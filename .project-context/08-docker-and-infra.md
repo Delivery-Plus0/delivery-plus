@@ -45,6 +45,12 @@ Purpose:
 - event transport between services
 - asynchronous updates for order, payment, and delivery lifecycle changes
 
+### S3-compatible media storage
+
+- Dev and test overlays add MinIO on ports `9000` (S3 API) and `9001` (console), with a persistent data volume.
+- A one-shot `minio-init` service creates the configured bucket, allows anonymous object downloads for local public URLs, and applies the browser CORS policy required for presigned PUT uploads.
+- User, restaurant, and menu services wait for bucket initialization. Production does not start MinIO; the production Compose overlay requires the bucket, public/CDN URL, region, and S3 credentials through deployment environment variables. Never commit production credentials.
+
 ## Service startup model
 
 The stack is built with health checks and `depends_on` conditions. This expresses the intended startup order, but it is not a complete readiness guarantee: Redis and Kafka readiness are not generally checked by application health endpoints, and the gateway Compose healthcheck targets a route the gateway does not currently implement.
@@ -86,6 +92,7 @@ Most services receive connection URLs like:
 - `DATABASE_URL=postgres://...@postgres:5432/<database_name>`
 - `REDIS_URL=redis://redis:6379`
 - `KAFKA_BROKER=kafka:29092`
+- `AWS_S3_ENDPOINT=http://minio:9000` inside dev/test service containers, with `AWS_S3_PUBLIC_ENDPOINT=http://localhost:9000` for browser-facing presigned URLs
 
 ## Observability and debugging
 

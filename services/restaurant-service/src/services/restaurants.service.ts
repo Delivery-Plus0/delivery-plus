@@ -1,5 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import { ForbiddenError, NotFoundError, PaginatedResult, UserRole, CacheService } from '@food-delivery/shared';
+import {
+  ForbiddenError,
+  NotFoundError,
+  PaginatedResult,
+  S3StorageService,
+  UserRole,
+  CacheService,
+} from '@food-delivery/shared';
 import { RestaurantsRepository } from '../repositories/restaurants.repository';
 import { CreateRestaurantDto } from '../dto/create-restaurant.dto';
 import { UpdateRestaurantDto } from '../dto/update-restaurant.dto';
@@ -9,9 +16,12 @@ import { Restaurant } from '../entities/restaurant.entity';
 
 @Injectable()
 export class RestaurantsService {
+  private readonly imageMaxSizeBytes = 10 * 1024 * 1024;
+
   constructor(
     private readonly restaurants: RestaurantsRepository,
     private readonly cache: CacheService,
+    private readonly storage: S3StorageService,
   ) {}
 
   create(ownerId: string, dto: CreateRestaurantDto): Promise<Restaurant> {
@@ -61,6 +71,40 @@ export class RestaurantsService {
       await this.getById(id);
     }
     const updated = await this.restaurants.update(id, { status: dto.status });
+    await this.cache.del(`restaurant:${id}`);
+    return updated as Restaurant;
+  }
+
+  async createImageUploadUrl(
+    id: string,
+    requesterId: string,
+    imageType: 'cover' | 'logo',
+    contentType: string,
+  ) {
+    await this.assertOwnership(id, requesterId);
+    return this.storage.generateUploadUrl(
+      `restaurants/${id}/${imageType}/`,
+      contentType,
+      this.imageMaxSizeBytes,
+    );
+  }
+
+  async confirmImageUpload(
+    id: string,
+    requesterId: string,
+    imageType: 'cover' | 'logo',
+    objectKey: string,
+  ): Promise<Restaurant> {
+    await this.assertOwnership(id, requesterId);
+    const verifiedUpload = await this.storage.verifyUploadedObject(
+      objectKey,
+      `restaurants/${id}/${imageType}/`,
+      this.imageMaxSizeBytes,
+    );
+    const imageUrlUpdate = imageType === 'cover'
+      ? { coverImageUrl: verifiedUpload.publicUrl }
+      : { logoUrl: verifiedUpload.publicUrl };
+    const updated = await this.restaurants.update(id, imageUrlUpdate);
     await this.cache.del(`restaurant:${id}`);
     return updated as Restaurant;
   }

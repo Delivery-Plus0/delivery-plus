@@ -102,4 +102,24 @@ describe('gateway internal route exposure', () => {
       ),
     ).toThrow(/service prefix|\/api\/cart/i);
   });
+
+  it('includes authenticated media upload and confirmation operations in the public contract', () => {
+    const document = generatePublicOpenApiDocument();
+    const mediaPaths = [
+      '/api/users/me/avatar/image-upload-url',
+      '/api/users/me/avatar/confirm',
+      '/api/restaurants/{id}/image-upload-url',
+      '/api/restaurants/{id}/image-confirm',
+      '/api/menus/menu-items/{id}/image-upload-url',
+      '/api/menus/menu-items/{id}/image-confirm',
+    ];
+
+    for (const path of mediaPaths) {
+      const operation = document.paths[path].post;
+      expect(operation.security).toEqual([{ bearerAuth: [] }]);
+      expect(operation.requestBody.required).toBe(true);
+    }
+    expect(document.paths['/api/users/me/avatar/image-upload-url'].post.responses['201'].content)
+      .toBeDefined();
+  });
 });

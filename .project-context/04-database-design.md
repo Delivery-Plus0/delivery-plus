@@ -68,6 +68,8 @@ Important design choices:
 - `restaurantId` is indexed on menu items
 - `price` is stored as a decimal with precision `10, scale 2`
 - menu availability is a boolean flag, allowing soft disable without deletion
+- `user_profiles.avatarUrl`, `restaurants.coverImageUrl`, and `restaurants.logoUrl` are nullable media URL columns added by new TypeORM migrations
+- `menu_items.imageUrl` already existed as a nullable column and is reused for confirmed S3 media; it does not need a duplicate migration
 
 ### Order orchestration
 

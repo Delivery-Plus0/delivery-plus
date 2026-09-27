@@ -19,7 +19,7 @@ export class MenuItemsRepository {
   }
 
   create(
-    data: Pick<MenuItem, 'restaurantId' | 'categoryId' | 'name' | 'description' | 'imageUrl'> & {
+    data: Pick<MenuItem, 'restaurantId' | 'categoryId' | 'name' | 'description'> & {
       price: number;
     },
   ): Promise<MenuItem> {

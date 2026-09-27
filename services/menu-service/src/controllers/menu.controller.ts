@@ -6,6 +6,8 @@ import { CreateCategoryDto } from '../dto/create-category.dto';
 import { CreateMenuItemDto } from '../dto/create-menu-item.dto';
 import { UpdateMenuItemDto } from '../dto/update-menu-item.dto';
 import { UpdateAvailabilityDto } from '../dto/update-availability.dto';
+import { CreateItemImageUploadUrlDto } from '../dto/create-item-image-upload-url.dto';
+import { ConfirmItemImageUploadDto } from '../dto/confirm-item-image-upload.dto';
 
 @ApiTags('menu')
 @Controller()
@@ -75,5 +77,31 @@ export class MenuController {
     @Body() dto: UpdateAvailabilityDto,
   ) {
     return this.menuService.updateAvailability(id, user.sub, dto);
+  }
+
+  @Post('menu-items/:id/image-upload-url')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.RESTAURANT_OWNER)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Create a presigned URL for a menu item image' })
+  createItemImageUploadUrl(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: CreateItemImageUploadUrlDto,
+  ) {
+    return this.menuService.createItemImageUploadUrl(id, user.sub, dto.contentType);
+  }
+
+  @Post('menu-items/:id/image-confirm')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.RESTAURANT_OWNER)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Confirm and save a menu item image upload' })
+  confirmItemImageUpload(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: ConfirmItemImageUploadDto,
+  ) {
+    return this.menuService.confirmItemImageUpload(id, user.sub, dto.objectKey);
   }
 }

@@ -12,9 +12,12 @@ From `services/restaurant-service/src/controllers/restaurants.controller.ts`:
 - `PATCH /restaurants/:id` – update restaurant details (owner only)
 - `PATCH /restaurants/:id/status` – update status (owner or admin)
 - `GET /restaurants/:id/ownership/:userId` – internal ownership verification used by menu-service
+- `POST /restaurants/:id/image-upload-url` – create a presigned cover/logo PUT URL (owner only)
+- `POST /restaurants/:id/image-confirm` – verify the uploaded cover/logo and save its public URL (owner only)
 
 ## Dependencies
 - Uses PostgreSQL for restaurant data
+- Uses the shared S3 storage service for restaurant cover and logo objects
 - `menu-service` checks ownership via this service
 - No Kafka usage is implemented here
 
@@ -28,6 +31,9 @@ From `services/restaurant-service/src/config/app-config.ts`:
 - `JWT_SECRET`
 - `PORT` (default: `3003`)
 - `NODE_ENV` (default: `development`)
+- `AWS_REGION`, `AWS_S3_BUCKET`, and `AWS_PUBLIC_BASE_URL`; S3 endpoint and credentials are configurable for local MinIO or a cloud provider
 
 ## Notes
 The service enforces restaurant ownership rules and is a central dependency for menu and order flows.
+
+Only the restaurant owner can request or confirm an image upload. Confirmation validates `restaurants/{restaurantId}/{cover|logo}/` and the stored object metadata before persisting `coverImageUrl` or `logoUrl`; both nullable columns are added by a forward TypeORM migration. Uploads accept JPEG, PNG, or WebP up to 10 MiB.

@@ -1,4 +1,37 @@
 services:
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${AWS_SECRET_ACCESS_KEY:-minioadmin}
+      MINIO_API_CORS_ALLOW_ORIGIN: '*'
+    ports:
+      - '127.0.0.1:9000:9000'
+      - '127.0.0.1:9001:9001'
+    volumes:
+      - minio_data:/data
+
+  minio-init:
+    image: minio/mc:latest
+    restart: 'no'
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint: ['/bin/sh', '-c']
+    command: >-
+      until mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" && mc ready local; do sleep 1; done;
+      mc mb --ignore-existing "local/$$AWS_S3_BUCKET";
+      mc anonymous set download "local/$$AWS_S3_BUCKET";
+      mc cors set "local/$$AWS_S3_BUCKET" /tmp/cors.json
+    environment:
+      MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${AWS_SECRET_ACCESS_KEY:-minioadmin}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-delivery-plus-media}
+    volumes:
+      - ./docker/minio/cors.json:/tmp/cors.json:ro
+
   kafka:
     ports:
       - '127.0.0.1:9092:9092'
@@ -100,6 +133,14 @@ services:
       REDIS_URL: redis://redis:6379
       INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:-local-internal-auth-development-only}
       ORDER_SERVICE_URL: http://order-service:3006
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-minioadmin}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-delivery-plus-media}
+      AWS_S3_ENDPOINT: http://minio:9000
+      AWS_S3_PUBLIC_ENDPOINT: ${AWS_S3_PUBLIC_ENDPOINT:-http://localhost:9000}
+      AWS_PUBLIC_BASE_URL: ${AWS_PUBLIC_BASE_URL:-http://localhost:9000/delivery-plus-media}
+      AWS_S3_FORCE_PATH_STYLE: 'true'
     healthcheck:
       test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3002/health']
       interval: 5s
@@ -110,6 +151,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
 
   restaurant-service:
     build:
@@ -122,6 +165,14 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/restaurant_service
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:-local-development-only}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-minioadmin}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-delivery-plus-media}
+      AWS_S3_ENDPOINT: http://minio:9000
+      AWS_S3_PUBLIC_ENDPOINT: ${AWS_S3_PUBLIC_ENDPOINT:-http://localhost:9000}
+      AWS_PUBLIC_BASE_URL: ${AWS_PUBLIC_BASE_URL:-http://localhost:9000/delivery-plus-media}
+      AWS_S3_FORCE_PATH_STYLE: 'true'
     healthcheck:
       test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3003/health']
       interval: 5s
@@ -130,6 +181,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
 
   menu-service:
     build:
@@ -143,6 +196,14 @@ services:
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:-local-development-only}
       RESTAURANT_SERVICE_URL: http://restaurant-service:3003
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-minioadmin}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-delivery-plus-media}
+      AWS_S3_ENDPOINT: http://minio:9000
+      AWS_S3_PUBLIC_ENDPOINT: ${AWS_S3_PUBLIC_ENDPOINT:-http://localhost:9000}
+      AWS_PUBLIC_BASE_URL: ${AWS_PUBLIC_BASE_URL:-http://localhost:9000/delivery-plus-media}
+      AWS_S3_FORCE_PATH_STYLE: 'true'
     healthcheck:
       test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3004/health']
       interval: 5s
@@ -153,6 +214,8 @@ services:
         condition: service_healthy
       restaurant-service:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
 
   cart-service:
     build:
@@ -326,3 +389,6 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+
+volumes:
+  minio_data:

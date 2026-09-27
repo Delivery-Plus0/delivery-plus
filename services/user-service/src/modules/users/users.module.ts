@@ -8,6 +8,7 @@ import { UsersController } from '../../controllers/users.controller';
 import { OrderServiceClient } from '../../common/order-service.client';
 import { APP_CONFIG, AppConfig } from '../../config/app-config';
 import { InternalAuthGuard } from '../../guards/internal-auth.guard';
+import { S3StorageService } from '@food-delivery/shared';
 
 @Module({
   imports: [
@@ -18,6 +19,6 @@ import { InternalAuthGuard } from '../../guards/internal-auth.guard';
     }),
   ],
   controllers: [UsersController],
-  providers: [UsersService, ProfilesRepository, OrderServiceClient, InternalAuthGuard],
+  providers: [UsersService, ProfilesRepository, OrderServiceClient, InternalAuthGuard, S3StorageService],
 })
 export class UsersModule {}

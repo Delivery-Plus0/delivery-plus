@@ -32,6 +32,8 @@ export const SERVICE_DEFINITIONS = [
       { method: 'patch', path: '/me', summary: 'Update the current authenticated user profile', auth: true, statusCode: 200 },
       { method: 'get', path: '/me/orders', summary: 'Get the current user order history', auth: true, statusCode: 200 },
       { method: 'get', path: '/:id', summary: 'Get a user profile by id', auth: true, statusCode: 200 },
+      { method: 'post', path: '/me/avatar/image-upload-url', summary: 'Create a presigned avatar upload URL', auth: true, statusCode: 201 },
+      { method: 'post', path: '/me/avatar/confirm', summary: 'Confirm and save an uploaded avatar', auth: true, statusCode: 201 },
     ],
   },
   {
@@ -44,6 +46,8 @@ export const SERVICE_DEFINITIONS = [
       { method: 'patch', path: '/:id', summary: 'Update restaurant details', auth: true, statusCode: 200 },
       { method: 'patch', path: '/:id/status', summary: 'Update restaurant status', auth: true, statusCode: 200 },
       { method: 'get', path: '/:id/ownership/:userId', summary: 'Check restaurant ownership', auth: false, statusCode: 200 },
+      { method: 'post', path: '/:id/image-upload-url', summary: 'Create a presigned restaurant image upload URL', auth: true, statusCode: 201 },
+      { method: 'post', path: '/:id/image-confirm', summary: 'Confirm and save a restaurant image', auth: true, statusCode: 201 },
     ],
   },
   {
@@ -57,6 +61,8 @@ export const SERVICE_DEFINITIONS = [
       { method: 'patch', path: '/menu-items/:id', summary: 'Update a menu item', auth: true, statusCode: 200 },
       { method: 'delete', path: '/menu-items/:id', summary: 'Delete a menu item', auth: true, statusCode: 200 },
       { method: 'patch', path: '/menu-items/:id/availability', summary: 'Update menu item availability', auth: true, statusCode: 200 },
+      { method: 'post', path: '/menu-items/:id/image-upload-url', summary: 'Create a presigned menu item image upload URL', auth: true, statusCode: 201 },
+      { method: 'post', path: '/menu-items/:id/image-confirm', summary: 'Confirm and save a menu item image', auth: true, statusCode: 201 },
     ],
   },
   {
@@ -223,6 +229,46 @@ const baseSchemas = {
       role: { type: 'string', enum: ['CUSTOMER', 'RESTAURANT_OWNER', 'DRIVER', 'ADMIN'] },
     },
   },
+  ImageUploadUrlRequest: {
+    type: 'object',
+    required: ['contentType'],
+    properties: {
+      contentType: { type: 'string', enum: ['image/jpeg', 'image/png', 'image/webp'] },
+    },
+  },
+  RestaurantImageUploadUrlRequest: {
+    type: 'object',
+    required: ['imageType', 'contentType'],
+    properties: {
+      imageType: { type: 'string', enum: ['cover', 'logo'] },
+      contentType: { type: 'string', enum: ['image/jpeg', 'image/png', 'image/webp'] },
+    },
+  },
+  ImageConfirmRequest: {
+    type: 'object',
+    required: ['objectKey'],
+    properties: {
+      objectKey: { type: 'string' },
+    },
+  },
+  RestaurantImageConfirmRequest: {
+    type: 'object',
+    required: ['imageType', 'objectKey'],
+    properties: {
+      imageType: { type: 'string', enum: ['cover', 'logo'] },
+      objectKey: { type: 'string' },
+    },
+  },
+  PresignedImageUpload: {
+    type: 'object',
+    required: ['uploadUrl', 'objectKey', 'expiresIn', 'headers'],
+    properties: {
+      uploadUrl: { type: 'string', format: 'uri' },
+      objectKey: { type: 'string' },
+      expiresIn: { type: 'integer', example: 300 },
+      headers: { type: 'object', additionalProperties: { type: 'string' } },
+    },
+  },
 };
 
 export function generatePublicOpenApiDocument() {
@@ -276,6 +322,36 @@ export function generatePublicOpenApiDocument() {
         operation.responses['401'] = { description: 'Missing or invalid JWT' };
       } else {
         operation.security = [];
+      }
+
+      if (route.method === 'post' && route.path.endsWith('/image-upload-url')) {
+        const requestSchema = service.service === 'restaurants'
+          ? 'RestaurantImageUploadUrlRequest'
+          : 'ImageUploadUrlRequest';
+        operation.requestBody = {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: `#/components/schemas/${requestSchema}` } },
+          },
+        };
+        operation.responses[String(route.statusCode || 201)].content = {
+          'application/json': { schema: { $ref: '#/components/schemas/PresignedImageUpload' } },
+        };
+      }
+
+      if (
+        route.method === 'post' &&
+        (route.path.endsWith('/image-confirm') || route.path.endsWith('/avatar/confirm'))
+      ) {
+        const requestSchema = service.service === 'restaurants'
+          ? 'RestaurantImageConfirmRequest'
+          : 'ImageConfirmRequest';
+        operation.requestBody = {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: `#/components/schemas/${requestSchema}` } },
+          },
+        };
       }
 
       if (route.method === 'post' && service.service === 'auth' && route.path === '/register') {

@@ -23,6 +23,9 @@ export class UserProfile {
   @Column({ nullable: true })
   address?: string;
 
+  @Column({ type: 'text', nullable: true })
+  avatarUrl?: string;
+
   @CreateDateColumn()
   createdAt!: Date;
 

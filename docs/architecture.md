@@ -22,6 +22,7 @@ graph TD
 - Kafka carries order, payment, and delivery event topics. Order and payment publication is implemented; delivery has event-building and Kafka wiring code, but its lifecycle methods currently do not invoke publication. Consumers retry locally up to three times, use an in-memory event-id set, and commit exhausted messages instead of writing to a real DLQ.
 - Redis stores carts, cache entries, rate-limit state, and recent driver locations with a TTL.
 - PostgreSQL stores credentials, profiles, restaurants, menu data, orders, payments, deliveries, drivers, and notifications. Docker initializes separate logical databases from `docker/postgres/init.sql`.
+- User, restaurant, and menu services issue short-lived presigned PUT URLs for media; clients upload directly to S3-compatible object storage. The services verify object ownership and S3 metadata before saving public/CDN URLs to their own records. The dev and test Compose overlays use MinIO.
 
 ## Main Flow
 
@@ -33,3 +34,9 @@ graph TD
 6. Delivery completion updates delivery, order, and driver state through the implemented service calls. Delivery event publication is currently partial, so downstream event propagation should not be assumed for every lifecycle transition.
 
 The current implementation does not provide a real payment provider, push/email delivery, durable Kafka idempotency store, or production dead-letter queue. Those are roadmap items.
+
+## Media storage
+
+Media bytes live in an S3-compatible bucket rather than service databases or application request bodies. The shared `S3StorageService` signs PUT requests for JPEG, PNG, and WebP objects with a five-minute expiry. Clients must send the returned `Content-Type` and size-metadata headers. Confirmation checks the expected resource key prefix, then performs `HeadObject` validation of the stored content type, signed maximum-size metadata, and actual byte count before persisting a public/CDN URL.
+
+Object keys are scoped by service-owned resources: `users/{userId}/avatar/{uuid}.{ext}`, `restaurants/{restaurantId}/{cover|logo}/{uuid}.{ext}`, and `restaurants/{restaurantId}/menu-items/{menuItemId}/{uuid}.{ext}`. User profiles and restaurants gained nullable URL columns; menu items reuse their existing nullable `imageUrl` column. See [project context: media and storage](../.project-context/15-media-and-storage.md) for the complete security and environment contract.

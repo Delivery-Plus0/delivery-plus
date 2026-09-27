@@ -1,13 +1,22 @@
 import { UsersService } from './users.service';
 import { ProfilesRepository } from '../repositories/profiles.repository';
 import { OrderServiceClient } from '../common/order-service.client';
-import { ConflictError, ForbiddenError, NotFoundError, UnauthorizedError, UserRole } from '@food-delivery/shared';
+import {
+  BadRequestError,
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+  S3StorageService,
+  UnauthorizedError,
+  UserRole,
+} from '@food-delivery/shared';
 import { UserProfile } from '../entities/user-profile.entity';
 
 describe('UsersService', () => {
   let service: UsersService;
   let profiles: jest.Mocked<ProfilesRepository>;
   let orderServiceClient: jest.Mocked<OrderServiceClient>;
+  let storage: jest.Mocked<S3StorageService>;
 
   const owner = {
     sub: 'u-owner',
@@ -49,7 +58,13 @@ describe('UsersService', () => {
       getOrderHistory: jest.fn(),
     } as unknown as jest.Mocked<OrderServiceClient>;
 
-    service = new UsersService(profiles, orderServiceClient);
+    storage = {
+      generateUploadUrl: jest.fn(),
+      verifyUploadedObject: jest.fn(),
+      getPublicUrl: jest.fn(),
+    } as unknown as jest.Mocked<S3StorageService>;
+
+    service = new UsersService(profiles, orderServiceClient, storage);
   });
 
   describe('createProfile', () => {
@@ -186,6 +201,44 @@ describe('UsersService', () => {
     it('rejects order history without the caller authorization header', async () => {
       await expect(service.getOrderHistory(owner, '', 1, 20)).rejects.toThrow(UnauthorizedError);
       expect(orderServiceClient.getOrderHistory).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('avatar uploads', () => {
+    it('rejects a mismatched object key before persisting an avatar URL', async () => {
+      profiles.findById.mockResolvedValue(profile());
+      storage.verifyUploadedObject.mockRejectedValue(
+        new BadRequestError('Uploaded object key is outside the authorized resource prefix'),
+      );
+
+      await expect(
+        service.confirmAvatarUpload(owner, 'users/u-other/avatar/01234567-89ab-cdef-0123-456789abcdef.png'),
+      ).rejects.toThrow(BadRequestError);
+
+      expect(storage.verifyUploadedObject).toHaveBeenCalledWith(
+        'users/u-other/avatar/01234567-89ab-cdef-0123-456789abcdef.png',
+        'users/u-owner/avatar/',
+        5 * 1024 * 1024,
+      );
+      expect(profiles.update).not.toHaveBeenCalled();
+    });
+
+    it('requires the authenticated user profile before issuing an upload URL', async () => {
+      profiles.findById.mockResolvedValue(profile());
+      storage.generateUploadUrl.mockResolvedValue({
+        uploadUrl: 'https://signed.example/upload',
+        objectKey: 'users/u-owner/avatar/object.png',
+        expiresIn: 300,
+        headers: { 'Content-Type': 'image/png' },
+      });
+
+      await service.createAvatarUploadUrl(owner, 'image/png');
+
+      expect(storage.generateUploadUrl).toHaveBeenCalledWith(
+        'users/u-owner/avatar/',
+        'image/png',
+        5 * 1024 * 1024,
+      );
     });
   });
 });

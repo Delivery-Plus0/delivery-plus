@@ -9,6 +9,7 @@ import { RestaurantServiceClient } from '../../common/restaurant-service.client'
 import { MenuService } from '../../services/menu.service';
 import { MenuController } from '../../controllers/menu.controller';
 import { APP_CONFIG, AppConfig } from '../../config/app-config';
+import { S3StorageService } from '@food-delivery/shared';
 
 @Module({
   imports: [
@@ -19,6 +20,6 @@ import { APP_CONFIG, AppConfig } from '../../config/app-config';
     }),
   ],
   controllers: [MenuController],
-  providers: [MenuService, CategoriesRepository, MenuItemsRepository, RestaurantServiceClient],
+  providers: [MenuService, CategoriesRepository, MenuItemsRepository, RestaurantServiceClient, S3StorageService],
 })
 export class MenuModule {}

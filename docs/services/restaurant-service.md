@@ -12,7 +12,7 @@ From `services/restaurant-service/src/controllers/restaurants.controller.ts`:
 - `PATCH /restaurants/:id` – update restaurant details (owner only)
 - `PATCH /restaurants/:id/status` – update status (owner or admin)
 - `GET /restaurants/:id/ownership/:userId` – internal ownership verification used by menu-service
-- `POST /restaurants/:id/image-upload-url` – create a presigned cover/logo PUT URL (owner only)
+- `POST /restaurants/:id/image-upload-url` – create a presigned cover/logo POST policy (owner only)
 - `POST /restaurants/:id/image-confirm` – verify the uploaded cover/logo and save its public URL (owner only)
 
 ## Dependencies
@@ -36,4 +36,4 @@ From `services/restaurant-service/src/config/app-config.ts`:
 ## Notes
 The service enforces restaurant ownership rules and is a central dependency for menu and order flows.
 
-Only the restaurant owner can request or confirm an image upload. Confirmation validates `restaurants/{restaurantId}/{cover|logo}/` and the stored object metadata before persisting `coverImageUrl` or `logoUrl`; both nullable columns are added by a forward TypeORM migration. Uploads accept JPEG, PNG, or WebP up to 10 MiB.
+Only the restaurant owner can request or confirm an image upload. The five-minute presigned POST policy enforces a 10 MiB limit and exact content type. Confirmation validates the staging key under `pending/restaurants/{restaurantId}/{cover|logo}/`, checks the image bytes, and copies it to a separate permanent key before persisting `coverImageUrl` or `logoUrl`; both nullable columns are added by a forward TypeORM migration. Staging objects expire after one day.

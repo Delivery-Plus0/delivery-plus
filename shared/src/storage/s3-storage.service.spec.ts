@@ -1,14 +1,17 @@
+import { createHash } from 'node:crypto';
+
 const mockSend = jest.fn();
-const mockGetSignedUrl = jest.fn();
+const mockCreatePresignedPost = jest.fn();
 
 jest.mock('@aws-sdk/client-s3', () => ({
   S3Client: jest.fn(() => ({ send: mockSend })),
-  PutObjectCommand: jest.fn((input) => ({ input })),
+  GetObjectCommand: jest.fn((input) => ({ input })),
+  CopyObjectCommand: jest.fn((input) => ({ input })),
   HeadObjectCommand: jest.fn((input) => ({ input })),
 }));
 
-jest.mock('@aws-sdk/s3-request-presigner', () => ({
-  getSignedUrl: mockGetSignedUrl,
+jest.mock('@aws-sdk/s3-presigned-post', () => ({
+  createPresignedPost: mockCreatePresignedPost,
 }));
 
 import { BadRequestError } from '../errors/app-error';
@@ -26,29 +29,44 @@ describe('S3StorageService', () => {
     process.env.AWS_ACCESS_KEY_ID = 'minioadmin';
     process.env.AWS_SECRET_ACCESS_KEY = 'minioadmin';
     mockSend.mockReset();
-    mockGetSignedUrl.mockReset().mockResolvedValue('https://signed.example/upload');
+    mockCreatePresignedPost.mockReset().mockResolvedValue({
+      url: 'https://signed.example/upload',
+      fields: {
+        key: 'pending/users/user-1/avatar/01234567-89ab-cdef-0123-456789abcdef.png',
+        'Content-Type': 'image/png',
+        'x-amz-meta-max-size-bytes': '1024',
+      },
+    });
     service = new S3StorageService();
   });
 
-  it('generates a short-lived upload URL with signed type and size metadata', async () => {
+  it('generates a short-lived POST policy with a size range and constrained fields', async () => {
     const result = await service.generateUploadUrl('users/user-1/avatar/', 'image/png', 1024);
 
     expect(result.uploadUrl).toBe('https://signed.example/upload');
-    expect(result.objectKey).toMatch(/^users\/user-1\/avatar\/[0-9a-f-]+\.png$/);
+    expect(result.objectKey).toMatch(/^pending\/users\/user-1\/avatar\/[0-9a-f-]+\.png$/);
     expect(result.expiresIn).toBe(300);
-    expect(result.headers).toEqual({
+    expect(result.method).toBe('POST');
+    expect(result.fields).toMatchObject({
       'Content-Type': 'image/png',
       'x-amz-meta-max-size-bytes': '1024',
     });
-    expect(mockGetSignedUrl).toHaveBeenCalledWith(
+    expect(mockCreatePresignedPost).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        input: expect.objectContaining({
-          ContentType: 'image/png',
-          Metadata: { 'max-size-bytes': '1024' },
-        }),
+        Bucket: 'test-media',
+        Key: result.objectKey,
+        Expires: 300,
+        Fields: {
+          'Content-Type': 'image/png',
+          'x-amz-meta-max-size-bytes': '1024',
+        },
+        Conditions: [
+          ['content-length-range', 1, 1024],
+          ['eq', '$Content-Type', 'image/png'],
+          ['eq', '$x-amz-meta-max-size-bytes', '1024'],
+        ],
       }),
-      { expiresIn: 300 },
     );
   });
 
@@ -56,33 +74,57 @@ describe('S3StorageService', () => {
     await expect(service.generateUploadUrl('users/user-1/avatar/', 'image/gif', 1024)).rejects.toThrow(
       BadRequestError,
     );
-    expect(mockGetSignedUrl).not.toHaveBeenCalled();
+    expect(mockCreatePresignedPost).not.toHaveBeenCalled();
   });
 
-  it('confirms object metadata and returns its public URL', async () => {
-    mockSend.mockResolvedValue({
-      ContentLength: 512,
-      ContentType: 'image/webp',
-      Metadata: { 'max-size-bytes': '1024' },
-    });
+  it('validates uploaded bytes and copies them to a separate verified key', async () => {
+    const pngBytes = Buffer.alloc(33);
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(pngBytes);
+    pngBytes.writeUInt32BE(13, 8);
+    pngBytes.write('IHDR', 12);
+    pngBytes.writeUInt32BE(1, 16);
+    pngBytes.writeUInt32BE(1, 20);
+    mockSend
+      .mockResolvedValueOnce({
+        ContentLength: pngBytes.byteLength,
+        ETag: '"verified-etag"',
+        Metadata: { 'max-size-bytes': '1024' },
+      })
+      .mockResolvedValueOnce({ Body: { transformToByteArray: async () => pngBytes } })
+      .mockResolvedValueOnce({});
 
     const result = await service.verifyUploadedObject(
-      'users/user-1/avatar/01234567-89ab-cdef-0123-456789abcdef.webp',
+      'pending/users/user-1/avatar/01234567-89ab-cdef-0123-456789abcdef.png',
       'users/user-1/avatar/',
       1024,
     );
 
-    expect(result).toEqual({
-      publicUrl: 'http://localhost:9000/test-media/users/user-1/avatar/01234567-89ab-cdef-0123-456789abcdef.webp',
-      contentType: 'image/webp',
-      contentLength: 512,
+    expect(result.contentType).toBe('image/png');
+    expect(result.contentLength).toBe(pngBytes.byteLength);
+    const contentHash = createHash('sha256').update(pngBytes).digest('hex');
+    expect(result.publicUrl).toBe(
+      `http://localhost:9000/test-media/users/user-1/avatar/${contentHash}.png`,
+    );
+    expect(mockSend.mock.calls[1][0].input).toMatchObject({
+      Bucket: 'test-media',
+      Key: 'pending/users/user-1/avatar/01234567-89ab-cdef-0123-456789abcdef.png',
+      IfMatch: '"verified-etag"',
     });
+    expect(mockSend.mock.calls[2][0].input).toMatchObject({
+      Bucket: 'test-media',
+      CopySourceIfMatch: '"verified-etag"',
+      ContentType: 'image/png',
+      MetadataDirective: 'REPLACE',
+    });
+    expect(mockSend.mock.calls[2][0].input.Key).toBe(
+      `users/user-1/avatar/${contentHash}.png`,
+    );
   });
 
   it('rejects keys outside the expected prefix before querying S3', async () => {
     await expect(
       service.verifyUploadedObject(
-        'restaurants/other/logo/01234567-89ab-cdef-0123-456789abcdef.png',
+        'pending/restaurants/other/logo/01234567-89ab-cdef-0123-456789abcdef.png',
         'restaurants/restaurant-1/logo/',
         1024,
       ),
@@ -99,11 +141,31 @@ describe('S3StorageService', () => {
 
     await expect(
       service.verifyUploadedObject(
-        'users/user-1/avatar/01234567-89ab-cdef-0123-456789abcdef.png',
+        'pending/users/user-1/avatar/01234567-89ab-cdef-0123-456789abcdef.png',
         'users/user-1/avatar/',
         1024,
       ),
     ).rejects.toThrow(BadRequestError);
+  });
+
+  it('rejects bytes that are not an image before copying them to a public key', async () => {
+    const notAnImage = Buffer.from('<html>not an image</html>');
+    mockSend
+      .mockResolvedValueOnce({
+        ContentLength: notAnImage.byteLength,
+        ETag: '"untrusted-etag"',
+        Metadata: { 'max-size-bytes': '1024' },
+      })
+      .mockResolvedValueOnce({ Body: { transformToByteArray: async () => notAnImage } });
+
+    await expect(
+      service.verifyUploadedObject(
+        'pending/users/user-1/avatar/01234567-89ab-cdef-0123-456789abcdef.png',
+        'users/user-1/avatar/',
+        1024,
+      ),
+    ).rejects.toThrow(BadRequestError);
+    expect(mockSend).toHaveBeenCalledTimes(2);
   });
 
   it('does not prevent service startup when production media storage is not configured', async () => {

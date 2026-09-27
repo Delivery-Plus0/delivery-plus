@@ -90,6 +90,14 @@ The gateway acts as the boundary where client requests are routed, but the actua
 
 The gateway should not be treated as the only enforcement layer; actual permission logic still happens in application services. Internal service authentication is defined by and implemented according to [ADR 001](../docs/adr/001-internal-service-authentication.md). The gateway explicitly returns `404` for `/api/users/internal/*`, so the internal profile-creation route is not publicly proxied.
 
+## Browser CORS
+
+The gateway's default browser origins are localhost ports 8081-8083 and their
+127.0.0.1 equivalents. `CORS_ORIGINS` can replace that list. Allowed request
+headers include `Authorization`, `X-Correlation-Id`, and `Idempotency-Key`;
+the latter is required for browser checkout requests that use retry-safe order
+and payment creation.
+
 ## Current architecture assumptions
 
 The gateway is not a full API management layer. It is a thin reverse-proxy and documentation front door, which fits this repository’s microservice style.

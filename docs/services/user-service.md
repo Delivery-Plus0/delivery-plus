@@ -11,7 +11,7 @@ From `services/user-service/src/controllers/users.controller.ts`:
 - `PATCH /users/me` – update the current authenticated profile
 - `GET /users/me/orders` – fetch current user order history
 - `GET /users/:id` – get a user profile by ID (own profile or admin)
-- `POST /users/me/avatar/image-upload-url` – create a short-lived presigned avatar PUT URL
+- `POST /users/me/avatar/image-upload-url` – create a short-lived presigned avatar POST policy
 - `POST /users/me/avatar/confirm` – verify the uploaded object and save its public URL
 
 ## Dependencies
@@ -38,4 +38,4 @@ From `services/user-service/src/config/app-config.ts`:
 ## Notes
 The service acts as the canonical user-data layer for profile details. `POST /internal/users` requires the HMAC internal-auth contract in [ADR 001](../adr/001-internal-service-authentication.md) and records the verified caller in `createdByService`. Redis stores short-lived nonces with `SET NX EX` so a signed request cannot be replayed within the acceptance window. Profile rows store an explicit `authCredentialId` that must equal the profile `id` (the auth-service credential UUID). `GET /users/:id` is limited to the owning user or an admin. `GET/PATCH /users/me` and `GET /users/me/orders` require the JWT subject and email to match the stored profile.
 
-Avatar uploads use a five-minute presigned PUT URL and allow JPEG, PNG, or WebP up to 5 MiB. Confirmation rechecks the authenticated profile, validates the object key under `users/{userId}/avatar/`, verifies S3 metadata and actual size, then persists `avatarUrl`. The field is nullable and was added with a forward TypeORM migration.
+Avatar uploads use a five-minute presigned POST policy and allow JPEG, PNG, or WebP up to 5 MiB. Clients POST multipart form data to `uploadUrl`, including every returned `fields` entry and the image file. The policy enforces the size limit before storage accepts the upload. Confirmation rechecks the authenticated profile, validates the staging key under `pending/users/{userId}/avatar/`, checks the image bytes, copies the object to a separate permanent key, then persists `avatarUrl`. Staging objects expire after one day. The field is nullable and was added with a forward TypeORM migration.

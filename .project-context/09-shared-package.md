@@ -21,7 +21,7 @@ The shared package is structured around common concerns, including:
 - NestJS wrappers
 - Redis helpers
 - Kafka helpers
-- S3-compatible media storage with presigned PUT generation and post-upload verification
+- S3-compatible media storage with presigned POST generation, upload-size policies, byte verification, and staging-object promotion
 
 This makes it the contract layer that services depend on for common language and behavior.
 

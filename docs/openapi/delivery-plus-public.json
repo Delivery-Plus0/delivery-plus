@@ -2907,25 +2907,36 @@
           "uploadUrl",
           "objectKey",
           "expiresIn",
-          "headers"
+          "method",
+          "fields"
         ],
         "properties": {
           "uploadUrl": {
             "type": "string",
-            "format": "uri"
+            "format": "uri",
+            "description": "POST multipart form data to this object-storage URL."
           },
           "objectKey": {
-            "type": "string"
+            "type": "string",
+            "description": "Temporary key to submit to the corresponding confirmation endpoint."
           },
           "expiresIn": {
             "type": "integer",
             "example": 300
           },
-          "headers": {
+          "method": {
+            "type": "string",
+            "enum": [
+              "POST"
+            ],
+            "description": "HTTP method for the upload request."
+          },
+          "fields": {
             "type": "object",
             "additionalProperties": {
               "type": "string"
-            }
+            },
+            "description": "Include every field in the multipart form before adding the image file."
           }
         }
       }

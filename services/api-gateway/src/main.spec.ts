@@ -1,6 +1,17 @@
-import { extractPathParameters, joinPublicPath, validatePublicOpenApiDocument } from './public-openapi';
+import {
+  extractPathParameters,
+  generatePublicOpenApiDocument,
+  joinPublicPath,
+  validatePublicOpenApiDocument,
+} from './public-openapi';
 import { isBlockedInternalRoute } from './route-policy';
-import { getServicePrefix, rewriteProxyPath } from './main';
+import { getCorsOptions, getServicePrefix, rewriteProxyPath } from './main';
+
+describe('gateway browser CORS', () => {
+  it('allows the idempotency header used by order and payment clients', () => {
+    expect(getCorsOptions().allowedHeaders).toContain('Idempotency-Key');
+  });
+});
 
 describe('gateway internal route exposure', () => {
   it('blocks the internal users route from public proxying', () => {

@@ -20,10 +20,15 @@ export const PROXIES = {
 } as const;
 
 export function getServicePrefix(gatewayPath: string): string {
-  return gatewayPath === '/api/menus' ? '' : gatewayPath.replace(/^\/api/, '');
+  return gatewayPath === '/api/menus'
+    ? ''
+    : gatewayPath.replace(/^\/api/, '');
 }
 
-export function rewriteProxyPath(gatewayPath: string, incomingPath: string): string {
+export function rewriteProxyPath(
+  gatewayPath: string,
+  incomingPath: string,
+): string {
   const [pathname, queryString = ''] = incomingPath.split('?');
 
   if (/^\/docs-json(?:\/|$)/.test(pathname)) {
@@ -33,10 +38,45 @@ export function rewriteProxyPath(gatewayPath: string, incomingPath: string): str
   return `${getServicePrefix(gatewayPath)}${incomingPath}`;
 }
 
+function getCorsOrigins(): string[] {
+  const rawOrigins = process.env.CORS_ORIGINS;
+
+  if (!rawOrigins) {
+    return [
+      'http://localhost:8081',
+      'http://localhost:8082',
+      'http://localhost:8083',
+      'http://127.0.0.1:8081',
+      'http://127.0.0.1:8082',
+      'http://127.0.0.1:8083',
+    ];
+  }
+
+  return rawOrigins
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+}
+
+export function getCorsOptions() {
+  return {
+    origin: getCorsOrigins(),
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Correlation-Id',
+      'Idempotency-Key',
+    ],
+  };
+}
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   const PORT = process.env.PORT || 3000;
+
+  app.enableCors(getCorsOptions());
 
   app.use((request: Request, response: Response, next: NextFunction) => {
     if (isBlockedInternalRoute(request.path)) {
@@ -70,7 +110,8 @@ async function bootstrap() {
       createProxyMiddleware({
         target,
         changeOrigin: true,
-        pathRewrite: (incomingPath) => rewriteProxyPath(path, incomingPath),
+        pathRewrite: (incomingPath) =>
+          rewriteProxyPath(path, incomingPath),
       }),
     );
   });

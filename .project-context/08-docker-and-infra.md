@@ -48,8 +48,8 @@ Purpose:
 ### S3-compatible media storage
 
 - Dev and test overlays add MinIO on ports `9000` (S3 API) and `9001` (console), with a persistent data volume.
-- A one-shot `minio-init` service creates the configured bucket, allows anonymous object downloads for local public URLs, and applies the browser CORS policy required for presigned PUT uploads.
-- User, restaurant, and menu services wait for bucket initialization. Production does not start MinIO; the production Compose overlay requires the bucket, public/CDN URL, region, and S3 credentials through deployment environment variables. Never commit production credentials.
+- A one-shot `minio-init` service creates the configured bucket, allows anonymous object downloads for local public URLs, and expires temporary `pending/` uploads after one day. MinIO's `MINIO_API_CORS_ALLOW_ORIGIN` environment setting supplies local browser CORS for presigned POST uploads.
+- User, restaurant, and menu services wait for bucket initialization. Production does not start MinIO; configure an S3 lifecycle rule to expire `pending/` objects after one day. The production Compose overlay requires the bucket, public/CDN URL, region, and S3 credentials through deployment environment variables. Never commit production credentials.
 
 ## Service startup model
 

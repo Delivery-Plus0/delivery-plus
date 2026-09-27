@@ -261,12 +261,21 @@ const baseSchemas = {
   },
   PresignedImageUpload: {
     type: 'object',
-    required: ['uploadUrl', 'objectKey', 'expiresIn', 'headers'],
+    required: ['uploadUrl', 'objectKey', 'expiresIn', 'method', 'fields'],
     properties: {
-      uploadUrl: { type: 'string', format: 'uri' },
-      objectKey: { type: 'string' },
+      uploadUrl: {
+        type: 'string',
+        format: 'uri',
+        description: 'POST multipart form data to this object-storage URL.',
+      },
+      objectKey: { type: 'string', description: 'Temporary key to submit to the corresponding confirmation endpoint.' },
       expiresIn: { type: 'integer', example: 300 },
-      headers: { type: 'object', additionalProperties: { type: 'string' } },
+      method: { type: 'string', enum: ['POST'], description: 'HTTP method for the upload request.' },
+      fields: {
+        type: 'object',
+        additionalProperties: { type: 'string' },
+        description: 'Include every field in the multipart form before adding the image file.',
+      },
     },
   },
 };

@@ -24,13 +24,11 @@ services:
       until mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" && mc ready local; do sleep 1; done;
       mc mb --ignore-existing "local/$$AWS_S3_BUCKET";
       mc anonymous set download "local/$$AWS_S3_BUCKET";
-      mc cors set "local/$$AWS_S3_BUCKET" /tmp/cors.json
+      mc ilm rule add "local/$$AWS_S3_BUCKET" --prefix pending/ --expire-days 1
     environment:
       MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID:-minioadmin}
       MINIO_ROOT_PASSWORD: ${AWS_SECRET_ACCESS_KEY:-minioadmin}
       AWS_S3_BUCKET: ${AWS_S3_BUCKET:-delivery-plus-media}
-    volumes:
-      - ./docker/minio/cors.json:/tmp/cors.json:ro
 
   postgres:
     ports:

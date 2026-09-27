@@ -227,9 +227,10 @@ describe('UsersService', () => {
       profiles.findById.mockResolvedValue(profile());
       storage.generateUploadUrl.mockResolvedValue({
         uploadUrl: 'https://signed.example/upload',
-        objectKey: 'users/u-owner/avatar/object.png',
+        objectKey: 'pending/users/u-owner/avatar/object.png',
         expiresIn: 300,
-        headers: { 'Content-Type': 'image/png' },
+        method: 'POST',
+        fields: { 'Content-Type': 'image/png' },
       });
 
       await service.createAvatarUploadUrl(owner, 'image/png');

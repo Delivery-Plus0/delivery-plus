@@ -1,7 +1,12 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
-import { HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import {
+  CopyObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
+import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
 import { BadRequestError } from '../errors/app-error';
 
 const ALLOWED_CONTENT_TYPES = {
@@ -11,12 +16,53 @@ const ALLOWED_CONTENT_TYPES = {
 } as const;
 
 const UPLOAD_URL_TTL_SECONDS = 300;
+const PENDING_UPLOAD_PREFIX = 'pending/';
+
+function detectImageFormat(bytes: Uint8Array): { contentType: string; extension: string } | undefined {
+  const buffer = Buffer.from(bytes);
+  if (
+    buffer.length >= 33 &&
+    buffer[0] === 0x89 &&
+    buffer.subarray(1, 4).toString('ascii') === 'PNG' &&
+    buffer[4] === 0x0d &&
+    buffer[5] === 0x0a &&
+    buffer[6] === 0x1a &&
+    buffer[7] === 0x0a &&
+    buffer.readUInt32BE(8) === 13 &&
+    buffer.subarray(12, 16).toString('ascii') === 'IHDR' &&
+    buffer.readUInt32BE(16) > 0 &&
+    buffer.readUInt32BE(20) > 0
+  ) {
+    return { contentType: 'image/png', extension: 'png' };
+  }
+  if (
+    buffer.length >= 4 &&
+    buffer[0] === 0xff &&
+    buffer[1] === 0xd8 &&
+    buffer[2] === 0xff &&
+    buffer[buffer.length - 2] === 0xff &&
+    buffer[buffer.length - 1] === 0xd9
+  ) {
+    return { contentType: 'image/jpeg', extension: 'jpg' };
+  }
+  if (
+    buffer.length >= 20 &&
+    buffer.subarray(0, 4).toString('ascii') === 'RIFF' &&
+    buffer.subarray(8, 12).toString('ascii') === 'WEBP' &&
+    buffer.readUInt32LE(4) + 8 <= buffer.length &&
+    ['VP8 ', 'VP8L', 'VP8X'].includes(buffer.subarray(12, 16).toString('ascii')) &&
+    buffer.readUInt32LE(16) + 20 <= buffer.length
+  ) {
+    return { contentType: 'image/webp', extension: 'webp' };
+  }
+}
 
 export interface PresignedUpload {
   uploadUrl: string;
   objectKey: string;
   expiresIn: number;
-  headers: Record<string, string>;
+  method: 'POST';
+  fields: Record<string, string>;
 }
 
 export interface VerifiedUpload {
@@ -71,23 +117,29 @@ export class S3StorageService {
     this.assertValidMaxSize(maxSizeBytes);
 
     const extension = ALLOWED_CONTENT_TYPES[contentType as keyof typeof ALLOWED_CONTENT_TYPES];
-    const objectKey = `${keyPrefix}${randomUUID()}.${extension}`;
-    const command = new PutObjectCommand({
+    const objectKey = `${PENDING_UPLOAD_PREFIX}${keyPrefix}${randomUUID()}.${extension}`;
+    const fields = {
+      'Content-Type': contentType,
+      'x-amz-meta-max-size-bytes': String(maxSizeBytes),
+    };
+    const post = await createPresignedPost(this.signingClient, {
       Bucket: this.bucket,
       Key: objectKey,
-      ContentType: contentType,
-      Metadata: { 'max-size-bytes': String(maxSizeBytes) },
+      Expires: UPLOAD_URL_TTL_SECONDS,
+      Fields: fields,
+      Conditions: [
+        ['content-length-range', 1, maxSizeBytes],
+        ['eq', '$Content-Type', contentType],
+        ['eq', '$x-amz-meta-max-size-bytes', String(maxSizeBytes)],
+      ],
     });
-    const uploadUrl = await getSignedUrl(this.signingClient, command, { expiresIn: UPLOAD_URL_TTL_SECONDS });
 
     return {
-      uploadUrl,
+      uploadUrl: post.url,
       objectKey,
       expiresIn: UPLOAD_URL_TTL_SECONDS,
-      headers: {
-        'Content-Type': contentType,
-        'x-amz-meta-max-size-bytes': String(maxSizeBytes),
-      },
+      method: 'POST',
+      fields: post.fields,
     };
   }
 
@@ -99,8 +151,9 @@ export class S3StorageService {
     this.assertConfigured();
     this.assertValidKeyPrefix(expectedKeyPrefix);
     this.assertValidMaxSize(maxSizeBytes);
-    const fileName = objectKey.startsWith(expectedKeyPrefix)
-      ? objectKey.slice(expectedKeyPrefix.length)
+    const pendingKeyPrefix = `${PENDING_UPLOAD_PREFIX}${expectedKeyPrefix}`;
+    const fileName = objectKey.startsWith(pendingKeyPrefix)
+      ? objectKey.slice(pendingKeyPrefix.length)
       : '';
     if (!/^[0-9a-f-]{36}\.(jpg|png|webp)$/i.test(fileName)) {
       throw new BadRequestError('Uploaded object key is outside the authorized resource prefix');
@@ -116,13 +169,6 @@ export class S3StorageService {
       throw error;
     }
 
-    const contentType = head.ContentType || '';
-    this.assertAllowedContentType(contentType);
-    const extension = ALLOWED_CONTENT_TYPES[contentType as keyof typeof ALLOWED_CONTENT_TYPES];
-    if (!fileName.endsWith(`.${extension}`)) {
-      throw new BadRequestError('Uploaded object extension does not match its content type');
-    }
-
     const contentLength = head.ContentLength;
     if (typeof contentLength !== 'number' || !Number.isSafeInteger(contentLength) || contentLength <= 0 || contentLength > maxSizeBytes) {
       throw new BadRequestError(`Uploaded object must be between 1 and ${maxSizeBytes} bytes`);
@@ -130,10 +176,46 @@ export class S3StorageService {
     if (head.Metadata?.['max-size-bytes'] !== String(maxSizeBytes)) {
       throw new BadRequestError('Uploaded object metadata does not match the issued upload constraints');
     }
+    if (!head.ETag) {
+      throw new Error('S3 did not return an ETag for the uploaded object');
+    }
+
+    const object = await this.client.send(new GetObjectCommand({
+      Bucket: this.bucket,
+      Key: objectKey,
+      IfMatch: head.ETag,
+    }));
+    if (!object.Body) {
+      throw new BadRequestError('Uploaded object has no content');
+    }
+    const bytes = await object.Body.transformToByteArray();
+    if (bytes.byteLength !== contentLength || bytes.byteLength > maxSizeBytes) {
+      throw new BadRequestError('Uploaded object content length does not match its stored size');
+    }
+    const detectedFormat = detectImageFormat(bytes);
+    if (!detectedFormat || !fileName.endsWith(`.${detectedFormat.extension}`)) {
+      throw new BadRequestError('Uploaded object bytes do not match an allowed image format');
+    }
+
+    const contentHash = createHash('sha256').update(bytes).digest('hex');
+    const verifiedObjectKey = `${expectedKeyPrefix}${contentHash}.${detectedFormat.extension}`;
+    const copySource = `${encodeURIComponent(this.bucket)}/${objectKey
+      .split('/')
+      .map(encodeURIComponent)
+      .join('/')}`;
+    await this.client.send(new CopyObjectCommand({
+      Bucket: this.bucket,
+      Key: verifiedObjectKey,
+      CopySource: copySource,
+      CopySourceIfMatch: head.ETag,
+      ContentType: detectedFormat.contentType,
+      MetadataDirective: 'REPLACE',
+      Metadata: { 'max-size-bytes': String(maxSizeBytes) },
+    }));
 
     return {
-      publicUrl: this.getPublicUrl(objectKey),
-      contentType,
+      publicUrl: this.getPublicUrl(verifiedObjectKey),
+      contentType: detectedFormat.contentType,
       contentLength,
     };
   }

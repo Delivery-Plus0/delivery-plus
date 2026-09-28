@@ -18,8 +18,10 @@ services:
       - |
         set -e
         mkdir -p /etc/seaweedfs
+        esc_access_key=$$(printf '%s' "$$AWS_ACCESS_KEY_ID" | sed 's/\\/\\\\/g; s/"/\\"/g')
+        esc_secret_key=$$(printf '%s' "$$AWS_SECRET_ACCESS_KEY" | sed 's/\\/\\\\/g; s/"/\\"/g')
         cat > /etc/seaweedfs/s3.json <<EOF
-        {"identities":[{"name":"delivery-plus","credentials":[{"accessKey":"$$AWS_ACCESS_KEY_ID","secretKey":"$$AWS_SECRET_ACCESS_KEY"}],"actions":["Admin","Read","Write","List","Tagging"]}]}
+        {"identities":[{"name":"delivery-plus","credentials":[{"accessKey":"$$esc_access_key","secretKey":"$$esc_secret_key"}],"actions":["Admin","Read","Write","List","Tagging"]}]}
         EOF
         exec weed server -dir=/data -s3 -s3.port=9000 -s3.config=/etc/seaweedfs/s3.json
     environment:

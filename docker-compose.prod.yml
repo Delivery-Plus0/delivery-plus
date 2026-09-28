@@ -21,6 +21,7 @@ services:
     restart: unless-stopped
     environment:
       NODE_ENV: production
+      CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS must be set}
       AUTH_SERVICE_URL: http://auth-service:3001
       USER_SERVICE_URL: http://user-service:3002
       RESTAURANT_SERVICE_URL: http://restaurant-service:3003

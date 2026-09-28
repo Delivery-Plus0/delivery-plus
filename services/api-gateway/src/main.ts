@@ -40,8 +40,15 @@ export function rewriteProxyPath(
 
 function getCorsOrigins(): string[] {
   const rawOrigins = process.env.CORS_ORIGINS;
+  const isProduction = process.env.NODE_ENV === 'production';
 
   if (!rawOrigins) {
+    if (isProduction) {
+      throw new Error(
+        'CORS_ORIGINS must be set to a comma-separated list of allowed origins when NODE_ENV=production',
+      );
+    }
+
     return [
       'http://localhost:8081',
       'http://localhost:8082',
@@ -52,10 +59,18 @@ function getCorsOrigins(): string[] {
     ];
   }
 
-  return rawOrigins
+  const origins = rawOrigins
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
+
+  if (isProduction && origins.length === 0) {
+    throw new Error(
+      'CORS_ORIGINS must contain at least one allowed origin when NODE_ENV=production',
+    );
+  }
+
+  return origins;
 }
 
 export function getCorsOptions() {
@@ -123,5 +138,8 @@ async function bootstrap() {
 }
 
 if (require.main === module) {
-  bootstrap();
+  bootstrap().catch((error) => {
+    console.error('API Gateway failed to start:', error instanceof Error ? error.message : error);
+    process.exit(1);
+  });
 }

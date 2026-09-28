@@ -95,4 +95,9 @@ jobs:
           POSTGRES_PASSWORD_URLENCODED: compose_validation_only_7f3c2b
           JWT_SECRET: compose_validation_only_jwt_9a41d8
           INTERNAL_AUTH_SECRET: compose_validation_only_internal_5e2a91
+          CORS_ORIGINS: https://compose-validation.example.com
+          AWS_ACCESS_KEY_ID: compose_validation_only_access_key
+          AWS_SECRET_ACCESS_KEY: compose_validation_only_secret_key
+          AWS_S3_BUCKET: compose-validation-only-bucket
+          AWS_PUBLIC_BASE_URL: https://compose-validation.example.com/compose-validation-only-bucket
         run: docker compose -f docker-compose.base.yml -f docker-compose.prod.yml config --quiet

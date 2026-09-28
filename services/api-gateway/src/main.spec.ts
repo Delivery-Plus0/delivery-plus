@@ -11,6 +11,65 @@ describe('gateway browser CORS', () => {
   it('allows the idempotency header used by order and payment clients', () => {
     expect(getCorsOptions().allowedHeaders).toContain('Idempotency-Key');
   });
+
+  describe('production origin enforcement', () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+    const originalCorsOrigins = process.env.CORS_ORIGINS;
+
+    afterEach(() => {
+      process.env.NODE_ENV = originalNodeEnv;
+      process.env.CORS_ORIGINS = originalCorsOrigins;
+    });
+
+    it('throws when NODE_ENV=production and CORS_ORIGINS is missing', () => {
+      process.env.NODE_ENV = 'production';
+      delete process.env.CORS_ORIGINS;
+
+      expect(() => getCorsOptions()).toThrow(/CORS_ORIGINS/);
+    });
+
+    it('throws when NODE_ENV=production and CORS_ORIGINS is set but empty after trimming', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.CORS_ORIGINS = ' , ,';
+
+      expect(() => getCorsOptions()).toThrow(/CORS_ORIGINS/);
+    });
+
+    it('uses the configured origins when NODE_ENV=production and CORS_ORIGINS is set', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.CORS_ORIGINS = 'https://app.example.com,https://admin.example.com';
+
+      expect(getCorsOptions().origin).toEqual([
+        'https://app.example.com',
+        'https://admin.example.com',
+      ]);
+    });
+
+    it('parses multiple comma-separated origins and trims whitespace', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.CORS_ORIGINS = ' https://a.example.com , https://b.example.com ,https://c.example.com';
+
+      expect(getCorsOptions().origin).toEqual([
+        'https://a.example.com',
+        'https://b.example.com',
+        'https://c.example.com',
+      ]);
+    });
+
+    it('still falls back to the localhost defaults outside production when CORS_ORIGINS is unset', () => {
+      process.env.NODE_ENV = 'development';
+      delete process.env.CORS_ORIGINS;
+
+      expect(getCorsOptions().origin).toEqual([
+        'http://localhost:8081',
+        'http://localhost:8082',
+        'http://localhost:8083',
+        'http://127.0.0.1:8081',
+        'http://127.0.0.1:8082',
+        'http://127.0.0.1:8083',
+      ]);
+    });
+  });
 });
 
 describe('gateway internal route exposure', () => {

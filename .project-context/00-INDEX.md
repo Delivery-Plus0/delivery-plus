@@ -30,6 +30,7 @@ Suggested sequence:
 - [12-environment-and-setup.md](./12-environment-and-setup.md) – environment variables and local run steps
 - [13-known-issues-and-gotchas.md](./13-known-issues-and-gotchas.md) – caveats and technical debt
 - [14-glossary.md](./14-glossary.md) – domain terms and abbreviations
+- [15-media-and-storage.md](./15-media-and-storage.md) – S3-compatible media uploads, ownership, object keys, and security rules
 
 ## Relationship to the docs folder
 

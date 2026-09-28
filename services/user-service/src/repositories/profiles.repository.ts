@@ -23,7 +23,7 @@ export class ProfilesRepository {
 
   async update(
     id: string,
-    data: Partial<Pick<UserProfile, 'fullName' | 'phone' | 'address'>>,
+    data: Partial<Pick<UserProfile, 'fullName' | 'phone' | 'address' | 'avatarUrl'>>,
   ): Promise<UserProfile | null> {
     await this.repo.update({ id }, data);
     return this.findById(id);

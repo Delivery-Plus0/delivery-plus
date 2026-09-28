@@ -43,11 +43,4 @@ export class CreateMenuItemDto {
   @IsPositive()
   price!: number;
 
-  @ApiPropertyOptional({
-    description: 'Optional image URL for the menu item.',
-    example: 'https://cdn.example.com/images/pizza.jpg',
-  })
-  @IsOptional()
-  @IsString()
-  imageUrl?: string;
 }

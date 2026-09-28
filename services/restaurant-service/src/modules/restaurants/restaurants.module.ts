@@ -6,6 +6,7 @@ import { RestaurantsRepository } from '../../repositories/restaurants.repository
 import { RestaurantsService } from '../../services/restaurants.service';
 import { RestaurantsController } from '../../controllers/restaurants.controller';
 import { APP_CONFIG, AppConfig } from '../../config/app-config';
+import { S3StorageService } from '@food-delivery/shared';
 
 @Module({
   imports: [
@@ -16,6 +17,6 @@ import { APP_CONFIG, AppConfig } from '../../config/app-config';
     }),
   ],
   controllers: [RestaurantsController],
-  providers: [RestaurantsService, RestaurantsRepository],
+  providers: [RestaurantsService, RestaurantsRepository, S3StorageService],
 })
 export class RestaurantsModule {}

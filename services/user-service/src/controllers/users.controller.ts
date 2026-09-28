@@ -3,6 +3,8 @@ import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser, JwtPayload } from '@food-delivery/shared';
 import { UsersService } from '../services/users.service';
 import { CreateProfileDto } from '../dto/create-profile.dto';
+import { CreateAvatarUploadUrlDto } from '../dto/create-avatar-upload-url.dto';
+import { ConfirmAvatarUploadDto } from '../dto/confirm-avatar-upload.dto';
 import { UpdateProfileDto } from '../dto/update-profile.dto';
 import { UserProfile } from '../entities/user-profile.entity';
 import { InternalAuthGuard } from '../guards/internal-auth.guard';
@@ -38,6 +40,22 @@ export class UsersController {
   @ApiOperation({ summary: 'Update the current authenticated user profile' })
   updateMe(@CurrentUser() user: JwtPayload, @Body() dto: UpdateProfileDto): Promise<UserProfile> {
     return this.usersService.updateOwnProfile(user, dto);
+  }
+
+  @Post('users/me/avatar/image-upload-url')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Create a presigned URL for the current user avatar' })
+  createAvatarUploadUrl(@CurrentUser() user: JwtPayload, @Body() dto: CreateAvatarUploadUrlDto) {
+    return this.usersService.createAvatarUploadUrl(user, dto.contentType);
+  }
+
+  @Post('users/me/avatar/confirm')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Confirm and save the current user avatar upload' })
+  confirmAvatarUpload(@CurrentUser() user: JwtPayload, @Body() dto: ConfirmAvatarUploadDto) {
+    return this.usersService.confirmAvatarUpload(user, dto.objectKey);
   }
 
   @Get('users/me/orders')

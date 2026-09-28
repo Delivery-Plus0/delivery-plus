@@ -6,6 +6,7 @@ import {
   NotFoundError,
   UnauthorizedError,
   UserRole,
+  S3StorageService,
 } from '@food-delivery/shared';
 import { ProfilesRepository } from '../repositories/profiles.repository';
 import { OrderServiceClient } from '../common/order-service.client';
@@ -15,9 +16,12 @@ import { UserProfile } from '../entities/user-profile.entity';
 
 @Injectable()
 export class UsersService {
+  private readonly avatarMaxSizeBytes = 5 * 1024 * 1024;
+
   constructor(
     private readonly profiles: ProfilesRepository,
     private readonly orderServiceClient: OrderServiceClient,
+    private readonly storage: S3StorageService,
   ) {}
 
   async createProfile(dto: CreateProfileDto, createdByService: string): Promise<UserProfile> {
@@ -65,6 +69,26 @@ export class UsersService {
   async updateOwnProfile(requester: JwtPayload, dto: UpdateProfileDto): Promise<UserProfile> {
     await this.getOwnProfile(requester);
     const updated = await this.profiles.update(requester.sub, dto);
+    return updated as UserProfile;
+  }
+
+  async createAvatarUploadUrl(requester: JwtPayload, contentType: string) {
+    const profile = await this.getOwnProfile(requester);
+    return this.storage.generateUploadUrl(
+      `users/${profile.id}/avatar/`,
+      contentType,
+      this.avatarMaxSizeBytes,
+    );
+  }
+
+  async confirmAvatarUpload(requester: JwtPayload, objectKey: string): Promise<UserProfile> {
+    const profile = await this.getOwnProfile(requester);
+    const verifiedUpload = await this.storage.verifyUploadedObject(
+      objectKey,
+      `users/${profile.id}/avatar/`,
+      this.avatarMaxSizeBytes,
+    );
+    const updated = await this.profiles.update(profile.id, { avatarUrl: verifiedUpload.publicUrl });
     return updated as UserProfile;
   }
 

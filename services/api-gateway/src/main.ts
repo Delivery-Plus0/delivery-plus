@@ -20,10 +20,15 @@ export const PROXIES = {
 } as const;
 
 export function getServicePrefix(gatewayPath: string): string {
-  return gatewayPath === '/api/menus' ? '' : gatewayPath.replace(/^\/api/, '');
+  return gatewayPath === '/api/menus'
+    ? ''
+    : gatewayPath.replace(/^\/api/, '');
 }
 
-export function rewriteProxyPath(gatewayPath: string, incomingPath: string): string {
+export function rewriteProxyPath(
+  gatewayPath: string,
+  incomingPath: string,
+): string {
   const [pathname, queryString = ''] = incomingPath.split('?');
 
   if (/^\/docs-json(?:\/|$)/.test(pathname)) {
@@ -33,10 +38,60 @@ export function rewriteProxyPath(gatewayPath: string, incomingPath: string): str
   return `${getServicePrefix(gatewayPath)}${incomingPath}`;
 }
 
+function getCorsOrigins(): string[] {
+  const rawOrigins = process.env.CORS_ORIGINS;
+  const isProduction = process.env.NODE_ENV === 'production';
+
+  if (!rawOrigins) {
+    if (isProduction) {
+      throw new Error(
+        'CORS_ORIGINS must be set to a comma-separated list of allowed origins when NODE_ENV=production',
+      );
+    }
+
+    return [
+      'http://localhost:8081',
+      'http://localhost:8082',
+      'http://localhost:8083',
+      'http://127.0.0.1:8081',
+      'http://127.0.0.1:8082',
+      'http://127.0.0.1:8083',
+    ];
+  }
+
+  const origins = rawOrigins
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  if (isProduction && origins.length === 0) {
+    throw new Error(
+      'CORS_ORIGINS must contain at least one allowed origin when NODE_ENV=production',
+    );
+  }
+
+  return origins;
+}
+
+export function getCorsOptions() {
+  return {
+    origin: getCorsOrigins(),
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Correlation-Id',
+      'Idempotency-Key',
+    ],
+  };
+}
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   const PORT = process.env.PORT || 3000;
+
+  app.enableCors(getCorsOptions());
 
   app.use((request: Request, response: Response, next: NextFunction) => {
     if (isBlockedInternalRoute(request.path)) {
@@ -70,7 +125,8 @@ async function bootstrap() {
       createProxyMiddleware({
         target,
         changeOrigin: true,
-        pathRewrite: (incomingPath) => rewriteProxyPath(path, incomingPath),
+        pathRewrite: (incomingPath) =>
+          rewriteProxyPath(path, incomingPath),
       }),
     );
   });
@@ -82,5 +138,8 @@ async function bootstrap() {
 }
 
 if (require.main === module) {
-  bootstrap();
+  bootstrap().catch((error) => {
+    console.error('API Gateway failed to start:', error instanceof Error ? error.message : error);
+    process.exit(1);
+  });
 }

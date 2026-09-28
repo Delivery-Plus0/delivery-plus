@@ -2,13 +2,15 @@ import { MenuService } from './menu.service';
 import { CategoriesRepository } from '../repositories/categories.repository';
 import { MenuItemsRepository } from '../repositories/menu-items.repository';
 import { RestaurantServiceClient } from '../common/restaurant-service.client';
-import { BadRequestError, ForbiddenError, NotFoundError } from '@food-delivery/shared';
+import { BadRequestError, ForbiddenError, NotFoundError, S3StorageService } from '@food-delivery/shared';
 
 describe('MenuService', () => {
   let service: MenuService;
   let categories: jest.Mocked<CategoriesRepository>;
   let menuItems: jest.Mocked<MenuItemsRepository>;
   let restaurantClient: jest.Mocked<RestaurantServiceClient>;
+  let storage: jest.Mocked<S3StorageService>;
+  let cache: { getOrSet: jest.Mock; del: jest.Mock };
 
   const item = {
     id: 'item-1',
@@ -42,10 +44,34 @@ describe('MenuService', () => {
       assertOwnership: jest.fn(),
     } as unknown as jest.Mocked<RestaurantServiceClient>;
 
-    service = new MenuService(categories, menuItems, restaurantClient, { getOrSet: async (k: any, fn: any) => fn(), del: jest.fn() } as any);
+    storage = {
+      generateUploadUrl: jest.fn(),
+      verifyUploadedObject: jest.fn(),
+      getPublicUrl: jest.fn(),
+    } as unknown as jest.Mocked<S3StorageService>;
+    cache = { getOrSet: jest.fn((_key, callback) => callback()), del: jest.fn() };
+
+    service = new MenuService(categories, menuItems, restaurantClient, cache as any, storage);
   });
 
   describe('createItem', () => {
+    it('does not persist caller-supplied image URLs outside the confirmation flow', async () => {
+      restaurantClient.assertOwnership.mockResolvedValue(undefined);
+      menuItems.create.mockResolvedValue(item);
+      const input = {
+        restaurantId: 'r1',
+        name: 'Burger',
+        price: 9.99,
+        imageUrl: 'https://untrusted.example/image.png',
+      } as Parameters<MenuService['createItem']>[1];
+
+      await service.createItem('owner-1', input);
+
+      expect(menuItems.create).toHaveBeenCalledWith(
+        expect.not.objectContaining({ imageUrl: 'https://untrusted.example/image.png' }),
+      );
+    });
+
     it('rejects when caller does not own the restaurant', async () => {
       restaurantClient.assertOwnership.mockRejectedValue(
         new ForbiddenError('You do not own this restaurant'),
@@ -137,6 +163,40 @@ describe('MenuService', () => {
       const result = await service.getMenu('r1');
       expect(result.restaurantId).toBe('r1');
       expect(result.items).toHaveLength(1);
+    });
+  });
+
+  describe('menu item image uploads', () => {
+    it('rejects a mismatched object key before persisting an image URL', async () => {
+      menuItems.findById.mockResolvedValue(item);
+      restaurantClient.assertOwnership.mockResolvedValue(undefined);
+      storage.verifyUploadedObject.mockRejectedValue(new BadRequestError('Object key prefix mismatch'));
+
+      await expect(
+        service.confirmItemImageUpload(
+          'item-1',
+          'owner-1',
+          'restaurants/other/menu-items/item-1/01234567-89ab-cdef-0123-456789abcdef.png',
+        ),
+      ).rejects.toThrow(BadRequestError);
+
+      expect(storage.verifyUploadedObject).toHaveBeenCalledWith(
+        'restaurants/other/menu-items/item-1/01234567-89ab-cdef-0123-456789abcdef.png',
+        'restaurants/r1/menu-items/item-1/',
+        10 * 1024 * 1024,
+      );
+      expect(menuItems.update).not.toHaveBeenCalled();
+    });
+
+    it('checks restaurant ownership before issuing an item image upload URL', async () => {
+      menuItems.findById.mockResolvedValue(item);
+      restaurantClient.assertOwnership.mockRejectedValue(new ForbiddenError('Not the restaurant owner'));
+
+      await expect(service.createItemImageUploadUrl('item-1', 'owner-1', 'image/png')).rejects.toThrow(
+        ForbiddenError,
+      );
+
+      expect(storage.generateUploadUrl).not.toHaveBeenCalled();
     });
   });
 });

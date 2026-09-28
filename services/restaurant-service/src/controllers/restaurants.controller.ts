@@ -15,6 +15,8 @@ import { CreateRestaurantDto } from '../dto/create-restaurant.dto';
 import { UpdateRestaurantDto } from '../dto/update-restaurant.dto';
 import { UpdateRestaurantStatusDto } from '../dto/update-restaurant-status.dto';
 import { ListRestaurantsQueryDto } from '../dto/list-restaurants-query.dto';
+import { CreateRestaurantImageUploadUrlDto } from '../dto/create-restaurant-image-upload-url.dto';
+import { ConfirmRestaurantImageUploadDto } from '../dto/confirm-restaurant-image-upload.dto';
 
 @ApiTags('restaurants')
 @Controller('restaurants')
@@ -66,6 +68,32 @@ export class RestaurantsController {
     @Body() dto: UpdateRestaurantStatusDto,
   ) {
     return this.restaurantsService.updateStatus(id, user.sub, user.role, dto);
+  }
+
+  @Post(':id/image-upload-url')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.RESTAURANT_OWNER)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Create a presigned URL for a restaurant cover or logo image' })
+  createImageUploadUrl(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: CreateRestaurantImageUploadUrlDto,
+  ) {
+    return this.restaurantsService.createImageUploadUrl(id, user.sub, dto.imageType, dto.contentType);
+  }
+
+  @Post(':id/image-confirm')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.RESTAURANT_OWNER)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Confirm and save a restaurant cover or logo upload' })
+  confirmImageUpload(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: ConfirmRestaurantImageUploadDto,
+  ) {
+    return this.restaurantsService.confirmImageUpload(id, user.sub, dto.imageType, dto.objectKey);
   }
 
   @Get(':id/ownership/:userId')

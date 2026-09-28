@@ -1,6 +1,76 @@
-import { extractPathParameters, joinPublicPath, validatePublicOpenApiDocument } from './public-openapi';
+import {
+  extractPathParameters,
+  generatePublicOpenApiDocument,
+  joinPublicPath,
+  validatePublicOpenApiDocument,
+} from './public-openapi';
 import { isBlockedInternalRoute } from './route-policy';
-import { getServicePrefix, rewriteProxyPath } from './main';
+import { getCorsOptions, getServicePrefix, rewriteProxyPath } from './main';
+
+describe('gateway browser CORS', () => {
+  it('allows the idempotency header used by order and payment clients', () => {
+    expect(getCorsOptions().allowedHeaders).toContain('Idempotency-Key');
+  });
+
+  describe('production origin enforcement', () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+    const originalCorsOrigins = process.env.CORS_ORIGINS;
+
+    afterEach(() => {
+      process.env.NODE_ENV = originalNodeEnv;
+      process.env.CORS_ORIGINS = originalCorsOrigins;
+    });
+
+    it('throws when NODE_ENV=production and CORS_ORIGINS is missing', () => {
+      process.env.NODE_ENV = 'production';
+      delete process.env.CORS_ORIGINS;
+
+      expect(() => getCorsOptions()).toThrow(/CORS_ORIGINS/);
+    });
+
+    it('throws when NODE_ENV=production and CORS_ORIGINS is set but empty after trimming', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.CORS_ORIGINS = ' , ,';
+
+      expect(() => getCorsOptions()).toThrow(/CORS_ORIGINS/);
+    });
+
+    it('uses the configured origins when NODE_ENV=production and CORS_ORIGINS is set', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.CORS_ORIGINS = 'https://app.example.com,https://admin.example.com';
+
+      expect(getCorsOptions().origin).toEqual([
+        'https://app.example.com',
+        'https://admin.example.com',
+      ]);
+    });
+
+    it('parses multiple comma-separated origins and trims whitespace', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.CORS_ORIGINS = ' https://a.example.com , https://b.example.com ,https://c.example.com';
+
+      expect(getCorsOptions().origin).toEqual([
+        'https://a.example.com',
+        'https://b.example.com',
+        'https://c.example.com',
+      ]);
+    });
+
+    it('still falls back to the localhost defaults outside production when CORS_ORIGINS is unset', () => {
+      process.env.NODE_ENV = 'development';
+      delete process.env.CORS_ORIGINS;
+
+      expect(getCorsOptions().origin).toEqual([
+        'http://localhost:8081',
+        'http://localhost:8082',
+        'http://localhost:8083',
+        'http://127.0.0.1:8081',
+        'http://127.0.0.1:8082',
+        'http://127.0.0.1:8083',
+      ]);
+    });
+  });
+});
 
 describe('gateway internal route exposure', () => {
   it('blocks the internal users route from public proxying', () => {
@@ -101,5 +171,25 @@ describe('gateway internal route exposure', () => {
         ['/api/cart'],
       ),
     ).toThrow(/service prefix|\/api\/cart/i);
+  });
+
+  it('includes authenticated media upload and confirmation operations in the public contract', () => {
+    const document = generatePublicOpenApiDocument();
+    const mediaPaths = [
+      '/api/users/me/avatar/image-upload-url',
+      '/api/users/me/avatar/confirm',
+      '/api/restaurants/{id}/image-upload-url',
+      '/api/restaurants/{id}/image-confirm',
+      '/api/menus/menu-items/{id}/image-upload-url',
+      '/api/menus/menu-items/{id}/image-confirm',
+    ];
+
+    for (const path of mediaPaths) {
+      const operation = document.paths[path].post;
+      expect(operation.security).toEqual([{ bearerAuth: [] }]);
+      expect(operation.requestBody.required).toBe(true);
+    }
+    expect(document.paths['/api/users/me/avatar/image-upload-url'].post.responses['201'].content)
+      .toBeDefined();
   });
 });

@@ -37,11 +37,4 @@ export class UpdateMenuItemDto {
   @IsPositive()
   price?: number;
 
-  @ApiPropertyOptional({
-    description: 'Updated image URL for the item.',
-    example: 'https://cdn.example.com/images/pizza-deluxe.jpg',
-  })
-  @IsOptional()
-  @IsString()
-  imageUrl?: string;
 }

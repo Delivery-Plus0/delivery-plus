@@ -23,6 +23,12 @@ export class Restaurant {
   @Column({ type: 'text', nullable: true })
   description?: string;
 
+  @Column({ type: 'text', nullable: true })
+  coverImageUrl?: string;
+
+  @Column({ type: 'text', nullable: true })
+  logoUrl?: string;
+
   @Column()
   address!: string;
 

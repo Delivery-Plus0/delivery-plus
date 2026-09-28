@@ -442,6 +442,103 @@
         ]
       }
     },
+    "/api/users/me/avatar/image-upload-url": {
+      "post": {
+        "summary": "Create a presigned avatar upload URL",
+        "tags": [
+          "users"
+        ],
+        "operationId": "users_post_api_users_me_avatar_image_upload_url",
+        "responses": {
+          "201": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresignedImageUpload"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImageUploadUrlRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users/me/avatar/confirm": {
+      "post": {
+        "summary": "Confirm and save an uploaded avatar",
+        "tags": [
+          "users"
+        ],
+        "operationId": "users_post_api_users_me_avatar_confirm",
+        "responses": {
+          "201": {
+            "description": "Successful response"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImageConfirmRequest"
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/restaurants": {
       "post": {
         "summary": "Create a restaurant",
@@ -682,6 +779,123 @@
           }
         ],
         "security": []
+      }
+    },
+    "/api/restaurants/{id}/image-upload-url": {
+      "post": {
+        "summary": "Create a presigned restaurant image upload URL",
+        "tags": [
+          "restaurants"
+        ],
+        "operationId": "restaurants_post_api_restaurants_id_image_upload_url",
+        "responses": {
+          "201": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresignedImageUpload"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RestaurantImageUploadUrlRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/restaurants/{id}/image-confirm": {
+      "post": {
+        "summary": "Confirm and save a restaurant image",
+        "tags": [
+          "restaurants"
+        ],
+        "operationId": "restaurants_post_api_restaurants_id_image_confirm",
+        "responses": {
+          "201": {
+            "description": "Successful response"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RestaurantImageConfirmRequest"
+              }
+            }
+          }
+        }
       }
     },
     "/api/menus/categories": {
@@ -965,6 +1179,123 @@
             "bearerAuth": []
           }
         ]
+      }
+    },
+    "/api/menus/menu-items/{id}/image-upload-url": {
+      "post": {
+        "summary": "Create a presigned menu item image upload URL",
+        "tags": [
+          "menus"
+        ],
+        "operationId": "menus_post_api_menus_menu_items_id_image_upload_url",
+        "responses": {
+          "201": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresignedImageUpload"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImageUploadUrlRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/menus/menu-items/{id}/image-confirm": {
+      "post": {
+        "summary": "Confirm and save a menu item image",
+        "tags": [
+          "menus"
+        ],
+        "operationId": "menus_post_api_menus_menu_items_id_image_confirm",
+        "responses": {
+          "201": {
+            "description": "Successful response"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImageConfirmRequest"
+              }
+            }
+          }
+        }
       }
     },
     "/api/cart": {
@@ -2497,6 +2828,115 @@
               "DRIVER",
               "ADMIN"
             ]
+          }
+        }
+      },
+      "ImageUploadUrlRequest": {
+        "type": "object",
+        "required": [
+          "contentType"
+        ],
+        "properties": {
+          "contentType": {
+            "type": "string",
+            "enum": [
+              "image/jpeg",
+              "image/png",
+              "image/webp"
+            ]
+          }
+        }
+      },
+      "RestaurantImageUploadUrlRequest": {
+        "type": "object",
+        "required": [
+          "imageType",
+          "contentType"
+        ],
+        "properties": {
+          "imageType": {
+            "type": "string",
+            "enum": [
+              "cover",
+              "logo"
+            ]
+          },
+          "contentType": {
+            "type": "string",
+            "enum": [
+              "image/jpeg",
+              "image/png",
+              "image/webp"
+            ]
+          }
+        }
+      },
+      "ImageConfirmRequest": {
+        "type": "object",
+        "required": [
+          "objectKey"
+        ],
+        "properties": {
+          "objectKey": {
+            "type": "string"
+          }
+        }
+      },
+      "RestaurantImageConfirmRequest": {
+        "type": "object",
+        "required": [
+          "imageType",
+          "objectKey"
+        ],
+        "properties": {
+          "imageType": {
+            "type": "string",
+            "enum": [
+              "cover",
+              "logo"
+            ]
+          },
+          "objectKey": {
+            "type": "string"
+          }
+        }
+      },
+      "PresignedImageUpload": {
+        "type": "object",
+        "required": [
+          "uploadUrl",
+          "objectKey",
+          "expiresIn",
+          "method",
+          "fields"
+        ],
+        "properties": {
+          "uploadUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "POST multipart form data to this object-storage URL."
+          },
+          "objectKey": {
+            "type": "string",
+            "description": "Temporary key to submit to the corresponding confirmation endpoint."
+          },
+          "expiresIn": {
+            "type": "integer",
+            "example": 300
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "POST"
+            ],
+            "description": "HTTP method for the upload request."
+          },
+          "fields": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Include every field in the multipart form before adding the image file."
           }
         }
       }

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { BadRequestError, NotFoundError, CacheService } from '@food-delivery/shared';
+import { BadRequestError, NotFoundError, CacheService, S3StorageService } from '@food-delivery/shared';
 import { CategoriesRepository } from '../repositories/categories.repository';
 import { MenuItemsRepository } from '../repositories/menu-items.repository';
 import { RestaurantServiceClient } from '../common/restaurant-service.client';
@@ -18,11 +18,13 @@ export interface MenuResponse {
 
 @Injectable()
 export class MenuService {
+  private readonly imageMaxSizeBytes = 10 * 1024 * 1024;
   constructor(
     private readonly categories: CategoriesRepository,
     private readonly menuItems: MenuItemsRepository,
     private readonly restaurantClient: RestaurantServiceClient,
     private readonly cache: CacheService,
+    private readonly storage: S3StorageService,
   ) {}
 
   async createCategory(requesterId: string, dto: CreateCategoryDto): Promise<Category> {
@@ -72,7 +74,6 @@ export class MenuService {
       name: dto.name,
       description: dto.description,
       price: dto.price,
-      imageUrl: dto.imageUrl,
     });
     await this.cache.del(`menu:${dto.restaurantId}`);
     return item;
@@ -103,6 +104,30 @@ export class MenuService {
     const item = await this.getItem(id);
     await this.restaurantClient.assertOwnership(item.restaurantId, requesterId);
     const updated = await this.menuItems.update(id, { available: dto.available });
+    await this.cache.del(`menu:${item.restaurantId}`);
+    await this.cache.del(`menuitem:${id}`);
+    return updated as MenuItem;
+  }
+
+  async createItemImageUploadUrl(id: string, requesterId: string, contentType: string) {
+    const item = await this.getItem(id);
+    await this.restaurantClient.assertOwnership(item.restaurantId, requesterId);
+    return this.storage.generateUploadUrl(
+      `restaurants/${item.restaurantId}/menu-items/${item.id}/`,
+      contentType,
+      this.imageMaxSizeBytes,
+    );
+  }
+
+  async confirmItemImageUpload(id: string, requesterId: string, objectKey: string): Promise<MenuItem> {
+    const item = await this.getItem(id);
+    await this.restaurantClient.assertOwnership(item.restaurantId, requesterId);
+    const verifiedUpload = await this.storage.verifyUploadedObject(
+      objectKey,
+      `restaurants/${item.restaurantId}/menu-items/${item.id}/`,
+      this.imageMaxSizeBytes,
+    );
+    const updated = await this.menuItems.update(id, { imageUrl: verifiedUpload.publicUrl });
     await this.cache.del(`menu:${item.restaurantId}`);
     await this.cache.del(`menuitem:${id}`);
     return updated as MenuItem;

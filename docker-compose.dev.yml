@@ -1,4 +1,68 @@
 services:
+  # MinIO's own images were pulled from Docker Hub (2026-09-11) and quay.io
+  # gated anonymous pulls behind a required license/account (2026-09-24), so
+  # there is no unattended way to run real MinIO in CI or a fresh clone
+  # anymore. media-storage runs SeaweedFS's S3 gateway instead: it is Apache
+  # 2.0, freely pullable, and speaks the same S3 API our shared
+  # S3StorageService already targets, so no application code changes were
+  # needed. See .project-context/15-media-and-storage.md for the full
+  # rationale and the S3-semantic checks this was validated against.
+  media-storage:
+    image: chrislusf/seaweedfs:4.47
+    restart: unless-stopped
+    entrypoint: ['/bin/sh', '-c']
+    # `command` must be a single-item list here: a plain scalar string is
+    # word-split by Compose into an argv array before it ever reaches
+    # `/bin/sh -c`, which silently truncates a multi-line heredoc script.
+    command:
+      - |
+        set -e
+        mkdir -p /etc/seaweedfs
+        cat > /etc/seaweedfs/s3.json <<EOF
+        {"identities":[{"name":"delivery-plus","credentials":[{"accessKey":"$$AWS_ACCESS_KEY_ID","secretKey":"$$AWS_SECRET_ACCESS_KEY"}],"actions":["Admin","Read","Write","List","Tagging"]}]}
+        EOF
+        exec weed server -dir=/data -s3 -s3.port=9000 -s3.config=/etc/seaweedfs/s3.json
+    environment:
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-minioadmin}
+    ports:
+      - '127.0.0.1:9000:9000'
+    volumes:
+      - media_storage_data:/data
+
+  # Creates the bucket, restricts anonymous public read so unconfirmed
+  # `pending/` uploads stay private (an improvement over the prior MinIO
+  # setup, which made the whole bucket world-readable), and applies the
+  # lifecycle rule that expires abandoned pending uploads after one day.
+  media-storage-init:
+    image: amazon/aws-cli:2.37.4
+    restart: 'no'
+    depends_on:
+      media-storage:
+        condition: service_started
+    entrypoint: ['/bin/sh', '-c']
+    # See the media-storage service comment: `command` must be a single-item
+    # list so Compose does not word-split this multi-line script.
+    command:
+      - |
+        set -e
+        until aws --endpoint-url "http://media-storage:9000" s3 ls >/dev/null 2>&1; do sleep 1; done
+        aws --endpoint-url "http://media-storage:9000" s3 mb "s3://$$AWS_S3_BUCKET" --region "$$AWS_REGION" || true
+        cat > /tmp/policy.json <<EOF
+        {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":["s3:GetObject"],"NotResource":["arn:aws:s3:::$$AWS_S3_BUCKET/pending/*"]}]}
+        EOF
+        aws --endpoint-url "http://media-storage:9000" s3api put-bucket-policy --bucket "$$AWS_S3_BUCKET" --policy file:///tmp/policy.json
+        cat > /tmp/lifecycle.json <<EOF
+        {"Rules":[{"ID":"expire-pending","Status":"Enabled","Filter":{"Prefix":"pending/"},"Expiration":{"Days":1}}]}
+        EOF
+        aws --endpoint-url "http://media-storage:9000" s3api put-bucket-lifecycle-configuration --bucket "$$AWS_S3_BUCKET" --lifecycle-configuration file:///tmp/lifecycle.json
+    environment:
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-minioadmin}
+      AWS_DEFAULT_REGION: ${AWS_REGION:-us-east-1}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-delivery-plus-media}
+
   kafka:
     ports:
       - '127.0.0.1:9092:9092'
@@ -100,6 +164,14 @@ services:
       REDIS_URL: redis://redis:6379
       INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:-local-internal-auth-development-only}
       ORDER_SERVICE_URL: http://order-service:3006
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-minioadmin}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-delivery-plus-media}
+      AWS_S3_ENDPOINT: http://media-storage:9000
+      AWS_S3_PUBLIC_ENDPOINT: ${AWS_S3_PUBLIC_ENDPOINT:-http://localhost:9000}
+      AWS_PUBLIC_BASE_URL: ${AWS_PUBLIC_BASE_URL:-http://localhost:9000/delivery-plus-media}
+      AWS_S3_FORCE_PATH_STYLE: 'true'
     healthcheck:
       test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3002/health']
       interval: 5s
@@ -110,6 +182,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      media-storage-init:
+        condition: service_completed_successfully
 
   restaurant-service:
     build:
@@ -122,6 +196,14 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/restaurant_service
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:-local-development-only}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-minioadmin}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-delivery-plus-media}
+      AWS_S3_ENDPOINT: http://media-storage:9000
+      AWS_S3_PUBLIC_ENDPOINT: ${AWS_S3_PUBLIC_ENDPOINT:-http://localhost:9000}
+      AWS_PUBLIC_BASE_URL: ${AWS_PUBLIC_BASE_URL:-http://localhost:9000/delivery-plus-media}
+      AWS_S3_FORCE_PATH_STYLE: 'true'
     healthcheck:
       test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3003/health']
       interval: 5s
@@ -130,6 +212,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      media-storage-init:
+        condition: service_completed_successfully
 
   menu-service:
     build:
@@ -143,6 +227,14 @@ services:
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:-local-development-only}
       RESTAURANT_SERVICE_URL: http://restaurant-service:3003
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-minioadmin}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-delivery-plus-media}
+      AWS_S3_ENDPOINT: http://media-storage:9000
+      AWS_S3_PUBLIC_ENDPOINT: ${AWS_S3_PUBLIC_ENDPOINT:-http://localhost:9000}
+      AWS_PUBLIC_BASE_URL: ${AWS_PUBLIC_BASE_URL:-http://localhost:9000/delivery-plus-media}
+      AWS_S3_FORCE_PATH_STYLE: 'true'
     healthcheck:
       test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3004/health']
       interval: 5s
@@ -153,6 +245,8 @@ services:
         condition: service_healthy
       restaurant-service:
         condition: service_healthy
+      media-storage-init:
+        condition: service_completed_successfully
 
   cart-service:
     build:
@@ -326,3 +420,6 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+
+volumes:
+  media_storage_data:

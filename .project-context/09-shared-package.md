@@ -21,6 +21,7 @@ The shared package is structured around common concerns, including:
 - NestJS wrappers
 - Redis helpers
 - Kafka helpers
+- S3-compatible media storage with presigned POST generation, upload-size policies, byte verification, and staging-object promotion
 
 This makes it the contract layer that services depend on for common language and behavior.
 
@@ -66,6 +67,7 @@ The shared package gives the repo a few important traits:
 - central Kafka topic naming
 - common logging and helper behavior
 - less chance of one service using a slightly different domain definition than another
+- consistent media MIME allowlisting, signed upload constraints, S3 object verification, and public URL derivation
 
 ## Important caveat
 

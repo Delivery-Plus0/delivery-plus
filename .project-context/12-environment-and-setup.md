@@ -25,9 +25,12 @@ Common runtime values include:
 - `POSTGRES_USER`
 - `POSTGRES_PASSWORD`
 - `JWT_SECRET`
+- `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_S3_BUCKET`, `AWS_S3_ENDPOINT`, `AWS_S3_PUBLIC_ENDPOINT`, `AWS_PUBLIC_BASE_URL`, and `AWS_S3_FORCE_PATH_STYLE` for media storage
 - service-specific URLs such as `AUTH_SERVICE_URL`, `ORDER_SERVICE_URL`, and `KAFKA_BROKER`
 
 The compose file sets practical local defaults, including a development JWT secret and default Postgres credentials.
+
+The dev/test Compose overlays supply local defaults (`minioadmin` credentials, `us-east-1`, bucket `delivery-plus-media`, internal endpoint `http://media-storage:9000`, and public endpoint/base URL on `localhost:9000`) for a `media-storage` service running SeaweedFS's S3 gateway (see [15-media-and-storage.md](15-media-and-storage.md) for why this isn't MinIO). The production overlay requires a bucket, public/CDN base URL, and credentials through deployment environment variables; do not reuse local credentials. `AWS_S3_PUBLIC_ENDPOINT` is for signing browser-reachable URLs, while `AWS_S3_ENDPOINT` is for service-to-object-storage requests.
 
 ## Database conventions
 

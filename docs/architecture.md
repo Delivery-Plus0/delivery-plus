@@ -22,7 +22,7 @@ graph TD
 - Kafka carries order, payment, and delivery event topics. Order and payment publication is implemented; delivery has event-building and Kafka wiring code, but its lifecycle methods currently do not invoke publication. Consumers retry locally up to three times, use an in-memory event-id set, and commit exhausted messages instead of writing to a real DLQ.
 - Redis stores carts, cache entries, rate-limit state, and recent driver locations with a TTL.
 - PostgreSQL stores credentials, profiles, restaurants, menu data, orders, payments, deliveries, drivers, and notifications. Docker initializes separate logical databases from `docker/postgres/init.sql`.
-- User, restaurant, and menu services issue short-lived presigned POST policies for media; clients upload directly to S3-compatible object storage. The policies enforce upload-size limits, and the services verify object bytes before copying them from expiring staging keys to permanent public/CDN URLs. The dev and test Compose overlays use MinIO.
+- User, restaurant, and menu services issue short-lived presigned POST policies for media; clients upload directly to S3-compatible object storage. The policies enforce upload-size limits, and the services verify object bytes before copying them from expiring staging keys to permanent public/CDN URLs. The dev and test Compose overlays use SeaweedFS's S3 gateway (service name `media-storage`), not MinIO; see `.project-context/15-media-and-storage.md` for why.
 
 ## Main Flow
 

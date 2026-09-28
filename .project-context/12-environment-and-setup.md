@@ -30,7 +30,7 @@ Common runtime values include:
 
 The compose file sets practical local defaults, including a development JWT secret and default Postgres credentials.
 
-The dev/test Compose overlays supply local MinIO defaults (`minioadmin` credentials, `us-east-1`, bucket `delivery-plus-media`, internal endpoint `http://minio:9000`, and public endpoint/base URL on `localhost:9000`). The production overlay requires a bucket, public/CDN base URL, and credentials through deployment environment variables; do not reuse local credentials. `AWS_S3_PUBLIC_ENDPOINT` is for signing browser-reachable URLs, while `AWS_S3_ENDPOINT` is for service-to-MinIO requests.
+The dev/test Compose overlays supply local defaults (`minioadmin` credentials, `us-east-1`, bucket `delivery-plus-media`, internal endpoint `http://media-storage:9000`, and public endpoint/base URL on `localhost:9000`) for a `media-storage` service running SeaweedFS's S3 gateway (see [15-media-and-storage.md](15-media-and-storage.md) for why this isn't MinIO). The production overlay requires a bucket, public/CDN base URL, and credentials through deployment environment variables; do not reuse local credentials. `AWS_S3_PUBLIC_ENDPOINT` is for signing browser-reachable URLs, while `AWS_S3_ENDPOINT` is for service-to-object-storage requests.
 
 ## Database conventions
 

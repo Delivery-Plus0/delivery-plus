@@ -98,6 +98,13 @@ headers include `Authorization`, `X-Correlation-Id`, and `Idempotency-Key`;
 the latter is required for browser checkout requests that use retry-safe order
 and payment creation.
 
+**Production fails closed on this setting.** When `NODE_ENV=production`,
+`CORS_ORIGINS` is required; the gateway throws at startup rather than silently
+falling back to the localhost defaults if it is missing or empty after
+trimming. `docker-compose.prod.yml` also declares `CORS_ORIGINS` as a required
+(`:?`) variable for defense in depth, but the application-level check is what
+protects a deployment that bypasses that Compose file entirely (e.g. ECS/K8s).
+
 ## Current architecture assumptions
 
 The gateway is not a full API management layer. It is a thin reverse-proxy and documentation front door, which fits this repository’s microservice style.

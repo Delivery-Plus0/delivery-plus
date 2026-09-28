@@ -29,6 +29,10 @@ override those origins. Allowed request headers include `Content-Type`,
 `Authorization`, `X-Correlation-Id`, and `Idempotency-Key`; order and payment
 checkout clients use the idempotency header for retry-safe creation.
 
+When `NODE_ENV=production`, `CORS_ORIGINS` is required: the gateway fails to
+start rather than silently allowing only the localhost defaults if it is
+unset or empty after trimming.
+
 ## Dependencies
 - Depends on all application services for proxying and Compose dependency checks.
 - Does not own a database.

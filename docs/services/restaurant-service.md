@@ -31,7 +31,7 @@ From `services/restaurant-service/src/config/app-config.ts`:
 - `JWT_SECRET`
 - `PORT` (default: `3003`)
 - `NODE_ENV` (default: `development`)
-- `AWS_REGION`, `AWS_S3_BUCKET`, and `AWS_PUBLIC_BASE_URL`; S3 endpoint and credentials are configurable for local MinIO or a cloud provider
+- `AWS_REGION`, `AWS_S3_BUCKET`, and `AWS_PUBLIC_BASE_URL`; S3 endpoint and credentials are configurable for the local media-storage service (SeaweedFS's S3 gateway) or a cloud provider
 
 ## Notes
 The service enforces restaurant ownership rules and is a central dependency for menu and order flows.

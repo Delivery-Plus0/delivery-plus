@@ -33,7 +33,7 @@ From `services/menu-service/src/config/app-config.ts`:
 - `RESTAURANT_SERVICE_URL` (default: `http://localhost:3003`)
 - `PORT` (default: `3004`)
 - `NODE_ENV` (default: `development`)
-- `AWS_REGION`, `AWS_S3_BUCKET`, and `AWS_PUBLIC_BASE_URL`; S3 endpoint and credentials are configurable for local MinIO or a cloud provider
+- `AWS_REGION`, `AWS_S3_BUCKET`, and `AWS_PUBLIC_BASE_URL`; S3 endpoint and credentials are configurable for the local media-storage service (SeaweedFS's S3 gateway) or a cloud provider
 
 ## Notes
 This service is a key dependency for carting and ordering because item availability and pricing are validated here.

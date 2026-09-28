@@ -47,9 +47,9 @@ Purpose:
 
 ### S3-compatible media storage
 
-- Dev and test overlays add MinIO on ports `9000` (S3 API) and `9001` (console), with a persistent data volume.
-- A one-shot `minio-init` service creates the configured bucket, allows anonymous object downloads for local public URLs, and expires temporary `pending/` uploads after one day. MinIO's `MINIO_API_CORS_ALLOW_ORIGIN` environment setting supplies local browser CORS for presigned POST uploads.
-- User, restaurant, and menu services wait for bucket initialization. Production does not start MinIO; configure an S3 lifecycle rule to expire `pending/` objects after one day. The production Compose overlay requires the bucket, public/CDN URL, region, and S3 credentials through deployment environment variables. Never commit production credentials.
+- Dev and test overlays add a `media-storage` service on port `9000` (S3 API), with a persistent data volume. It runs SeaweedFS's S3 gateway rather than MinIO: MinIO's own images were pulled from Docker Hub (2026-09-11) and quay.io gated anonymous pulls behind a required license/account (2026-09-24), so there is no unattended way to run real MinIO in CI or a fresh clone anymore. SeaweedFS is Apache 2.0, freely pullable, and speaks the same S3 API `S3StorageService` already targets, so no application code changed. See [15-media-and-storage.md](15-media-and-storage.md) for the full rationale.
+- A one-shot `media-storage-init` service creates the configured bucket, grants anonymous read only outside the `pending/` prefix (so unconfirmed uploads are not publicly downloadable), and expires temporary `pending/` uploads after one day via a bucket lifecycle rule. SeaweedFS's S3 gateway answers CORS preflight requests automatically, with no separate CORS configuration step needed for presigned POST uploads.
+- User, restaurant, and menu services wait for bucket initialization. Production does not start `media-storage`; configure an S3 lifecycle rule to expire `pending/` objects after one day. The production Compose overlay requires the bucket, public/CDN URL, region, and S3 credentials through deployment environment variables. Never commit production credentials.
 
 ## Service startup model
 
@@ -92,7 +92,7 @@ Most services receive connection URLs like:
 - `DATABASE_URL=postgres://...@postgres:5432/<database_name>`
 - `REDIS_URL=redis://redis:6379`
 - `KAFKA_BROKER=kafka:29092`
-- `AWS_S3_ENDPOINT=http://minio:9000` inside dev/test service containers, with `AWS_S3_PUBLIC_ENDPOINT=http://localhost:9000` for browser-facing presigned URLs
+- `AWS_S3_ENDPOINT=http://media-storage:9000` inside dev/test service containers, with `AWS_S3_PUBLIC_ENDPOINT=http://localhost:9000` for browser-facing presigned URLs
 
 ## Observability and debugging
 

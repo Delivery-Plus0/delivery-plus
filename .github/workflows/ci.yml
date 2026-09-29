@@ -13,6 +13,16 @@ jobs:
     name: Test and build
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v7
@@ -23,6 +33,11 @@ jobs:
       - run: npm run build --workspace=@food-delivery/shared
       - run: npm run lint
       - run: npm test
+        env:
+          # Opts the shared durable-idempotency spec into also running against
+          # this real Redis, which exercises its Lua scripts. Without it the
+          # spec runs against its in-memory fake only (as in pr-quality.yml).
+          REDIS_TEST_URL: redis://localhost:6379
       - run: npm run build
 
   docker:

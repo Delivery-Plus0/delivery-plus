@@ -7,7 +7,9 @@ import {
   ForbiddenError,
   InvalidStateTransitionError,
   NotFoundError,
+  OrderEventType,
   OrderStatus,
+  PaymentEventType,
   RestaurantStatus,
   UserRole,
 } from '@food-delivery/shared';
@@ -17,6 +19,8 @@ describe('OrdersService', () => {
   let orders: jest.Mocked<OrdersRepository>;
   let cartClient: jest.Mocked<CartServiceClient>;
   let restaurantClient: jest.Mocked<RestaurantServiceClient>;
+  let kafkaProducer: { publish: jest.Mock };
+  let kafkaConsumer: { subscribe: jest.Mock; start: jest.Mock };
 
   const baseOrder = {
     id: 'order-1',
@@ -49,12 +53,14 @@ describe('OrdersService', () => {
       assertOwnership: jest.fn(),
     } as unknown as jest.Mocked<RestaurantServiceClient>;
 
+    kafkaProducer = { publish: jest.fn() };
+    kafkaConsumer = { subscribe: jest.fn(), start: jest.fn() };
     service = new OrdersService(
-      orders, 
-      cartClient, 
+      orders,
+      cartClient,
       restaurantClient,
-      { publish: jest.fn() } as any,
-      { subscribe: jest.fn(), start: jest.fn() } as any,
+      kafkaProducer as any,
+      kafkaConsumer as any,
     );
   });
 
@@ -234,6 +240,106 @@ describe('OrdersService', () => {
 
       expect(restaurantClient.assertOwnership).toHaveBeenCalledWith('rest-1', 'owner-1');
       expect(result.status).toBe(OrderStatus.PREPARING);
+    });
+  });
+
+  describe('payment events', () => {
+    const withStatus = (status: OrderStatus) => ({ ...baseOrder, status });
+
+    /** Registers the consumers and returns the handler subscribed to a payment event type. */
+    async function handlerFor(eventType: PaymentEventType) {
+      await service.onModuleInit();
+      const call = kafkaConsumer.subscribe.mock.calls.find(([, type]) => type === eventType);
+      return call![2] as (event: { payload: { orderId: string } }) => Promise<void>;
+    }
+
+    it('payment.failed moves a PAYMENT_PENDING order to FAILED (not CANCELLED) and publishes order.failed', async () => {
+      orders.findById.mockResolvedValue(withStatus(OrderStatus.PAYMENT_PENDING) as any);
+      orders.updateStatus.mockResolvedValue(withStatus(OrderStatus.FAILED) as any);
+
+      await (await handlerFor(PaymentEventType.FAILED))({ payload: { orderId: 'order-1' } });
+
+      expect(orders.updateStatus).toHaveBeenCalledWith('order-1', OrderStatus.PAYMENT_PENDING, OrderStatus.FAILED);
+      expect(kafkaProducer.publish.mock.calls[0][1].eventType).toBe(OrderEventType.FAILED);
+    });
+
+    it('payment.completed confirms the order', async () => {
+      orders.findById.mockResolvedValue(withStatus(OrderStatus.PAYMENT_PENDING) as any);
+      orders.updateStatus.mockResolvedValue(withStatus(OrderStatus.CONFIRMED) as any);
+
+      await (await handlerFor(PaymentEventType.COMPLETED))({ payload: { orderId: 'order-1' } });
+
+      expect(orders.updateStatus).toHaveBeenCalledWith('order-1', OrderStatus.PAYMENT_PENDING, OrderStatus.CONFIRMED);
+      expect(kafkaProducer.publish.mock.calls[0][1].eventType).toBe(OrderEventType.CONFIRMED);
+    });
+
+    it('a duplicate payment.failed (order already FAILED via the HTTP sync) is a no-op', async () => {
+      orders.findById.mockResolvedValue(withStatus(OrderStatus.FAILED) as any);
+
+      await service.syncFromPaymentEvent('order-1', OrderStatus.FAILED);
+
+      expect(orders.updateStatus).not.toHaveBeenCalled();
+      expect(kafkaProducer.publish).not.toHaveBeenCalled();
+    });
+
+    it('a late payment.failed after the customer cancelled is skipped instead of failing the consumer', async () => {
+      orders.findById.mockResolvedValue(withStatus(OrderStatus.CANCELLED) as any);
+
+      await expect(service.syncFromPaymentEvent('order-1', OrderStatus.FAILED)).resolves.toBeUndefined();
+      expect(orders.updateStatus).not.toHaveBeenCalled();
+    });
+
+    it('a stale payment.created arriving after confirmation is skipped', async () => {
+      orders.findById.mockResolvedValue(withStatus(OrderStatus.CONFIRMED) as any);
+
+      await service.syncFromPaymentEvent('order-1', OrderStatus.PAYMENT_PENDING);
+
+      expect(orders.updateStatus).not.toHaveBeenCalled();
+    });
+
+    it('ignores events for unknown orders', async () => {
+      orders.findById.mockResolvedValue(null);
+      await expect(service.syncFromPaymentEvent('missing', OrderStatus.FAILED)).resolves.toBeUndefined();
+    });
+
+    it('publishes order.confirmed once when two writers race to CONFIRMED (compare-and-set)', async () => {
+      // Both writers read PAYMENT_PENDING; the database lets only the first update through.
+      orders.findById
+        .mockResolvedValueOnce(withStatus(OrderStatus.PAYMENT_PENDING) as any)
+        .mockResolvedValueOnce(withStatus(OrderStatus.PAYMENT_PENDING) as any)
+        .mockResolvedValue(withStatus(OrderStatus.CONFIRMED) as any);
+      orders.updateStatus
+        .mockResolvedValueOnce(withStatus(OrderStatus.CONFIRMED) as any)
+        .mockResolvedValueOnce(null);
+
+      await Promise.all([
+        service.updateStatus('order-1', 'system', UserRole.ADMIN, { status: OrderStatus.CONFIRMED }),
+        service.updateStatus('order-1', 'system', UserRole.ADMIN, { status: OrderStatus.CONFIRMED }),
+      ]);
+
+      const confirmed = kafkaProducer.publish.mock.calls.filter(([, e]) => e.eventType === OrderEventType.CONFIRMED);
+      expect(confirmed).toHaveLength(1);
+    });
+
+    it('rejects when another writer moved the order somewhere else in between', async () => {
+      orders.findById
+        .mockResolvedValueOnce(withStatus(OrderStatus.PAYMENT_PENDING) as any)
+        .mockResolvedValue(withStatus(OrderStatus.CANCELLED) as any);
+      orders.updateStatus.mockResolvedValueOnce(null);
+
+      await expect(
+        service.updateStatus('order-1', 'system', UserRole.ADMIN, { status: OrderStatus.CONFIRMED }),
+      ).rejects.toThrow(InvalidStateTransitionError);
+      expect(kafkaProducer.publish).not.toHaveBeenCalled();
+    });
+
+    it('labels the PAYMENT_PENDING transition as order.payment_pending, not order.created', async () => {
+      orders.findById.mockResolvedValue(withStatus(OrderStatus.CREATED) as any);
+      orders.updateStatus.mockResolvedValue(withStatus(OrderStatus.PAYMENT_PENDING) as any);
+
+      await service.syncFromPaymentEvent('order-1', OrderStatus.PAYMENT_PENDING);
+
+      expect(kafkaProducer.publish.mock.calls[0][1].eventType).toBe(OrderEventType.PAYMENT_PENDING);
     });
   });
 

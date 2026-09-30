@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
   ConflictError,
   ForbiddenError,
@@ -33,6 +33,9 @@ export const PAYMENT_EVENT_NAMESPACE = '6f1c2b9e-6a4d-4f3e-9d7a-2f0b8c1e5a47';
  * Side effects owed for each payment status. A status with no entry (PROCESSING,
  * REFUNDED) has no Kafka event or order update.
  */
+/** Orders in these states no longer react to a payment outcome. */
+const TERMINAL_ORDER_STATUSES: OrderStatus[] = [OrderStatus.FAILED, OrderStatus.CANCELLED, OrderStatus.DELIVERED];
+
 const SIDE_EFFECTS: Partial<Record<PaymentStatus, { eventType: PaymentEventType; orderStatus: OrderStatus }>> = {
   [PaymentStatus.PENDING]: { eventType: PaymentEventType.CREATED, orderStatus: OrderStatus.PAYMENT_PENDING },
   [PaymentStatus.COMPLETED]: { eventType: PaymentEventType.COMPLETED, orderStatus: OrderStatus.CONFIRMED },
@@ -52,6 +55,8 @@ export function paymentEventId(paymentId: string, eventType: PaymentEventType): 
 
 @Injectable()
 export class PaymentsService {
+  private readonly logger = new Logger(PaymentsService.name);
+
   constructor(
     private readonly payments: PaymentsRepository,
     private readonly orderClient: OrderServiceClient,
@@ -189,12 +194,16 @@ export class PaymentsService {
     return payment;
   }
 
+  /**
+   * Refunds are a support/admin action. Customers used to be able to refund their own COMPLETED
+   * payment at any time, even after delivery, with no order-state policy. A customer-facing refund
+   * needs such a policy (e.g. only for orders cancelled before preparation) before it is reopened.
+   */
   async refund(paymentId: string, requesterId: string, requesterRole: UserRole): Promise<Payment> {
-    const payment = await this.findOrThrow(paymentId);
-
-    if (requesterRole !== UserRole.ADMIN && payment.customerId !== requesterId) {
-      throw new ForbiddenError('You do not have access to this payment');
+    if (requesterRole !== UserRole.ADMIN) {
+      throw new ForbiddenError('Refunds can only be issued by support');
     }
+    const payment = await this.findOrThrow(paymentId);
 
     this.assertTransition(payment.status, PaymentStatus.REFUNDED);
     const refunded = await this.payments.transition(paymentId, payment.status, PaymentStatus.REFUNDED);
@@ -258,7 +267,7 @@ export class PaymentsService {
       }
 
       if (current.orderSyncedStatus !== current.status) {
-        await this.orderClient.updateOrderStatus(current.orderId, effects.orderStatus);
+        await this.syncOrder(current, effects.orderStatus);
         await this.payments.markOrderSynced(current.id, current.status);
       }
     } finally {
@@ -266,6 +275,27 @@ export class PaymentsService {
     }
 
     return this.findOrThrow(payment.id);
+  }
+
+  /**
+   * Moves the order to the status this payment implies. order-service's payment.failed consumer
+   * converges the order to the same FAILED status, and a same-status update is a no-op there, so
+   * the two writers never disagree. The one legitimate conflict left: the customer cancelled the
+   * order while the payment was still pending, then the payment was declined. The order is already
+   * closed, so there is nothing to sync. A COMPLETED payment on a closed order is still an error:
+   * that money needs a refund, and silently marking it synced would hide it.
+   */
+  private async syncOrder(payment: Payment, orderStatus: OrderStatus): Promise<void> {
+    try {
+      await this.orderClient.updateOrderStatus(payment.orderId, orderStatus);
+    } catch (err) {
+      if (!(err instanceof ConflictError) || payment.status !== PaymentStatus.FAILED) throw err;
+      const order = await this.orderClient.getOrderAsSystem(payment.orderId);
+      if (!TERMINAL_ORDER_STATUSES.includes(order.status)) throw err;
+      this.logger.warn(
+        `Payment ${payment.id} failed after order ${payment.orderId} was already ${order.status}; nothing to sync`,
+      );
+    }
   }
 
   private hasOwedSideEffects(payment: Payment): boolean {

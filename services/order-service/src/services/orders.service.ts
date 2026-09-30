@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import {
   BadRequestError,
   ForbiddenError,
@@ -30,6 +30,8 @@ import { v4 as uuidv4 } from 'uuid';
 
 @Injectable()
 export class OrdersService implements OnModuleInit {
+  private readonly logger = new Logger(OrdersService.name);
+
   constructor(
     private readonly orders: OrdersRepository,
     private readonly cartClient: CartServiceClient,
@@ -43,7 +45,7 @@ export class OrdersService implements OnModuleInit {
       TOPICS.PAYMENT_EVENTS,
       PaymentEventType.CREATED,
       async (event) => {
-        await this.updateStatus(event.payload.orderId, 'system', UserRole.ADMIN, { status: OrderStatus.PAYMENT_PENDING });
+        await this.syncFromPaymentEvent(event.payload.orderId, OrderStatus.PAYMENT_PENDING);
       },
     );
 
@@ -51,8 +53,7 @@ export class OrdersService implements OnModuleInit {
       TOPICS.PAYMENT_EVENTS,
       PaymentEventType.COMPLETED,
       async (event) => {
-        // Assume system acts as ADMIN to bypass role checks for automated transitions
-        await this.updateStatus(event.payload.orderId, 'system', UserRole.ADMIN, { status: OrderStatus.CONFIRMED });
+        await this.syncFromPaymentEvent(event.payload.orderId, OrderStatus.CONFIRMED);
       },
     );
 
@@ -60,7 +61,9 @@ export class OrdersService implements OnModuleInit {
       TOPICS.PAYMENT_EVENTS,
       PaymentEventType.FAILED,
       async (event) => {
-        await this.updateStatus(event.payload.orderId, 'system', UserRole.ADMIN, { status: OrderStatus.CANCELLED });
+        // A declined payment is FAILED, not CANCELLED: payment-service syncs the same status over
+        // HTTP, so both paths must agree or the second writer hits an invalid transition.
+        await this.syncFromPaymentEvent(event.payload.orderId, OrderStatus.FAILED);
       },
     );
 
@@ -211,11 +214,22 @@ export class OrdersService implements OnModuleInit {
       throw new InvalidStateTransitionError('Order', order.status, dto.status);
     }
 
-    const updated = await this.orders.updateStatus(id, dto.status);
+    // Compare-and-set so two writers racing to the same status (e.g. payment-service's HTTP sync and
+    // the payment.completed consumer) cannot both "win" and publish the event twice.
+    const updated = await this.orders.updateStatus(id, order.status, dto.status);
+    if (!updated) {
+      const current = await this.findOrThrow(id);
+      if (current.status === dto.status) {
+        return current; // Lost the race to a writer with the same target: already applied, publish nothing.
+      }
+      throw new InvalidStateTransitionError('Order', current.status, dto.status);
+    }
 
     let eventType: OrderEventType;
     switch (dto.status) {
+      case OrderStatus.PAYMENT_PENDING: eventType = OrderEventType.PAYMENT_PENDING; break;
       case OrderStatus.CONFIRMED: eventType = OrderEventType.CONFIRMED; break;
+      case OrderStatus.FAILED: eventType = OrderEventType.FAILED; break;
       case OrderStatus.CANCELLED: eventType = OrderEventType.CANCELLED; break;
       case OrderStatus.PREPARING: eventType = OrderEventType.PREPARING; break;
       case OrderStatus.READY_FOR_PICKUP: eventType = OrderEventType.READY_FOR_PICKUP; break;
@@ -240,6 +254,26 @@ export class OrdersService implements OnModuleInit {
     });
 
     return updated as Order;
+  }
+
+  /**
+   * Applies the order status implied by a payment event. payment-service owns this transition and
+   * also syncs it over HTTP, so the event is a convergence path: it must tolerate arriving after the
+   * HTTP sync (same status → no-op), being redelivered, or arriving after the order has moved on
+   * (e.g. the customer cancelled while payment was pending) without failing the consumer.
+   */
+  async syncFromPaymentEvent(orderId: string, target: OrderStatus): Promise<void> {
+    const order = await this.orders.findById(orderId);
+    if (!order) {
+      this.logger.warn(`Ignoring payment event for unknown order ${orderId}`);
+      return;
+    }
+    if (order.status === target) return;
+    if (!isTransitionAllowed(ORDER_TRANSITIONS, order.status, target)) {
+      this.logger.warn(`Ignoring stale payment event: order ${orderId} is ${order.status}, not moving to ${target}`);
+      return;
+    }
+    await this.updateStatus(orderId, 'system', UserRole.ADMIN, { status: target });
   }
 
   private async findOrThrow(id: string): Promise<Order> {

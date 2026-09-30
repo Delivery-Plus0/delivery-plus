@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { BadRequestError, ForbiddenError, NotFoundError, OrderStatus, assertValidUuidV4 } from '@food-delivery/shared';
+import { BadRequestError, ConflictError, ForbiddenError, NotFoundError, OrderStatus, assertValidUuidV4 } from '@food-delivery/shared';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { SystemTokenService } from './system-token.service';
 
@@ -38,6 +38,11 @@ export class OrderServiceClient {
     return (await response.json()) as OrderDto;
   }
 
+  /** Reads an order with the service token, e.g. to see where it ended up after a rejected sync. */
+  async getOrderAsSystem(orderId: string): Promise<OrderDto> {
+    return this.getOrder(orderId, await this.systemToken.mint());
+  }
+
   /** Uses a minted service token (see SystemTokenService) since this is a system-triggered transition. */
   async updateOrderStatus(orderId: string, status: OrderStatus): Promise<void> {
     const safeOrderId = assertValidUuidV4(orderId, 'orderId');
@@ -48,6 +53,10 @@ export class OrderServiceClient {
       body: JSON.stringify({ status }),
     });
 
+    if (response.status === 409) {
+      // The order is in a state that cannot move to `status` (e.g. already terminal).
+      throw new ConflictError(`Order ${safeOrderId} cannot move to ${status}`);
+    }
     if (!response.ok) {
       throw new Error(`Failed to update order ${safeOrderId} to ${status} (status ${response.status})`);
     }

@@ -21,6 +21,7 @@
     "seed": "tsx scripts/seed.ts",
     "seed:demo": "tsx scripts/seed-demo.ts",
     "e2e": "tsx scripts/e2e.ts",
+    "kafka:dlq": "tsx scripts/kafka-dlq.ts",
     "seed:e2e": "tsx scripts/seed-e2e.ts",
     "e2e:env:up": "docker compose -p delivery-plus-e2e -f docker-compose.base.yml -f docker-compose.test.yml -f docker-compose.e2e.yml up -d --build --wait --wait-timeout 300",
     "e2e:env:down": "docker compose -p delivery-plus-e2e -f docker-compose.base.yml -f docker-compose.test.yml -f docker-compose.e2e.yml down --volumes --remove-orphans",

@@ -30,9 +30,14 @@ Purpose:
 
 Purpose:
 
-- cart state
-- delivery/tracking location state
-- low-latency runtime data
+- cart state (cart-service)
+- last-known driver locations (tracking-service)
+- response caching (restaurant-service, menu-service)
+- rate-limit counters (auth-service, cart-service, order-service)
+- one-time nonces for internal service authentication (user-service)
+- durable Kafka idempotency markers once consumers adopt `DurableEventIdempotencyService` (not wired yet)
+
+The Compose Redis has no data volume and no append-only file, so recreating the container loses everything above. That is acceptable for carts, caches and rate limits, but must be fixed (AOF plus a volume, or a managed Redis) before idempotency markers are relied on in production. The CI workflow also starts a throwaway `redis:7-alpine` service so the shared idempotency tests run against real Redis.
 
 ### Kafka and Zookeeper
 
@@ -53,7 +58,7 @@ Purpose:
 
 ## Service startup model
 
-The stack is built with health checks and `depends_on` conditions. This expresses the intended startup order, but it is not a complete readiness guarantee: Redis and Kafka readiness are not generally checked by application health endpoints, and the gateway Compose healthcheck targets a route the gateway does not currently implement.
+The stack is built with health checks and `depends_on` conditions. This expresses the intended startup order, but it is not a complete readiness guarantee: Redis and Kafka readiness are not generally checked by application health endpoints, and the gateway's health route checks only its own process.
 
 Examples from the compose file:
 
@@ -63,7 +68,7 @@ Examples from the compose file:
 
 ## Application service startup pattern
 
-The root build configuration uses a Docker build arg called `SERVICE_NAME` to build individual services. This is reflected in the root Dockerfile and the compose service definitions.
+The root build configuration uses a Docker build arg called `SERVICE_NAME` to build individual services. This is reflected in the root Dockerfile and the compose service definitions. Both Dockerfile stages use `node:22-alpine`; Node 20 is end-of-life and below the `^22.15.0` that `http-proxy-middleware` 4 requires.
 
 The important behavior is:
 
@@ -73,11 +78,11 @@ The important behavior is:
 
 ## Health checks
 
-Each domain app service exposes a `/health` route and uses a Docker healthcheck like:
+Every app service, including the API Gateway, exposes a `/health` route and uses a Docker healthcheck like:
 
 - `wget --spider -q http://localhost:<port>/health`
 
-The API Gateway is an exception: it has no health controller while Compose still probes `/health` on port 3000. This mismatch can keep the gateway unhealthy even when its process is running.
+The gateway's `/health` is liveness only; it does not check downstream services.
 
 ## Environment conventions
 

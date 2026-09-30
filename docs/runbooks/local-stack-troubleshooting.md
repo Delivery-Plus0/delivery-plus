@@ -21,11 +21,11 @@ docker compose -f docker-compose.yml ps --all
 docker compose -f docker-compose.yml logs --no-color --tail=200 <service>
 ```
 
-Infrastructure services are PostgreSQL, Redis, Zookeeper, Kafka, and Kafka UI. Application services wait on Compose health conditions for their declared dependencies. This is an ordering aid, not a complete readiness guarantee.
+Infrastructure services are PostgreSQL, Redis, Zookeeper, Kafka, Kafka UI, and (in the dev and test overlays) `media-storage` (SeaweedFS S3 gateway on port `9000`) with its one-shot `media-storage-init` bucket initializer. Application services wait on Compose health conditions for their declared dependencies. This is an ordering aid, not a complete readiness guarantee.
 
-## Known healthcheck limitation
+## Healthcheck limitations
 
-Compose probes `/health` on the API Gateway at port `3000`, but the gateway currently has no controller that serves that route. A running gateway process can therefore remain unhealthy. Check the gateway logs and test a known proxied route separately; do not treat gateway health status as proof that every downstream route is healthy.
+Compose probes `/health` on every service, including the API Gateway on port `3000`. The gateway's route is liveness only: a healthy gateway proves its process responds, not that downstream routes work. Test a known proxied route separately.
 
 The domain services expose `/health` routes. Their readiness controllers may query PostgreSQL, but application readiness does not generally verify Kafka or Redis availability.
 
@@ -73,7 +73,9 @@ Kafka clients inside Compose use `kafka:29092`; host tools use the published `lo
 
 Redis-backed cart and tracking state is ephemeral. A Redis restart can remove current cart/location state unless the configured volume or recovery process preserves it.
 
-The shared Kafka consumer retries a handler three times with exponential backoff. It keeps processed event IDs only in memory. After retries are exhausted it commits the offset and logs a DLQ message, but no actual dead-letter topic is implemented.
+Redis in Compose has no persistence volume, so recreating the container also clears caches, rate-limit counters, and internal-auth nonces.
+
+The shared Kafka consumer retries a handler three times with exponential backoff. It keeps processed event IDs only in memory. After retries are exhausted it commits the offset and logs a DLQ message, but no actual dead-letter topic is implemented. The shared `DurableEventIdempotencyService` (Redis keys `kafka:idempotency:{group}:{eventId}`) is not wired into the consumer yet, so those keys will not appear in Redis.
 
 ## Escalation notes
 

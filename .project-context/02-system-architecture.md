@@ -18,23 +18,38 @@ flowchart LR
     GW --> TRK[Tracking Service<br/>3010]
     GW --> NOTIF[Notification Service<br/>3011]
 
-    ORD --> PAY
+    AUTH -->|create profile, HMAC| USER
+    USER --> ORD
+    MENU -->|ownership| REST
+    CART -->|item validation| MENU
     ORD --> CART
     ORD --> REST
+    PAY -->|status sync| ORD
+    DEL --> ORD
     DEL --> DRV
     TRK --> DEL
     TRK --> DRV
 
     ORD -.->|order.events| KAFKA[(Kafka)]
     PAY -.->|payment.events| KAFKA
-    DEL -.->|delivery.events wiring| KAFKA
+    DEL -.->|delivery.events<br/>not published yet| KAFKA
 
-    KAFKA -.->|events| NOTIF
-    KAFKA -.->|events| DRV
-    KAFKA -.->|events| ORD
+    KAFKA -.->|order, payment, delivery| NOTIF
+    KAFKA -.->|delivery| DRV
+    KAFKA -.->|payment, delivery| ORD
 
-    CART -.->|Redis| REDIS[(Redis)]
-    TRK -.->|location| REDIS
+    CART -.->|carts| REDIS[(Redis)]
+    TRK -.->|locations| REDIS
+    AUTH -.->|rate limits| REDIS
+    ORD -.->|rate limits| REDIS
+    USER -.->|internal-auth nonces| REDIS
+    REST -.->|cache| REDIS
+    MENU -.->|cache| REDIS
+
+    USER -.->|avatars| S3[(S3-compatible<br/>object storage)]
+    REST -.->|cover, logo| S3
+    MENU -.->|item images| S3
+    Client -.->|presigned POST upload| S3
 
     AUTH --> PG[(PostgreSQL)]
     USER --> PG
@@ -53,9 +68,9 @@ flowchart LR
 | -------------------- | -------------------------------------------------- |
 | api-gateway          | Proxies client traffic and aggregates Swagger docs |
 | auth-service         | Registers users, logs in, and issues JWTs          |
-| user-service         | User profile data and order history access         |
-| restaurant-service   | Restaurant CRUD and ownership checks               |
-| menu-service         | Menu categories and items                          |
+| user-service         | User profile data, avatars, order history access   |
+| restaurant-service   | Restaurant CRUD, ownership checks, cover/logo      |
+| menu-service         | Menu categories and items, item images             |
 | cart-service         | Redis-backed cart state                            |
 | order-service        | Order lifecycle and orchestration                  |
 | payment-service      | Simulated payment processing                       |
@@ -77,6 +92,16 @@ Kafka topics from the shared package drive event propagation:
 * `order.events`
 * `payment.events`
 * `delivery.events`
+
+Delivery-service does not publish its lifecycle events yet, and the shared consumer still deduplicates in memory; see [05-event-driven-design.md](./05-event-driven-design.md).
+
+### Media
+
+Clients upload image bytes directly to S3-compatible object storage with short-lived presigned POST policies issued by the owning service, then call a confirm endpoint so the service can verify the bytes and store the permanent URL. See [15-media-and-storage.md](./15-media-and-storage.md).
+
+## Runtime
+
+Every service is built from the root [Dockerfile](../Dockerfile) on `node:22-alpine`, selected by the `SERVICE_NAME` build argument, and runs its migrations before starting.
 
 ## Gateway routing
 

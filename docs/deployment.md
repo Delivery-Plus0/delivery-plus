@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-Use Node.js 20+, npm, and Docker Desktop with Compose v2. Copy `.env.example` to `.env` for local commands, but do not commit the copy.
+Use Node.js 22 (22.15 or newer, matching CI and the `node:22-alpine` images), npm, and Docker Desktop with Compose v2. Copy `.env.example` to `.env` for local commands, but do not commit the copy.
 
 ## Docker Compose
 

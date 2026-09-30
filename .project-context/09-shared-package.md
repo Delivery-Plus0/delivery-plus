@@ -18,10 +18,14 @@ The shared package is structured around common concerns, including:
 - event topic constants
 - reusable errors and utilities
 - logging helpers
-- NestJS wrappers
-- Redis helpers
-- Kafka helpers
+- NestJS wrappers (JWT and role guards, correlation-id middleware, HTTP exception filter)
+- internal service authentication (HMAC request signing and verification helpers)
+- Redis helpers: `RedisModule` (provides the shared `REDIS_CLIENT`), `CacheService`, `RateLimiterService` and `RateLimitGuard`
+- Kafka helpers: `KafkaModule`, `KafkaProducerService`, `KafkaConsumerService`
+- `DurableEventIdempotencyService`: Redis-backed, consumer-group-scoped event deduplication with atomic lease/processed state (see [05-event-driven-design.md](./05-event-driven-design.md)); exported but not yet used by `KafkaConsumerService`
 - S3-compatible media storage with presigned POST generation, upload-size policies, byte verification, and staging-object promotion
+
+`KafkaModule` does not register `DurableEventIdempotencyService`: services that consume Kafka without Redis (driver-service, notification-service) would otherwise fail dependency injection at startup. A service opts in by importing `RedisModule` and adding the service to its providers.
 
 This makes it the contract layer that services depend on for common language and behavior.
 

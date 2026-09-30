@@ -23,9 +23,9 @@ Core business actors and entities include:
 
 | Entity | Typical owner | Notes |
 | --- | --- | --- |
-| User profile | user-service | Auth registration creates a profile entry |
-| Restaurant | restaurant-service | Has owner and status |
-| Menu item | menu-service | Belongs to a restaurant and has availability |
+| User profile | user-service | Auth registration creates a profile entry; optional avatar URL |
+| Restaurant | restaurant-service | Has owner and status; optional cover and logo URLs |
+| Menu item | menu-service | Belongs to a restaurant and has availability; optional image URL |
 | Cart | cart-service | Redis-backed and customer-scoped |
 | Order | order-service | Central orchestration model |
 | Payment | payment-service | Simulated payment flow |
@@ -48,8 +48,11 @@ The auth layer issues JWTs and the shared guards enforce access rules at service
 - The API gateway is the front door for the platform.
 - Business logic lives in domain services rather than the gateway.
 - Kafka is used for async coordination between order, payment, delivery, and notification flows.
-- Redis is used for cart and location state.
+- Redis holds cart and last-known location state, plus shared infrastructure state: response caching, rate-limit counters, and one-time nonces for internal service authentication.
 - PostgreSQL stores structured domain records in service-owned databases.
+- Images (user avatars, restaurant cover/logo, menu item images) live in S3-compatible object storage; clients upload directly with presigned POST policies and the owning service stores only the verified URL.
+
+For what is implemented versus partial today, see [16-current-state.md](./16-current-state.md).
 
 ## Source of truth
 This summary is intentionally high-level. For route-level and configuration-level truth, see:

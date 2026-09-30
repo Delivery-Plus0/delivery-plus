@@ -88,7 +88,7 @@ A realistic verification flow would include:
 - compose build
 - compose up
 - service health checks
-- gateway route verification (the gateway `/health` route is currently missing)
+- gateway route verification (the gateway `/health` route is liveness only, so also call a proxied route)
 - Kafka + Postgres readiness
 
 This is particularly useful for validating that the project boots correctly in a real multi-container setup.
@@ -104,7 +104,31 @@ When working on this repo, the best practical testing order is:
 
 ## Important caveat
 
-The repository is not a full end-to-end test platform by default. Current CI runs workspace lint, tests, builds, Compose syntax validation, an API Gateway image build, and Trivy scans. It does not start the full infrastructure, run migrations, run `scripts/e2e.ts`, collect coverage, or enforce a coverage threshold. Most broader validation therefore requires a combination of:
+CI is split across six workflows in `.github/workflows/`, all running on Node 22:
+
+| Workflow | Coverage |
+| --- | --- |
+| `ci.yml` (CI) | `npm ci`, lint, every workspace's Jest suite with a real Redis service (`REDIS_TEST_URL`), build, Compose config, Trivy scan of the gateway image |
+| `pr-quality.yml` (PR Quality Gate) | Lint, unit tests with no infrastructure, build, OpenAPI regeneration must match the committed contract, Compose config for every overlay |
+| `security.yml` (Security) | CodeQL, `npm audit` (blocking on critical), Trivy filesystem and secret scan |
+| `docker.yml` (Docker Build) | Builds and Trivy-scans every service image |
+| `integration.yml` (Integration) | Boots the full Compose test stack, seeds data (`npm run seed`), runs the critical-path workflow (`npm run e2e`) |
+| `migration-verification.yml` | Runs every PostgreSQL service's migrations on fresh databases; runs the payment SQL upgrade test against real Postgres |
+
+No workflow collects coverage or enforces a coverage threshold.
+
+### Opt-in real-infrastructure tests
+
+Some specs run against a real backend only when an environment variable is set, and are skipped or fake-backed otherwise, so `npm test` works with no infrastructure:
+
+- `PAYMENT_TEST_DATABASE_URL`: payment-service repository integration test against a disposable Postgres database (run in `migration-verification.yml`).
+- `REDIS_TEST_URL`: the shared `DurableEventIdempotencyService` suite also runs its behavior tests against real Redis (run in `ci.yml`), exercising the Lua scripts that the in-memory fake only imitates.
+
+### Jest and ESM-only dependencies
+
+Jest runs each workspace in CommonJS mode through ts-jest. An ESM-only package imported by code under test fails with `SyntaxError: Unexpected token 'export'`. `http-proxy-middleware` 4 is one: `services/api-gateway/src/main.spec.ts` stubs it with `jest.mock` because those tests never exercise the proxy.
+
+Beyond CI, broader local validation still combines:
 
 - workspace-level scripts
 - service-level Jest runs

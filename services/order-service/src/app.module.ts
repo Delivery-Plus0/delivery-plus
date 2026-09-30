@@ -20,6 +20,7 @@ const config = loadConfig();
       clientId: 'order-service',
       brokers: [process.env.KAFKA_BROKER || 'localhost:9092'],
       groupId: 'order-service-group',
+      durableIdempotency: true,
     }),
     OrdersModule,
   ],

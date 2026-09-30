@@ -48,11 +48,10 @@ The workspace root defines commands, but actual validation is still service-spec
 
 ## 11. Current implementation gaps
 
-- `KafkaConsumerService` still deduplicates in memory, and exhausted consumer messages are committed without a real DLQ. The durable `DurableEventIdempotencyService` exists in `shared` but is not wired into the consumer yet.
-- Order-service and delivery-service publish events with random `uuidv4()` IDs, so a duplicate publish cannot be deduplicated downstream; only payment-service uses deterministic event IDs.
-- Delivery event publication is wired but not invoked by the current lifecycle methods, so driver-service's and notification-service's delivery handlers never fire.
-- Notification payment and delivery handlers are currently no-ops.
-- driver-service and notification-service consume Kafka but have no Redis, which the durable idempotency integration will need.
+- No transactional outbox: order-service and delivery-service publish after their database write, so a crash in between loses the event (consumers dedupe and dead-letter, but cannot recover an event that was never sent).
+- Notification payment and delivery handlers are currently no-ops; payment and delivery payloads carry no `customerId`.
+- Kafka handlers must finish well within the 30 s session timeout and the 60 s idempotency lease; neither is enforced. Services have no graceful shutdown hooks, so a stopped consumer stays in its group until the session expires (resetting offsets has to wait for that).
+- kafkajs logs `Topic creation errors` at ERROR on every consumer start when the topics already exist; it is harmless.
 - Internal user profile creation requires HMAC service identity, and user profile lookup enforces owner or admin access.
 - Outbound service HTTP clients use native `fetch` without a shared timeout, retry, or circuit-breaker policy, and TypeORM sets no statement timeout, so a handler's duration is not bounded.
 - The payment service contains a manual SQL idempotency upgrade outside the normal TypeORM migration runner.

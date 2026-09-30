@@ -35,9 +35,9 @@ Purpose:
 - response caching (restaurant-service, menu-service)
 - rate-limit counters (auth-service, cart-service, order-service)
 - one-time nonces for internal service authentication (user-service)
-- durable Kafka idempotency markers once consumers adopt `DurableEventIdempotencyService` (not wired yet)
+- durable Kafka idempotency markers (`kafka:idempotency:{group}:{eventId}`, order-service and notification-service)
 
-The Compose Redis has no data volume and no append-only file, so recreating the container loses everything above. That is acceptable for carts, caches and rate limits, but must be fixed (AOF plus a volume, or a managed Redis) before idempotency markers are relied on in production. The CI workflow also starts a throwaway `redis:7-alpine` service so the shared idempotency tests run against real Redis.
+The Compose Redis runs with AOF (`--appendonly yes`) on the `redis_data` volume, so a restart or recreate keeps carts and idempotency markers. `docker compose down -v` still removes them. Production should use a managed or replicated Redis. The CI workflow also starts a throwaway `redis:7-alpine` service so the shared idempotency tests run against real Redis.
 
 ### Kafka and Zookeeper
 

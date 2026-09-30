@@ -2,7 +2,7 @@
 
 ## Why Kafka is used here
 
-This project uses Kafka as an asynchronous integration backbone between services. The purpose is to decouple status changes and downstream reactions from synchronous HTTP calls, but the current implementation is partial and remains at-least-once with process-local safeguards.
+This project uses Kafka as an asynchronous integration backbone between services. The purpose is to decouple status changes and downstream reactions from synchronous HTTP calls, but delivery is at-least-once: consumers deduplicate by `eventId` in Redis and park messages they cannot handle in a dead-letter topic.
 
 The core event topics are declared in:
 
@@ -14,6 +14,8 @@ The current topics are:
 - `payment.events`
 - `delivery.events`
 
+Each has a dead-letter topic, `<topic>.dlq`, created by the consumers on startup.
+
 ## Event topology
 
 ```mermaid
@@ -21,9 +23,10 @@ flowchart LR
     ORDER[Order Service] -->|order.events| KAFKA[(Kafka)]
     PAYMENT[Payment Service] -->|payment.events| KAFKA
     DELIVERY[Delivery Service] -->|delivery.events| KAFKA
-    KAFKA --> NOTIF[Notification Service]
-    KAFKA --> DRIVER[Driver Service]
-    KAFKA --> ORDER2[Order Service]
+    KAFKA -->|order, payment, delivery| NOTIF[Notification Service]
+    KAFKA -->|payment, delivery| ORDER2[Order Service]
+    NOTIF -. unhandled .-> DLQ[(topic.dlq)]
+    ORDER2 -. unhandled .-> DLQ
 ```
 
 ## Topic responsibilities
@@ -53,30 +56,29 @@ Typical consumers include:
 Delivery semantics (payment-service):
 
 - Events are published **after** the payment row is committed and are **at-least-once**: a retry after a failed or interrupted publish may send the same event again.
-- `eventId` is deterministic: UUID v5 of `"<paymentId>:<eventType>"` in a fixed namespace (`PAYMENT_EVENT_NAMESPACE` in `payments.service.ts`). A re-published `payment.completed` for a payment always has the same `eventId`, so consumers must deduplicate by `eventId` (the shared `KafkaConsumerService` already skips ids it has processed, but its store is still in-memory; the durable `DurableEventIdempotencyService` described below is not wired into it yet).
+- `eventId` is deterministic: UUID v5 of `"<paymentId>:<eventType>"` in a fixed namespace (`PAYMENT_EVENT_NAMESPACE` in `payments.service.ts`). A re-published `payment.completed` for a payment always has the same `eventId`, so consumers must deduplicate by `eventId`; the shared `KafkaConsumerService` does this per consumer group in Redis (see Reliability).
 - Each payment emits at most one event per type in normal operation; `publishedEventStatus` on the payment row tracks what was already published.
 - The payload shape `{ paymentId, orderId, amount, status }` and event type names are unchanged; `eventId` remains a UUID, so existing consumers are unaffected.
 - The order-service status update is a separate HTTP call, not driven by the event; it is tracked the same way (`orderSyncedStatus`) and retried by the client's next `process`/create retry, not by Kafka.
-- payment-service owns the payment → order transition (`PENDING` → `PAYMENT_PENDING`, `COMPLETED` → `CONFIRMED`, `FAILED` → `FAILED`). order-service's payment-event consumers apply the **same** statuses as a convergence path (`syncFromPaymentEvent`): a same-status update is a no-op, and a stale or late event (e.g. `payment.failed` after the customer cancelled) is logged and skipped rather than retried. If the HTTP sync of a `FAILED` payment hits an order that is already terminal, payment-service marks it synced; a `COMPLETED` payment on a closed order still errors (needs a refund).
+- payment-service owns the payment → order transition (`PENDING` → `PAYMENT_PENDING`, `COMPLETED` → `CONFIRMED`, `FAILED` → `FAILED`). order-service's payment-event consumers apply the **same** statuses as a convergence path (`syncStatusFromEvent`): a same-status update is a no-op, and a stale or late event (e.g. `payment.failed` after the customer cancelled) is logged and skipped rather than retried. If the HTTP sync of a `FAILED` payment hits an order that is already terminal, payment-service marks it synced; a `COMPLETED` payment on a closed order still errors (needs a refund).
 - order-service publishes `order.payment_pending` and `order.failed` for those transitions (added in Phase 0; they were previously mislabeled `order.created`).
 - Order status writes are compare-and-set (`UPDATE … WHERE status = <expected>`): when the HTTP sync and the consumer race to the same status only the winner publishes, so `order.confirmed` (and its notification) is emitted once.
 
-### Partitioning and topic provisioning
+### Partitioning, event ids and topic provisioning
 
-- The shared producer keys every message by the event's `correlationId`, which is generated fresh for each event. Events for one order therefore do not share a partition key; ordering per order only holds today because auto-created topics have a single partition. Keying by `orderId` is required before adding partitions.
-- `KafkaConsumerService.subscribe` creates the topic first (idempotent, waits for a leader). Before this, a consumer subscribing to a topic nobody had produced to yet (driver-service → `delivery.events`) crashed on a fresh cluster.
+- The shared producer keys every message by the payload's `orderId` (`eventPartitionKey`), falling back to the `correlationId` for events without one. All order, payment and delivery events of one order land on the same partition in publish order, so partitions can be added without breaking per-order ordering.
+- Order and delivery events use `lifecycleEventId(entityId, eventType)`: UUID v5 of `"<id>:<eventType>"`, stable because both lifecycles are one-way (each event type happens at most once per entity). Payment keeps its own namespace (`paymentEventId`).
+- `KafkaConsumerService.subscribe` creates the topic and its `.dlq` first (idempotent, waits for a leader). Before this, a consumer subscribing to a topic nobody had produced to yet crashed on a fresh cluster. kafkajs logs `Topic creation errors` at ERROR level when the topics already exist; that line is expected.
+- Topics are created with broker defaults (1 partition locally). Production needs explicit partition and replication settings.
 
 ### delivery.events
 
-This topic is intended to capture delivery lifecycle changes:
+delivery-service publishes one event per lifecycle transition: `delivery.created`, `delivery.driver_assigned`, `delivery.picked_up`, `delivery.in_transit`, `delivery.completed`, `delivery.cancelled`, with `{ deliveryId, orderId, driverId?, status }`.
 
-- assignment to driver
-- pickup started
-- vehicle in transit
-- delivery completed
-- cancellation or failure
-
-This is primarily relevant to delivery, tracking, and notification flows. The delivery service currently defines the event publisher and event-building code, but its lifecycle methods do not invoke publication consistently; treat delivery event propagation as partial.
+- Published after the HTTP syncs to order-service (order status) and driver-service (availability) succeed; those HTTP calls remain the authoritative path.
+- order-service applies `driver_assigned`, `picked_up` and `completed` through `syncStatusFromEvent` (same status → no-op; stale → logged and skipped), so a late or redelivered event never fails the consumer.
+- driver-service does **not** consume delivery events. Its old release-on-completion consumer was removed: a late `delivery.completed` could free a driver already on the next delivery, and AVAILABLE → AVAILABLE is not a valid transition.
+- notification-service subscribes to `delivery.driver_assigned` but does nothing yet (no `customerId` in the payload).
 
 ## Event-driven patterns in the repository
 
@@ -102,8 +104,8 @@ The repository does not implement a centralized event store. Instead, each servi
 Services react to incoming events by updating their own internal state or creating follow-up side effects:
 
 - `notification-service` subscribes to order/payment/delivery topics and persists order notifications; payment and delivery handlers currently contain no-op behavior because the required lookup/contract work is not implemented
-- `driver-service` can react to delivery events when the lifecycle affects driver availability
-- `order-service` can adjust its internal state based on payment or delivery outcomes
+- `order-service` converges its status from payment and delivery events (tolerant of duplicates and stale events)
+- `driver-service` consumes nothing; availability is set synchronously by delivery-service
 
 ## Why this matters for maintainers
 
@@ -127,31 +129,38 @@ Most of the actual event contracts are established implicitly through:
 
 This means the project is best understood as a practical microservice event bus rather than a strict event-sourcing system.
 
-### Reliability boundaries
+### Reliability (shared `KafkaConsumerService`)
 
-- Consumer retries are limited to three attempts with exponential backoff in the process.
-- `KafkaConsumerService` still stores processed event IDs in an in-memory `Set`; the state is lost on restart and is not shared across replicas.
-- Exhausted messages are logged and their offsets are committed; no real dead-letter topic or persistence path is implemented.
-- Payment events use deterministic event IDs and retry-aware payment markers, but publication remains at-least-once.
-- Other producers (every order-service event, delivery-service's unused publisher) use random `uuidv4()` event IDs, so a duplicate publish cannot be deduplicated by consumers.
-- A versioned event registry, runtime validation, consumer integration of durable deduplication, and DLQ handling remain roadmap work.
+Per message, in order:
 
-### Durable idempotency (available, not yet integrated)
+1. Unparseable (not JSON, or no `eventId`/`eventType`) → sent to `<topic>.dlq` with reason `unparseable`, offset committed.
+2. No handler in this group for the event type → offset committed.
+3. **Claim** the event in Redis via `DurableEventIdempotencyService.tryAcquire(groupId, eventId)`. `processed` → skip and commit. `in-progress` (another consumer mid-handler after a rebalance) → poll until it finishes or its lease expires (the partition stays blocked, preserving order), then give the message back to kafkajs.
+4. Run the handler, up to 3 attempts with exponential backoff (200 ms, 400 ms).
+5. Success → `markProcessed`, then commit. Exhausted → send to `<topic>.dlq` with reason `handler-failed` and the error, **release** the claim (not marked processed, so a replay can run it), then commit.
 
-`shared/src/kafka/durable-event-idempotency.service.ts` provides `DurableEventIdempotencyService`, a Redis-backed record of processed events built on the shared `REDIS_CLIENT`. It is exported from the shared package but **no consumer uses it yet**; `KafkaConsumerService` behavior is unchanged.
+The offset is only committed once the event is handled, already handled, or safely in the dead-letter topic. If Redis or the dead-letter send fails, the error propagates and kafkajs redelivers the message.
 
-- Key per consumer group and event: `kafka:idempotency:{consumerGroup}:{eventId}`, with each segment URI-encoded so different pairs can never collide.
-- Values: `lease:<token>` while a consumer is processing the event (expires after the lease TTL, default 60s), `processed` once handled (kept for the retention TTL, default 7 days, matching Kafka's default log retention).
-- `tryAcquire` is the processing gate: it atomically returns `acquired` (with a lease token), `processed` (skip), or `in-progress` (another consumer holds it; do not process or commit).
-- `markProcessed` records the event as processed and never rewrites an existing marker; `release` gives up a lease and only works for the lease owner. `isProcessed` is informational only and must not gate processing.
-- Every operation is one Lua script, so each check-and-write is atomic and lease expiry uses the Redis clock. Redis errors propagate to the caller.
-- Its tests run against an in-memory fake and, when `REDIS_TEST_URL` is set (as in the CI workflow), against a real Redis.
+Dead-lettered messages keep their key, value and headers, plus `dlq-original-topic`, `dlq-original-partition`, `dlq-original-offset`, `dlq-consumer-group`, `dlq-reason`, `dlq-error` and `dlq-failed-at`.
 
-Integration constraints recorded for the follow-up work:
+**Replay:** `npm run kafka:dlq -- <topic>` lists what is pending; `--replay` republishes each message to its original topic (dead-letter headers stripped). Every group sees it again; groups that already handled it skip it through durable idempotency. Progress is tracked by the `delivery-plus-dlq-replay` consumer group, so each message is replayed once. Unparseable messages are listed and skipped. `KAFKA_BROKER` defaults to `localhost:9092`.
 
-- The Compose Redis has no persistence volume, so recreating the container would drop every `processed` marker.
-- driver-service and notification-service consume Kafka but do not register `RedisModule`; they need Redis before they can use the service.
-- KafkaJS sends heartbeats only between messages (session timeout 30s), so handler time must stay well below both the session timeout and the lease TTL, or the lease needs renewal.
+**Durable idempotency** (`DurableEventIdempotencyService`): Redis keys `kafka:idempotency:{consumerGroup}:{eventId}` holding `lease:<token>` while a consumer handles the event (60 s TTL) or `processed` (7 days, matching Kafka's default retention). Every operation is one Lua script. order-service and notification-service use it (`KafkaModule.register({ durableIdempotency: true })` plus `RedisModule`). A consumer registered without it falls back to an in-process set and logs a warning at startup.
+
+**Redis persistence:** the Compose Redis runs with AOF (`--appendonly yes`) on the `redis_data` volume, so processed markers (and carts) survive a Redis restart.
+
+Verified live (2026-10-01, dev stack):
+- All events of one order carried the `orderId` as key.
+- Rewinding notification-service's offsets and restarting it redelivered 6 events; all 6 were skipped as processed, with no duplicate notifications.
+- A handler failure (notifications table renamed) and a poison message both reached `order.events.dlq`. After restoring the table, `--replay` created the notification exactly once and skipped the poison message; a second replay found nothing pending.
+
+### Remaining gaps
+
+- **No outbox.** order-service and delivery-service publish after their database write; a crash in between loses the event. payment-service re-publishes via its status markers.
+- **Payloads:** payment and delivery events carry no `customerId`, so notification-service cannot notify on them without a lookup.
+- **Handler time:** kafkajs heartbeats only between messages (session timeout 30 s). Handlers must stay well below that and the 60 s lease, or the lease needs renewal.
+- **No graceful shutdown hooks:** a stopped service stays in its consumer group until the session times out.
+- **No schema registry or runtime validation** of payloads beyond `eventId`/`eventType`.
 
 ## Source of truth
 

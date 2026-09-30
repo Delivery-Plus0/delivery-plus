@@ -25,7 +25,7 @@ Current handler status:
 
 - order events: implemented notification persistence
 - payment events: subscribed, handler currently no-op
-- delivery events: subscribed, handler currently no-op
+- delivery events: subscribed (`delivery.driver_assigned`), handler currently no-op; the payload has no `customerId` yet
 
 Published:
 - none directly implemented in this service
@@ -36,6 +36,7 @@ From `services/notification-service/src/config/app-config.ts`:
 - `DATABASE_URL`
 - `JWT_SECRET`
 - `KAFKA_BROKER` (used in Docker Compose as `kafka:29092`)
+- `REDIS_URL` (processed-event markers for durable idempotency; Compose: `redis://redis:6379`)
 - `PORT` (default: `3011`)
 - `NODE_ENV` (default: `development`)
 

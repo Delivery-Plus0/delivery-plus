@@ -23,7 +23,7 @@ Every service image is built from the root `Dockerfile` on `node:22-alpine`. For
 ## Communication
 
 - HTTP is used by the gateway and for synchronous service-to-service checks such as menu ownership, cart reads, order validation, and delivery updates.
-- Kafka carries order, payment, and delivery event topics. Order and payment publication is implemented; delivery has event-building and Kafka wiring code, but its lifecycle methods currently do not invoke publication. Consumers retry locally up to three times, use an in-memory event-id set, and commit exhausted messages instead of writing to a real DLQ. A durable, Redis-backed `DurableEventIdempotencyService` is available in the shared package but is not yet used by the consumer.
+- Kafka carries order, payment, and delivery event topics, all keyed by `orderId`. Consumers deduplicate per consumer group in Redis (`DurableEventIdempotencyService`), retry a handler up to three times, then send the message to `<topic>.dlq`; `npm run kafka:dlq` lists and replays dead-lettered messages. Publication happens after each service's database write, without a transactional outbox.
 - Redis stores carts, cache entries, rate-limit state, internal-auth nonces, and recent driver locations with a TTL.
 - PostgreSQL stores credentials, profiles, restaurants, menu data, orders, payments, deliveries, drivers, and notifications. Docker initializes separate logical databases from `docker/postgres/init.sql`.
 - User, restaurant, and menu services issue short-lived presigned POST policies for media; clients upload directly to S3-compatible object storage. The policies enforce upload-size limits, and the services verify object bytes before copying them from expiring staging keys to permanent public/CDN URLs. The dev and test Compose overlays use SeaweedFS's S3 gateway (service name `media-storage`), not MinIO; see `.project-context/15-media-and-storage.md` for why.
@@ -37,7 +37,7 @@ Every service image is built from the root `Dockerfile` on `node:22-alpine`. For
 5. Drivers report locations to Tracking Service, which stores the latest location in Redis. Tracking combines delivery data with the driver location.
 6. Delivery completion updates delivery, order, and driver state through the implemented service calls. Delivery event publication is currently partial, so downstream event propagation should not be assumed for every lifecycle transition.
 
-The current implementation does not provide a real payment provider, push/email delivery, consumer-side durable Kafka deduplication (the shared service exists but is not wired in), or a production dead-letter queue. Those are roadmap items.
+The current implementation does not provide a real payment provider, push/email delivery, or a transactional outbox for Kafka events. Those are roadmap items.
 
 ## Media storage
 

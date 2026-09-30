@@ -46,7 +46,7 @@ A short-lived, server-signed upload policy that lets a client upload an image di
 In `DurableEventIdempotencyService`, a Redis key per consumer group and event. `lease:<token>` means one consumer has claimed the event and is processing it (it expires on its own); `processed` means the event was handled and must be skipped.
 
 ## Redis
-The in-memory data store used for cart and tracking state, caches, rate-limit counters, internal-auth nonces, and (once integrated) Kafka idempotency markers.
+The in-memory data store used for cart and tracking state, caches, rate-limit counters, internal-auth nonces, and Kafka idempotency markers.
 
 ## Restaurant Service
 The service responsible for restaurant records and ownership checks.

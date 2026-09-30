@@ -18,15 +18,15 @@ From `services/delivery-service/src/controllers/deliveries.controller.ts`:
 - Calls `order-service` to validate order state and update order status
 - Calls `driver-service` to find and update drivers
 - Uses PostgreSQL for delivery records
-- Contains partial `delivery.events` publication wiring
+- Publishes `delivery.events`
 
 ## Events published/consumed
-The service contains Kafka wiring and event-building code for `delivery.events`, including:
+Every lifecycle transition publishes to `delivery.events`: `delivery.created`, `delivery.driver_assigned`, `delivery.picked_up`, `delivery.in_transit`, `delivery.completed`, `delivery.cancelled`. Payload: `{ deliveryId, orderId, driverId?, status }`.
 
-- dispatch/assignment updates
-- pickup/in-transit/complete/cancel transitions
-
-The current lifecycle methods do not consistently invoke the publisher, so delivery event propagation is partial and must not be treated as fully implemented.
+- Published after the HTTP syncs to order-service and driver-service succeed, so consumers see state the synchronous path already applied.
+- Keyed by `orderId` (same partition as the order's own events).
+- `eventId` is stable per (delivery, event type), so a re-publish is deduplicated by consumers.
+- At-least-once and not transactional with the database write: a crash between the update and the publish loses the event (no outbox yet).
 
 Consumed from:
 - none directly implemented in this service

@@ -99,7 +99,7 @@ flowchart LR
     NOTIF --> PG
 ```
 
-Every service is self-contained and shares a common foundation through the internal `shared` library. The shared package provides enums, transition helpers, Kafka/Redis helpers, S3 media storage, internal service authentication, JWT and role guards, logging, and common NestJS utilities. Redis is also used for caching, rate limits, and internal-auth nonces, which the diagram omits for readability. Kafka reliability is currently limited: retries are process-local, the consumer deduplicates in memory, and there is no dead-letter queue. A durable Redis-backed idempotency service exists in `shared` but is not yet wired into the consumer.
+Every service is self-contained and shares a common foundation through the internal `shared` library. The shared package provides enums, transition helpers, Kafka/Redis helpers, S3 media storage, internal service authentication, JWT and role guards, logging, and common NestJS utilities. Redis is also used for caching, rate limits, and internal-auth nonces, which the diagram omits for readability. Kafka consumers deduplicate events per consumer group in Redis, retry a failing handler three times, then park the message in a `<topic>.dlq` dead-letter topic that `npm run kafka:dlq` can list and replay; events are keyed by `orderId`. There is no transactional outbox yet.
 
 ## <img src="./assets/icons/tech_stack.png" width="26" valign="middle"> Tech Stack
 

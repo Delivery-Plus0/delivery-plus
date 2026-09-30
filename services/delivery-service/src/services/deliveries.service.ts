@@ -25,6 +25,13 @@ import { v4 as uuidv4 } from 'uuid';
 
 const DISPATCH_ROLES = [UserRole.RESTAURANT_OWNER, UserRole.ADMIN];
 
+/** Who is acting on a delivery; `authHeader` is forwarded to order-service for ownership checks. */
+export interface DeliveryRequester {
+  userId: string;
+  role: UserRole;
+  authHeader: string;
+}
+
 @Injectable()
 export class DeliveriesService {
   constructor(
@@ -34,8 +41,8 @@ export class DeliveriesService {
     private readonly kafkaProducer: KafkaProducerService,
   ) {}
 
-  async create(requesterRole: UserRole, dto: CreateDeliveryDto): Promise<Delivery> {
-    this.assertDispatchRole(requesterRole);
+  async create(requester: DeliveryRequester, dto: CreateDeliveryDto): Promise<Delivery> {
+    await this.assertCanDispatch(dto.orderId, requester);
 
     const existing = await this.deliveries.findByOrderId(dto.orderId);
     if (existing) {
@@ -52,9 +59,10 @@ export class DeliveriesService {
     return this.deliveries.create(dto.orderId);
   }
 
-  async assignDriver(deliveryId: string, requesterRole: UserRole): Promise<Delivery> {
-    this.assertDispatchRole(requesterRole);
+  async assignDriver(deliveryId: string, requester: DeliveryRequester): Promise<Delivery> {
+    this.assertDispatchRole(requester.role);
     const delivery = await this.findOrThrow(deliveryId);
+    await this.assertCanDispatch(delivery.orderId, requester);
     this.assertTransition(delivery.status, DeliveryStatus.DRIVER_ASSIGNED);
 
     const driver = await this.driverClient.findAvailableDriver();
@@ -107,9 +115,10 @@ export class DeliveriesService {
     return updated as Delivery;
   }
 
-  async cancel(deliveryId: string, requesterRole: UserRole): Promise<Delivery> {
-    this.assertDispatchRole(requesterRole);
+  async cancel(deliveryId: string, requester: DeliveryRequester): Promise<Delivery> {
+    this.assertDispatchRole(requester.role);
     const delivery = await this.findOrThrow(deliveryId);
+    await this.assertCanDispatch(delivery.orderId, requester);
     this.assertTransition(delivery.status, DeliveryStatus.CANCELLED);
 
     const updated = await this.deliveries.update(deliveryId, { status: DeliveryStatus.CANCELLED });
@@ -120,8 +129,68 @@ export class DeliveriesService {
     return updated as Delivery;
   }
 
-  async getById(id: string): Promise<Delivery> {
-    return this.findOrThrow(id);
+  async getById(id: string, reader: DeliveryRequester): Promise<Delivery> {
+    const delivery = await this.findOrThrow(id);
+    await this.assertCanRead(delivery, reader);
+    return delivery;
+  }
+
+  /**
+   * Resolves the delivery for an order. For customers and restaurant owners the order is checked
+   * first, so someone else's order is a 403/404 on the order and never reveals whether a delivery
+   * exists. A 404 after a successful order check means the delivery has not been created yet.
+   */
+  async getByOrderId(orderId: string, reader: DeliveryRequester): Promise<Delivery> {
+    if (reader.role === UserRole.CUSTOMER || reader.role === UserRole.RESTAURANT_OWNER) {
+      await this.orderClient.assertReadableBy(orderId, reader.authHeader);
+    } else if (reader.role !== UserRole.ADMIN && reader.role !== UserRole.DRIVER) {
+      throw new ForbiddenError('You do not have access to this delivery');
+    }
+
+    const delivery = await this.deliveries.findByOrderId(orderId);
+    if (!delivery) {
+      throw new NotFoundError(`No delivery has been created for order ${orderId} yet`);
+    }
+    if (reader.role === UserRole.DRIVER) {
+      await this.assertIsAssignedDriver(delivery, reader.userId);
+    }
+    return delivery;
+  }
+
+  /** Read access follows the ownership chain: JWT → order ownership (or assignment) → delivery. */
+  private async assertCanRead(delivery: Delivery, reader: DeliveryRequester): Promise<void> {
+    switch (reader.role) {
+      case UserRole.ADMIN:
+        return;
+      case UserRole.DRIVER:
+        return this.assertIsAssignedDriver(delivery, reader.userId);
+      case UserRole.CUSTOMER:
+      case UserRole.RESTAURANT_OWNER:
+        return this.orderClient.assertReadableBy(delivery.orderId, reader.authHeader);
+      default:
+        throw new ForbiddenError('You do not have access to this delivery');
+    }
+  }
+
+  private async assertIsAssignedDriver(delivery: Delivery, userId: string): Promise<void> {
+    if (!delivery.driverId) {
+      throw new ForbiddenError('You are not the driver assigned to this delivery');
+    }
+    const driver = await this.driverClient.getDriver(delivery.driverId);
+    if (driver.userId !== userId) {
+      throw new ForbiddenError('You are not the driver assigned to this delivery');
+    }
+  }
+
+  /**
+   * Dispatch (create/assign/cancel) is for admins and the owner of the order's restaurant only.
+   * order-service decides restaurant ownership when asked with the owner's own token.
+   */
+  private async assertCanDispatch(orderId: string, requester: DeliveryRequester): Promise<void> {
+    this.assertDispatchRole(requester.role);
+    if (requester.role === UserRole.RESTAURANT_OWNER) {
+      await this.orderClient.assertReadableBy(orderId, requester.authHeader);
+    }
   }
 
   private assertDispatchRole(role: UserRole): void {

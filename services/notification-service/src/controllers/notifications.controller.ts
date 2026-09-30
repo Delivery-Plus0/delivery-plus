@@ -1,4 +1,4 @@
-import { Controller, Get, Patch, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Patch, Param, ParseUUIDPipe, Query, UseGuards } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -37,8 +37,8 @@ export class NotificationsController {
   @ApiOperation({ summary: 'Mark a notification as read', description: 'Marks a specific notification as read.' })
   @ApiParam({ name: 'id', description: 'The notification id to mark as read.' })
   @ApiResponse({ status: 200, description: 'Notification marked as read.' })
-  async markAsRead(@Param('id') id: string) {
-    await this.notificationsService.markAsRead(id);
+  async markAsRead(@Param('id', new ParseUUIDPipe()) id: string, @CurrentUser() user: JwtPayload) {
+    await this.notificationsService.markAsRead(id, user.sub);
     return { success: true };
   }
 

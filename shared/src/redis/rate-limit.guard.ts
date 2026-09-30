@@ -18,7 +18,12 @@ export class RateLimitGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const options = this.reflector.get<RateLimitOptions>(RATE_LIMIT_KEY, context.getHandler());
+    // A route-level @RateLimit wins; otherwise fall back to one declared on the controller class
+    // (cart-service declares its limit there, which used to be silently ignored).
+    const options = this.reflector.getAllAndOverride<RateLimitOptions | undefined>(RATE_LIMIT_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
     if (!options) return true;
 
     const request = context.switchToHttp().getRequest();

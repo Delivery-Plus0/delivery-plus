@@ -16,17 +16,23 @@ describe('TrackingService.DriverServiceClient', () => {
     });
     global.fetch = fetchMock as any;
 
-    const client = new DriverServiceClient({ driverServiceUrl: 'http://driver-service:3009' } as any);
+    const client = new DriverServiceClient({ driverServiceUrl: 'http://driver-service:3009' } as any, {
+      mint: async () => 'Bearer system',
+    } as any);
 
     await expect(client.getDriver(validDriverId)).resolves.toMatchObject({ id: validDriverId });
-    expect(fetchMock).toHaveBeenCalledWith(`http://driver-service:3009/drivers/${validDriverId}`);
+    expect(fetchMock).toHaveBeenCalledWith(`http://driver-service:3009/drivers/${validDriverId}`, {
+      headers: { Authorization: 'Bearer system' },
+    });
   });
 
   it('rejects malformed driverId before making the request', async () => {
     const fetchMock = jest.fn();
     global.fetch = fetchMock as any;
 
-    const client = new DriverServiceClient({ driverServiceUrl: 'http://driver-service:3009' } as any);
+    const client = new DriverServiceClient({ driverServiceUrl: 'http://driver-service:3009' } as any, {
+      mint: async () => 'Bearer system',
+    } as any);
     const promise = client.getDriver('http://evil.example');
 
     await expect(promise).rejects.toThrow(BadRequestError);

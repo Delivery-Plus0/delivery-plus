@@ -61,6 +61,32 @@ describe('DriversService', () => {
     });
   });
 
+  describe('getByIdFor (driver profile visibility)', () => {
+    it('lets a driver read their own profile', async () => {
+      drivers.findById.mockResolvedValue(baseDriver as any);
+      await expect(service.getByIdFor('driver-1', { sub: 'user-1', role: UserRole.DRIVER })).resolves.toMatchObject({
+        id: 'driver-1',
+      });
+    });
+
+    it("rejects a driver reading another driver's profile (plate, user id)", async () => {
+      drivers.findById.mockResolvedValue(baseDriver as any);
+      await expect(service.getByIdFor('driver-1', { sub: 'user-2', role: UserRole.DRIVER })).rejects.toThrow(ForbiddenError);
+    });
+
+    it('lets admins and service system tokens (ADMIN role) read any profile', async () => {
+      drivers.findById.mockResolvedValue(baseDriver as any);
+      await expect(
+        service.getByIdFor('driver-1', { sub: 'system:delivery-service', role: UserRole.ADMIN }),
+      ).resolves.toBeDefined();
+    });
+
+    it('404s for an unknown driver', async () => {
+      drivers.findById.mockResolvedValue(null);
+      await expect(service.getByIdFor('missing', { sub: 'admin', role: UserRole.ADMIN })).rejects.toThrow(NotFoundError);
+    });
+  });
+
   describe('updateStatus', () => {
     it('rejects an invalid transition', async () => {
       drivers.findByUserId.mockResolvedValue({ ...baseDriver, status: DriverStatus.SUSPENDED });

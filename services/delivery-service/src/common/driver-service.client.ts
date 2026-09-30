@@ -18,7 +18,9 @@ export class DriverServiceClient {
 
   async getDriver(driverId: string): Promise<DriverDto> {
     const safeDriverId = assertValidUuidV4(driverId, 'driverId');
-    const response = await fetch(`${this.config.driverServiceUrl}/drivers/${safeDriverId}`);
+    const response = await fetch(`${this.config.driverServiceUrl}/drivers/${safeDriverId}`, {
+      headers: { Authorization: await this.systemToken.mint() },
+    });
     if (response.status === 404) {
       throw new NotFoundError(`Driver ${safeDriverId} not found`);
     }
@@ -30,7 +32,9 @@ export class DriverServiceClient {
 
   /** Returns the first currently available driver, or null if none. */
   async findAvailableDriver(): Promise<DriverDto | null> {
-    const response = await fetch(`${this.config.driverServiceUrl}/drivers/available?page=1&limit=1`);
+    const response = await fetch(`${this.config.driverServiceUrl}/drivers/available?page=1&limit=1`, {
+      headers: { Authorization: await this.systemToken.mint() },
+    });
     if (!response.ok) {
       throw new BadRequestError('Failed to query available drivers');
     }

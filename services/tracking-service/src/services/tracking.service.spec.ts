@@ -2,7 +2,7 @@ import { TrackingService } from './tracking.service';
 import { LocationRepository } from '../repositories/location.repository';
 import { DeliveryServiceClient } from '../common/delivery-service.client';
 import { DriverServiceClient } from '../common/driver-service.client';
-import { DeliveryStatus, NotFoundError } from '@food-delivery/shared';
+import { DeliveryStatus, ForbiddenError, NotFoundError, UserRole } from '@food-delivery/shared';
 
 describe('TrackingService', () => {
   let service: TrackingService;
@@ -40,9 +40,31 @@ describe('TrackingService', () => {
   });
 
   describe('getDriverLocation', () => {
+    const self = { sub: 'user-1', role: UserRole.DRIVER };
+
     it('throws NotFoundError when nothing has been reported', async () => {
       locationRepository.find.mockResolvedValue(null);
-      await expect(service.getDriverLocation('user-1')).rejects.toThrow(NotFoundError);
+      await expect(service.getDriverLocation('user-1', self)).rejects.toThrow(NotFoundError);
+    });
+
+    it("rejects a customer asking for a driver's raw location", async () => {
+      await expect(
+        service.getDriverLocation('user-1', { sub: 'customer-1', role: UserRole.CUSTOMER }),
+      ).rejects.toThrow(ForbiddenError);
+      expect(locationRepository.find).not.toHaveBeenCalled();
+    });
+
+    it("rejects a driver reading another driver's location", async () => {
+      await expect(
+        service.getDriverLocation('user-1', { sub: 'user-2', role: UserRole.DRIVER }),
+      ).rejects.toThrow(ForbiddenError);
+    });
+
+    it('lets an admin read any driver location', async () => {
+      locationRepository.find.mockResolvedValue({ userId: 'user-1', latitude: 1, longitude: 2, updatedAt: '' });
+      await expect(
+        service.getDriverLocation('user-1', { sub: 'admin', role: UserRole.ADMIN }),
+      ).resolves.toBeDefined();
     });
 
     it('returns the stored location', async () => {
@@ -52,7 +74,7 @@ describe('TrackingService', () => {
         longitude: 31.2,
         updatedAt: new Date().toISOString(),
       });
-      const result = await service.getDriverLocation('user-1');
+      const result = await service.getDriverLocation('user-1', self);
       expect(result.latitude).toBe(30.1);
     });
   });

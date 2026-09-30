@@ -1,4 +1,4 @@
-import { BadRequestError } from '@food-delivery/shared';
+import { BadRequestError, ForbiddenError, NotFoundError } from '@food-delivery/shared';
 import { OrderServiceClient } from './order-service.client';
 
 describe('DeliveryServiceClient.OrderServiceClient', () => {
@@ -38,5 +38,31 @@ describe('DeliveryServiceClient.OrderServiceClient', () => {
     await expect(promise).rejects.toThrow(BadRequestError);
     await expect(promise).rejects.toThrow('orderId must be a valid UUID v4');
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  describe('assertReadableBy', () => {
+    const client = new OrderServiceClient({ orderServiceUrl: 'http://order-service:3006' } as any, {
+      mint: async () => 'Bearer system',
+    } as any);
+
+    it("asks order-service with the requester's own token", async () => {
+      const fetchMock = jest.fn().mockResolvedValue({ ok: true, status: 200 });
+      global.fetch = fetchMock as any;
+
+      await client.assertReadableBy(validOrderId, 'Bearer customer');
+
+      expect(fetchMock).toHaveBeenCalledWith(`http://order-service:3006/orders/${validOrderId}`, {
+        headers: { Authorization: 'Bearer customer' },
+      });
+    });
+
+    it.each([
+      [404, NotFoundError],
+      [403, ForbiddenError],
+      [401, ForbiddenError],
+    ])('maps order-service %s to %p', async (status, errorType) => {
+      global.fetch = jest.fn().mockResolvedValue({ ok: false, status }) as any;
+      await expect(client.assertReadableBy(validOrderId, 'Bearer customer')).rejects.toThrow(errorType);
+    });
   });
 });

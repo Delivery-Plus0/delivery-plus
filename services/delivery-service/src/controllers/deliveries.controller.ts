@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Post, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser, JwtPayload } from '@food-delivery/shared';
 import { DeliveriesService } from '../services/deliveries.service';
@@ -13,14 +13,18 @@ export class DeliveriesController {
 
   @Post()
   @ApiOperation({ summary: 'Create a delivery for an order that is READY_FOR_PICKUP' })
-  create(@CurrentUser() user: JwtPayload, @Body() dto: CreateDeliveryDto) {
-    return this.deliveriesService.create(user.role, dto);
+  create(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: CreateDeliveryDto,
+    @Headers('authorization') authHeader: string,
+  ) {
+    return this.deliveriesService.create({ userId: user.sub, role: user.role, authHeader }, dto);
   }
 
   @Post(':id/assign')
   @ApiOperation({ summary: 'Auto-assign the next available driver to a delivery' })
-  assign(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
-    return this.deliveriesService.assignDriver(id, user.role);
+  assign(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Headers('authorization') authHeader: string) {
+    return this.deliveriesService.assignDriver(id, { userId: user.sub, role: user.role, authHeader });
   }
 
   @Post(':id/pickup')
@@ -43,13 +47,29 @@ export class DeliveriesController {
 
   @Post(':id/cancel')
   @ApiOperation({ summary: 'Cancel a delivery (dispatch role only)' })
-  cancel(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
-    return this.deliveriesService.cancel(id, user.role);
+  cancel(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Headers('authorization') authHeader: string) {
+    return this.deliveriesService.cancel(id, { userId: user.sub, role: user.role, authHeader });
+  }
+
+  @Get('by-order/:orderId')
+  @ApiOperation({
+    summary: 'Get the delivery for an order (order owner, its restaurant owner, the assigned driver, or admin)',
+  })
+  getByOrderId(
+    @Param('orderId') orderId: string,
+    @CurrentUser() user: JwtPayload,
+    @Headers('authorization') authHeader: string,
+  ) {
+    return this.deliveriesService.getByOrderId(orderId, { userId: user.sub, role: user.role, authHeader });
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get a delivery by id' })
-  getById(@Param('id') id: string) {
-    return this.deliveriesService.getById(id);
+  @ApiOperation({ summary: 'Get a delivery by id (order owner, its restaurant owner, the assigned driver, or admin)' })
+  getById(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @Headers('authorization') authHeader: string,
+  ) {
+    return this.deliveriesService.getById(id, { userId: user.sub, role: user.role, authHeader });
   }
 }

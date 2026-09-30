@@ -1,4 +1,4 @@
-import { BadRequestError } from '@food-delivery/shared';
+import { BadRequestError, ForbiddenError } from '@food-delivery/shared';
 import { DeliveryServiceClient } from './delivery-service.client';
 
 describe('TrackingService.DeliveryServiceClient', () => {
@@ -39,5 +39,12 @@ describe('TrackingService.DeliveryServiceClient', () => {
     await expect(promise).rejects.toThrow(BadRequestError);
     await expect(promise).rejects.toThrow('deliveryId must be a valid UUID v4');
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("surfaces delivery-service's ownership rejection as 403, not a generic 400", async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 403 }) as any;
+    const client = new DeliveryServiceClient({ deliveryServiceUrl: 'http://delivery-service:3008' } as any);
+
+    await expect(client.getDelivery(validDeliveryId, 'Bearer other-customer')).rejects.toThrow(ForbiddenError);
   });
 });

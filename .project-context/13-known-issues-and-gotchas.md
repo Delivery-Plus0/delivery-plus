@@ -24,7 +24,7 @@ The project uses Kafka for event propagation, but it does not implement distribu
 
 ## 5. Redis is used for mutable runtime state, not long-term data history
 
-The cart and tracking services store state in Redis because it is suited to low-latency, ephemeral data. This is intentional, but it means those domains should not be treated like permanent relational storage.
+The cart and tracking services store state in Redis because it is suited to low-latency, ephemeral data. This is intentional, but it means those domains should not be treated like permanent relational storage. Redis also holds caches, rate-limit counters, and internal-auth nonces. The Compose Redis has no persistence volume, so a recreated container starts empty; this matters most for the durable Kafka idempotency markers once consumers adopt them.
 
 ## 6. Local environment defaults are convenience defaults
 
@@ -48,28 +48,35 @@ The workspace root defines commands, but actual validation is still service-spec
 
 ## 11. Current implementation gaps
 
-- The API Gateway has no `/health` controller even though Compose probes that path.
-- Kafka deduplication is in-memory, and exhausted consumer messages are committed without a real DLQ.
-- Delivery event publication is wired but not invoked by the current lifecycle methods.
+- `KafkaConsumerService` still deduplicates in memory, and exhausted consumer messages are committed without a real DLQ. The durable `DurableEventIdempotencyService` exists in `shared` but is not wired into the consumer yet.
+- Order-service and delivery-service publish events with random `uuidv4()` IDs, so a duplicate publish cannot be deduplicated downstream; only payment-service uses deterministic event IDs.
+- Delivery event publication is wired but not invoked by the current lifecycle methods, so driver-service's and notification-service's delivery handlers never fire.
 - Notification payment and delivery handlers are currently no-ops.
+- driver-service and notification-service consume Kafka but have no Redis, which the durable idempotency integration will need.
 - Internal user profile creation requires HMAC service identity, and user profile lookup enforces owner or admin access.
-- Outbound service HTTP clients use native `fetch` without a shared timeout, retry, or circuit-breaker policy.
+- Outbound service HTTP clients use native `fetch` without a shared timeout, retry, or circuit-breaker policy, and TypeORM sets no statement timeout, so a handler's duration is not bounded.
 - The payment service contains a manual SQL idempotency upgrade outside the normal TypeORM migration runner.
-- CI does not start Compose, execute migrations, run gateway-to-service integration tests, run the E2E script, or collect coverage.
+- Health routes (gateway included) are liveness checks; they do not verify Kafka, Redis, or downstream services.
+- No CI workflow collects coverage.
+- Media: a verified S3 object can be orphaned if the owning service's database write fails after the copy (see [15-media-and-storage.md](./15-media-and-storage.md)).
+- `.gitignore` has no entry for local agent settings such as `.claude/`, so they show as untracked; stage files explicitly rather than with `git add -A`.
 
 These are documented findings from the current source, not claims that the application should be changed as part of documentation work. Related GitHub roadmap items remain open unless the repository and GitHub state prove otherwise.
 
-## 12. Roadmap and history snapshot
+## 12. Roadmap and history
 
-The authenticated GitHub repository currently contains 55 roadmap issues mapped to the active local DP set: 50 open and 5 closed historical items. The closed items cover order idempotency, payment concurrency, production schema synchronization, Compose profiles, and service-level Swagger documentation. The remaining issues are roadmap work, not evidence that the corresponding behavior is implemented.
+GitHub issues are the authoritative roadmap; an open issue is roadmap work, not evidence that the behavior exists. The current capability status, toolchain, CI coverage, and most recent merges are kept in [16-current-state.md](./16-current-state.md).
 
-Recent repository history confirms these completed code/documentation themes:
+Earlier milestones still present in the code:
 
-- production database migration workflow was merged through PR #29 and is present in the Docker startup path
-- service Swagger/OpenAPI DTO metadata was standardized through PR #27
-- environment-specific Compose files and host Kafka exposure were merged through PR #25
-- order creation idempotency was merged through PR #21
-- the latest commit (`5b8f306`) ignores local roadmap and issue tooling, so local issue files are not tracked source artifacts
+- order creation idempotency (PR #21)
+- environment-specific Compose files and host Kafka exposure (PR #25)
+- standardized service Swagger/OpenAPI DTO metadata (PR #27)
+- the production database migration workflow in the Docker startup path (PR #29)
+
+## 13. Dependency updates can pass on stale checks
+
+Dependabot PRs are not re-tested when `dev` moves. `http-proxy-middleware` 4 (#78) passed its checks against an older base, then broke `dev` once another merged PR made a spec import the gateway's `main.ts`. Re-run or update a dependency PR from the current base before merging it.
 
 ## Source of truth
 

@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-red.svg" alt="License: MIT"></a>
-  <img src="https://img.shields.io/badge/node-%3E%3D18-red.svg" alt="Node >= 18">
+  <img src="https://img.shields.io/badge/node-22-red.svg" alt="Node 22">
   <img src="https://img.shields.io/badge/NestJS-10-red.svg?logo=nestjs&logoColor=white" alt="NestJS 10">
   <img src="https://img.shields.io/badge/TypeScript-5-red.svg?logo=typescript&logoColor=white" alt="TypeScript">
   <img src="https://img.shields.io/badge/Docker-ready-red.svg?logo=docker&logoColor=white" alt="Docker Ready">
@@ -37,7 +37,9 @@
 
 ## <img src="./assets/icons/overview.png" width="26" valign="middle"> Overview
 
-**Delivery Plus** is a backend food-delivery platform built as independently deployable **microservices** that communicate over REST and **Kafka** events. Domain responsibilities are separated across auth, users, restaurants, menus, carts, orders, payments, drivers, deliveries, tracking, and notifications. PostgreSQL-backed services own relational data; cart and tracking use Redis; the gateway owns no domain data.
+**Delivery Plus** is a backend food-delivery platform built as independently deployable **microservices** that communicate over REST and **Kafka** events. Domain responsibilities are separated across auth, users, restaurants, menus, carts, orders, payments, drivers, deliveries, tracking, and notifications. PostgreSQL-backed services own relational data; cart and tracking use Redis; images live in S3-compatible object storage, uploaded directly by clients through presigned POST policies; the gateway owns no domain data.
+
+For a one-page status of what is implemented, partial, or missing today, see [`.project-context/16-current-state.md`](./.project-context/16-current-state.md).
 
 This is a **backend-only** repository — no frontend/UI is included here by design. It's meant to be consumed by web, mobile, or third-party clients through the **API Gateway**.
 
@@ -53,28 +55,38 @@ flowchart LR
     GW --> MENU[Menu Service]
     GW --> CART[Cart Service]
     GW --> ORD[Order Service]
+    GW --> PAY[Payment Service]
+    GW --> DEL[Delivery Service]
+    GW --> DRV[Driver Service]
+    GW --> TRK[Tracking Service]
+    GW --> NOTIF[Notification Service]
 
-    ORD --> PAY[Payment Service]
+    AUTH --> USER
+    USER --> ORD
+    MENU --> REST
+    CART --> MENU
     ORD --> CART
     ORD --> REST
-
     PAY --> ORD
+    DEL --> ORD
+    DEL --> DRV
+    TRK --> DEL
+    TRK --> DRV
 
-    ORD -. events .-> KAFKA[(Kafka)]
-    DEL[Delivery Service] -. partial event wiring .-> KAFKA
-    DRV[Driver Service] -. events .-> KAFKA
-    TRK[Tracking Service] -. events .-> KAFKA
-    NOTIF[Notification Service] -. events .-> KAFKA
+    ORD -. order.events .-> KAFKA[(Kafka)]
+    PAY -. payment.events .-> KAFKA
+    DEL -. delivery.events, not published yet .-> KAFKA
 
-    KAFKA -. events .-> DEL
+    KAFKA -. events .-> ORD
+    KAFKA -. events .-> DRV
     KAFKA -. events .-> NOTIF
 
-    DEL --> DRV
-    TRK --> DRV
-    TRK --> DEL
-
-    CART -. cache .-> REDIS[(Redis)]
+    CART -. carts .-> REDIS[(Redis)]
     TRK -. live location .-> REDIS
+
+    USER -. avatars .-> S3[(S3-compatible storage)]
+    REST -. images .-> S3
+    MENU -. images .-> S3
 
     AUTH --> PG[(PostgreSQL)]
     USER --> PG
@@ -84,19 +96,22 @@ flowchart LR
     PAY --> PG
     DRV --> PG
     DEL --> PG
+    NOTIF --> PG
 ```
 
-Every service is self-contained and shares a common foundation through the internal `shared` library. The shared package provides enums, transition helpers, Kafka/Redis helpers, JWT and role guards, logging, and common NestJS utilities. Kafka reliability is currently limited: retries are process-local, deduplication is in-memory, and the documented DLQ path is not implemented.
+Every service is self-contained and shares a common foundation through the internal `shared` library. The shared package provides enums, transition helpers, Kafka/Redis helpers, S3 media storage, internal service authentication, JWT and role guards, logging, and common NestJS utilities. Redis is also used for caching, rate limits, and internal-auth nonces, which the diagram omits for readability. Kafka reliability is currently limited: retries are process-local, the consumer deduplicates in memory, and there is no dead-letter queue. A durable Redis-backed idempotency service exists in `shared` but is not yet wired into the consumer.
 
 ## <img src="./assets/icons/tech_stack.png" width="26" valign="middle"> Tech Stack
 
 | Layer | Technology |
 |---|---|
-| Language | TypeScript |
-| Framework | NestJS |
-| Database | PostgreSQL |
-| Cache / Real-time state | Redis |
+| Runtime | Node.js 22 LTS |
+| Language | TypeScript 5 |
+| Framework | NestJS 10 |
+| Database | PostgreSQL 16 |
+| Cache / Real-time state | Redis 7 |
 | Messaging / Events | Apache Kafka |
+| Media storage | S3-compatible object storage (SeaweedFS in local dev/test) |
 | Containerization | Docker & Docker Compose |
 | Testing | Jest (unit + e2e) |
 | Shared internals | Custom `shared` package (events, guards, filters, utils) |
@@ -118,12 +133,12 @@ Every service is self-contained and shares a common foundation through the inter
 | `tracking-service` | Live location tracking (Redis-backed) |
 | `notification-service` | User notifications |
 
-The domain services expose `/health` routes used by Compose healthchecks. The API Gateway is an exception: it currently has no health controller, although Compose still probes `/health` on port `3000`; treat that healthcheck as a known runtime gap. Services generally follow `controllers → services → repositories/entities`, with variations by service.
+Every service, including the API Gateway, exposes a `/health` route used by Compose healthchecks. These are liveness checks; they do not prove that Kafka, Redis, or downstream services are reachable. Services generally follow `controllers → services → repositories/entities`, with variations by service.
 
 ## <img src="./assets/icons/getting_started.png" width="26" valign="middle"> Getting Started
 
 ### Prerequisites
-- Node.js ≥ 18
+- Node.js 22 (22.15 or newer)
 - Docker & Docker Compose
 
 ### Run locally

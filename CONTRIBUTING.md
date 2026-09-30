@@ -12,7 +12,7 @@ topics, or cross-service contracts, also check [.project-context/09-shared-packa
 1. Fork the repository and clone your fork.
 2. Create a focused branch, for example `feat/menu-cache` or `fix/order-status`.
 3. Copy `.env.example` to `.env` for local-only configuration.
-4. Install Node.js 20 or newer and run `npm ci`.
+4. Install Node.js 22 (22.15 or newer; CI and the Docker images use Node 22) and run `npm ci`.
 5. Start dependencies and services with `docker compose up --build -d`.
 6. Verify the stack is healthy: `curl http://localhost:3000/health` should return a successful response before you start developing.
 7. Make a small, tested change and update documentation when contracts change.

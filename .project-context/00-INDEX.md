@@ -4,15 +4,16 @@ This folder is a lightweight, machine-readable knowledge base for AI agents and 
 
 ## Required reading order for AI agents
 
-Any AI agent working on an issue in this repo should read this folder first, starting with 01 through 03, then jump to the specific service/topic file relevant to the issue, before writing any code.
+Any AI agent working on an issue in this repo should read this folder first: 01, then 16 (current state), then 02 and 03, then the specific service/topic file relevant to the issue, before writing any code.
 
 Suggested sequence:
 
 1. [01-project-overview.md](./01-project-overview.md)
-2. [02-system-architecture.md](./02-system-architecture.md)
-3. [03-service-map.md](./03-service-map.md)
-4. Jump to the relevant service doc in [../docs/services.md](../docs/services.md)
-5. Then read the specific topic file that matches the issue, such as [05-event-driven-design.md](./05-event-driven-design.md), [06-api-gateway.md](./06-api-gateway.md), or [08-docker-and-infra.md](./08-docker-and-infra.md)
+2. [16-current-state.md](./16-current-state.md) – what is implemented, partial, and missing today; toolchain; CI; recent changes
+3. [02-system-architecture.md](./02-system-architecture.md)
+4. [03-service-map.md](./03-service-map.md)
+5. Jump to the relevant service doc in [../docs/services.md](../docs/services.md)
+6. Then read the specific topic file that matches the issue, such as [05-event-driven-design.md](./05-event-driven-design.md), [06-api-gateway.md](./06-api-gateway.md), [08-docker-and-infra.md](./08-docker-and-infra.md), or [15-media-and-storage.md](./15-media-and-storage.md)
 
 ## Folder map
 
@@ -31,6 +32,7 @@ Suggested sequence:
 - [13-known-issues-and-gotchas.md](./13-known-issues-and-gotchas.md) – caveats and technical debt
 - [14-glossary.md](./14-glossary.md) – domain terms and abbreviations
 - [15-media-and-storage.md](./15-media-and-storage.md) – S3-compatible media uploads, ownership, object keys, and security rules
+- [16-current-state.md](./16-current-state.md) – status snapshot: capabilities, toolchain, CI workflows, recent changes, planned work
 
 ## Relationship to the docs folder
 

@@ -74,11 +74,16 @@ The Menu service remains a special case because its controllers are mounted at t
 
 ## Health and readiness
 
-The gateway currently has no controller or `/health` route. Compose nevertheless probes `http://localhost:3000/health`, so the gateway healthcheck is a known mismatch and should not be documented as a working readiness signal. The downstream domain services expose the health routes used by their Compose checks.
+The gateway serves `GET /health` and `GET /health/live` from its own `HealthController`; both return `{ "status": "ok" }`, and `/health` is what the Compose healthcheck probes. They are liveness checks only: the gateway has no database, and neither route checks that downstream services are reachable, so a healthy gateway is not proof that every proxied route works. The downstream domain services expose their own `/health` routes for their Compose checks.
 
 This is documented in:
 
+- [../services/api-gateway/src/controllers/health.controller.ts](../services/api-gateway/src/controllers/health.controller.ts)
 - [docker-compose.yml](../docker-compose.yml)
+
+## Proxy library and tests
+
+Proxying uses `http-proxy-middleware` 4.x, which is ESM-only and requires Node `^22.15.0`. The compiled CommonJS gateway loads it through Node's `require(esm)` support. Jest's CommonJS runtime cannot, so `src/main.spec.ts` stubs the module with `jest.mock`; that spec only tests `main.ts`'s pure helpers (CORS options, path rewriting), never live proxying.
 
 ## Security and auth flow
 

@@ -10,17 +10,21 @@ graph TD
   Services --> Redis[(Redis)]
   Order[Order service] -->|order.events| Kafka[(Kafka)]
   Payment[Payment service] -->|payment.events| Kafka
-  Delivery[Delivery service] -. delivery.events wiring .-> Kafka
+  Delivery[Delivery service] -. delivery.events, not published yet .-> Kafka
   Kafka --> Driver[Driver service]
   Kafka --> Notification[Notification service]
   Kafka --> Order
+  Services -->|user, restaurant, menu media| S3[(S3-compatible storage)]
+  Client -. presigned POST upload .-> S3
 ```
+
+Every service image is built from the root `Dockerfile` on `node:22-alpine`. For a status snapshot of what is implemented, partial, and missing, see [project context: current state](../.project-context/16-current-state.md).
 
 ## Communication
 
 - HTTP is used by the gateway and for synchronous service-to-service checks such as menu ownership, cart reads, order validation, and delivery updates.
-- Kafka carries order, payment, and delivery event topics. Order and payment publication is implemented; delivery has event-building and Kafka wiring code, but its lifecycle methods currently do not invoke publication. Consumers retry locally up to three times, use an in-memory event-id set, and commit exhausted messages instead of writing to a real DLQ.
-- Redis stores carts, cache entries, rate-limit state, and recent driver locations with a TTL.
+- Kafka carries order, payment, and delivery event topics. Order and payment publication is implemented; delivery has event-building and Kafka wiring code, but its lifecycle methods currently do not invoke publication. Consumers retry locally up to three times, use an in-memory event-id set, and commit exhausted messages instead of writing to a real DLQ. A durable, Redis-backed `DurableEventIdempotencyService` is available in the shared package but is not yet used by the consumer.
+- Redis stores carts, cache entries, rate-limit state, internal-auth nonces, and recent driver locations with a TTL.
 - PostgreSQL stores credentials, profiles, restaurants, menu data, orders, payments, deliveries, drivers, and notifications. Docker initializes separate logical databases from `docker/postgres/init.sql`.
 - User, restaurant, and menu services issue short-lived presigned POST policies for media; clients upload directly to S3-compatible object storage. The policies enforce upload-size limits, and the services verify object bytes before copying them from expiring staging keys to permanent public/CDN URLs. The dev and test Compose overlays use SeaweedFS's S3 gateway (service name `media-storage`), not MinIO; see `.project-context/15-media-and-storage.md` for why.
 
@@ -33,7 +37,7 @@ graph TD
 5. Drivers report locations to Tracking Service, which stores the latest location in Redis. Tracking combines delivery data with the driver location.
 6. Delivery completion updates delivery, order, and driver state through the implemented service calls. Delivery event publication is currently partial, so downstream event propagation should not be assumed for every lifecycle transition.
 
-The current implementation does not provide a real payment provider, push/email delivery, durable Kafka idempotency store, or production dead-letter queue. Those are roadmap items.
+The current implementation does not provide a real payment provider, push/email delivery, consumer-side durable Kafka deduplication (the shared service exists but is not wired in), or a production dead-letter queue. Those are roadmap items.
 
 ## Media storage
 

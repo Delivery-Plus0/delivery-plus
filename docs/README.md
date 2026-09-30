@@ -5,7 +5,9 @@ This folder is the main human-readable documentation hub for the repository.
 ## Start here
 
 - [Overview](../README.md) – project summary and quick start
+- [Current state](../.project-context/16-current-state.md) – what is implemented, partial, and missing today; toolchain; CI; recent changes
 - [Architecture](./architecture.md) – service boundaries and communication model
+- [Media and storage](../.project-context/15-media-and-storage.md) – S3-compatible image uploads, key layout, and security rules
 - [Deployment](./deployment.md) – Docker, environment variables, and runtime setup
 - [Services index](./services.md) – links to all service-level docs
 - [ADR index](./adr/README.md) – architecture decision records
@@ -28,4 +30,6 @@ This folder is the main human-readable documentation hub for the repository.
 
 ## Notes
 
-The project is structured as a Node.js 20 + NestJS 10 microservice platform with PostgreSQL 16, Redis 7, and Kafka backing the domain services. For implementation details, prefer the service pages and the root README; planned roadmap work must not be read as implemented behavior.
+The project is structured as a Node.js 22 + NestJS 10 microservice platform with PostgreSQL 16, Redis 7, Kafka, and S3-compatible object storage backing the domain services. For implementation details, prefer the service pages and the root README; planned roadmap work must not be read as implemented behavior.
+
+AI agents and new contributors should also read [../.project-context/00-INDEX.md](../.project-context/00-INDEX.md), the architecture knowledge base, before changing code.

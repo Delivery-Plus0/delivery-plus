@@ -39,11 +39,20 @@ The service that handles payment lifecycle state such as pending, processing, an
 ## PostgreSQL
 The relational database used for durable structured data in the platform.
 
+## Presigned POST
+A short-lived, server-signed upload policy that lets a client upload an image directly to S3-compatible storage under constraints the service chose (key, content type, size range), without the bytes passing through a service.
+
+## Processed marker / lease (Kafka idempotency)
+In `DurableEventIdempotencyService`, a Redis key per consumer group and event. `lease:<token>` means one consumer has claimed the event and is processing it (it expires on its own); `processed` means the event was handled and must be skipped.
+
 ## Redis
-The in-memory data store used for cart and tracking state.
+The in-memory data store used for cart and tracking state, caches, rate-limit counters, internal-auth nonces, and (once integrated) Kafka idempotency markers.
 
 ## Restaurant Service
 The service responsible for restaurant records and ownership checks.
+
+## S3-compatible storage
+Object storage speaking the Amazon S3 API. Production uses real S3 or an S3-compatible provider; the dev/test Compose overlays run SeaweedFS's S3 gateway as `media-storage`.
 
 ## Tracking Service
 The service responsible for last-known driver and delivery location information.

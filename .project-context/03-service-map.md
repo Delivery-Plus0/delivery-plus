@@ -5,12 +5,12 @@ This file is the high-level dependency map. For deeper service-by-service detail
 | Service | Port | Depends on | Depended on by | Owns / persists | Publishes | Consumes |
 | --- | ---: | --- | --- | --- | --- | --- |
 | api-gateway | 3000 | all app services | clients | none | none | none |
-| auth-service | 3001 | PostgreSQL, shared auth guards | gateway | credentials + auth state | none | none |
-| user-service | 3002 | PostgreSQL, order-service | gateway, auth-service | user profiles | none | none |
-| restaurant-service | 3003 | PostgreSQL | gateway, menu-service, order-service | restaurants | none | none |
-| menu-service | 3004 | PostgreSQL, restaurant-service | gateway, cart-service | menu items and categories | none | none |
+| auth-service | 3001 | PostgreSQL, Redis (rate limits), user-service | gateway | credentials + auth state (verification, lockout) | none | none |
+| user-service | 3002 | PostgreSQL, Redis (internal-auth nonces), S3, order-service | gateway, auth-service | user profiles + avatar URLs | none | none |
+| restaurant-service | 3003 | PostgreSQL, Redis (cache), S3 | gateway, menu-service, order-service | restaurants + cover/logo URLs | none | none |
+| menu-service | 3004 | PostgreSQL, Redis (cache), S3, restaurant-service | gateway, cart-service | menu items and categories + item image URLs | none | none |
 | cart-service | 3005 | Redis, menu-service | gateway, order-service | user cart state | none | none |
-| order-service | 3006 | PostgreSQL, Redis, cart-service, restaurant-service, Kafka | gateway, payment-service, delivery-service | orders | order.events | payment.events, delivery.events |
+| order-service | 3006 | PostgreSQL, Redis (rate limits), cart-service, restaurant-service, Kafka | gateway, payment-service, delivery-service, user-service | orders | order.events | payment.events, delivery.events |
 | payment-service | 3007 | PostgreSQL, order-service, Kafka | gateway | payment records | payment.events | none |
 | delivery-service | 3008 | PostgreSQL, order-service, driver-service, Kafka | gateway | delivery records | delivery.events wiring exists, lifecycle publication is incomplete | none |
 | driver-service | 3009 | PostgreSQL, Kafka | delivery-service, tracking-service | drivers | none | delivery.events |
@@ -25,7 +25,8 @@ This file is the high-level dependency map. For deeper service-by-service detail
 
 ## Cross-service relationships
 
-- `auth-service` creates the user profile via `user-service`
+- `auth-service` creates the user profile via `user-service` using an HMAC-signed internal request with a one-time nonce
+- `user-service`, `restaurant-service`, and `menu-service` issue presigned upload policies and verify uploaded images through the shared `S3StorageService`
 - `menu-service` verifies ownership with `restaurant-service`
 - `cart-service` validates menu items from `menu-service`
 - `order-service` orchestrates state changes using cart and restaurant checks

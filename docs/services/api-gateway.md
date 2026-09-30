@@ -56,7 +56,11 @@ unset or empty after trimming.
 
 ## Health and readiness
 
-The gateway currently has no controller or `/health` route. Compose still probes `http://localhost:3000/health`, so the gateway healthcheck is a known mismatch rather than a working readiness endpoint.
+`GET /health` and `GET /health/live` return `{ "status": "ok" }` and back the Compose healthcheck on port `3000`. They are liveness checks only: they do not verify that downstream services are reachable.
+
+## Runtime requirement
+
+The proxy uses `http-proxy-middleware` 4.x, which is ESM-only and requires Node `^22.15.0`; the gateway runs on Node 22. Its Jest spec stubs the module with `jest.mock`, because Jest's CommonJS runtime cannot load ESM-only packages and the spec only tests pure helpers.
 
 ## Notes
 The gateway is intentionally thin; business logic stays in the downstream services. It does not enforce all authorization itself; downstream services validate JWTs and roles. See the root [README](../../README.md) and the service docs index in [../services.md](../services.md).

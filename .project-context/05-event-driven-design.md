@@ -53,7 +53,7 @@ Typical consumers include:
 Delivery semantics (payment-service):
 
 - Events are published **after** the payment row is committed and are **at-least-once**: a retry after a failed or interrupted publish may send the same event again.
-- `eventId` is deterministic: UUID v5 of `"<paymentId>:<eventType>"` in a fixed namespace (`PAYMENT_EVENT_NAMESPACE` in `payments.service.ts`). A re-published `payment.completed` for a payment always has the same `eventId`, so consumers must deduplicate by `eventId` (the shared `KafkaConsumerService` already skips ids it has processed; its store is in-memory, so durable dedup across restarts is consumer-side work).
+- `eventId` is deterministic: UUID v5 of `"<paymentId>:<eventType>"` in a fixed namespace (`PAYMENT_EVENT_NAMESPACE` in `payments.service.ts`). A re-published `payment.completed` for a payment always has the same `eventId`, so consumers must deduplicate by `eventId` (the shared `KafkaConsumerService` already skips ids it has processed, but its store is still in-memory; the durable `DurableEventIdempotencyService` described below is not wired into it yet).
 - Each payment emits at most one event per type in normal operation; `publishedEventStatus` on the payment row tracks what was already published.
 - The payload shape `{ paymentId, orderId, amount, status }` and event type names are unchanged; `eventId` remains a UUID, so existing consumers are unaffected.
 - The order-service status update is a separate HTTP call, not driven by the event; it is tracked the same way (`orderSyncedStatus`) and retried by the client's next `process`/create retry, not by Kafka.
@@ -122,10 +122,28 @@ This means the project is best understood as a practical microservice event bus 
 ### Reliability boundaries
 
 - Consumer retries are limited to three attempts with exponential backoff in the process.
-- Processed event IDs are stored in an in-memory `Set`; the state is lost on restart and is not shared across replicas.
+- `KafkaConsumerService` still stores processed event IDs in an in-memory `Set`; the state is lost on restart and is not shared across replicas.
 - Exhausted messages are logged and their offsets are committed; no real dead-letter topic or persistence path is implemented.
 - Payment events use deterministic event IDs and retry-aware payment markers, but publication remains at-least-once.
-- A versioned event registry, runtime validation, durable deduplication, and DLQ handling remain roadmap work.
+- Other producers (every order-service event, delivery-service's unused publisher) use random `uuidv4()` event IDs, so a duplicate publish cannot be deduplicated by consumers.
+- A versioned event registry, runtime validation, consumer integration of durable deduplication, and DLQ handling remain roadmap work.
+
+### Durable idempotency (available, not yet integrated)
+
+`shared/src/kafka/durable-event-idempotency.service.ts` provides `DurableEventIdempotencyService`, a Redis-backed record of processed events built on the shared `REDIS_CLIENT`. It is exported from the shared package but **no consumer uses it yet**; `KafkaConsumerService` behavior is unchanged.
+
+- Key per consumer group and event: `kafka:idempotency:{consumerGroup}:{eventId}`, with each segment URI-encoded so different pairs can never collide.
+- Values: `lease:<token>` while a consumer is processing the event (expires after the lease TTL, default 60s), `processed` once handled (kept for the retention TTL, default 7 days, matching Kafka's default log retention).
+- `tryAcquire` is the processing gate: it atomically returns `acquired` (with a lease token), `processed` (skip), or `in-progress` (another consumer holds it; do not process or commit).
+- `markProcessed` records the event as processed and never rewrites an existing marker; `release` gives up a lease and only works for the lease owner. `isProcessed` is informational only and must not gate processing.
+- Every operation is one Lua script, so each check-and-write is atomic and lease expiry uses the Redis clock. Redis errors propagate to the caller.
+- Its tests run against an in-memory fake and, when `REDIS_TEST_URL` is set (as in the CI workflow), against a real Redis.
+
+Integration constraints recorded for the follow-up work:
+
+- The Compose Redis has no persistence volume, so recreating the container would drop every `processed` marker.
+- driver-service and notification-service consume Kafka but do not register `RedisModule`; they need Redis before they can use the service.
+- KafkaJS sends heartbeats only between messages (session timeout 30s), so handler time must stay well below both the session timeout and the lease TTL, or the lease needs renewal.
 
 ## Source of truth
 

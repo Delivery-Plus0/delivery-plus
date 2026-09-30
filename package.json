@@ -19,6 +19,7 @@
     "migration:revert": "npm run migration:revert --workspaces --if-present",
     "migration:show": "npm run migration:show --workspaces --if-present",
     "seed": "tsx scripts/seed.ts",
+    "seed:demo": "tsx scripts/seed-demo.ts",
     "e2e": "tsx scripts/e2e.ts"
   },
   "devDependencies": {

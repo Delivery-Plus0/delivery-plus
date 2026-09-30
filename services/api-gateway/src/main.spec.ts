@@ -1,3 +1,9 @@
+// http-proxy-middleware v4 ships ESM only. Node loads it from the compiled
+// CommonJS gateway (require(esm)), but Jest's own CommonJS module runtime
+// cannot parse it. These tests cover main.ts's pure helpers and never start the
+// proxy, so stub the module rather than load it.
+jest.mock('http-proxy-middleware', () => ({ createProxyMiddleware: jest.fn() }));
+
 import {
   extractPathParameters,
   generatePublicOpenApiDocument,

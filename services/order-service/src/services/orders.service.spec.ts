@@ -4,6 +4,7 @@ import { CartServiceClient } from '../common/cart-service.client';
 import { RestaurantServiceClient } from '../common/restaurant-service.client';
 import {
   BadRequestError,
+  DeliveryEventType,
   ForbiddenError,
   InvalidStateTransitionError,
   NotFoundError,
@@ -12,6 +13,7 @@ import {
   PaymentEventType,
   RestaurantStatus,
   UserRole,
+  lifecycleEventId,
 } from '@food-delivery/shared';
 
 describe('OrdersService', () => {
@@ -276,7 +278,7 @@ describe('OrdersService', () => {
     it('a duplicate payment.failed (order already FAILED via the HTTP sync) is a no-op', async () => {
       orders.findById.mockResolvedValue(withStatus(OrderStatus.FAILED) as any);
 
-      await service.syncFromPaymentEvent('order-1', OrderStatus.FAILED);
+      await service.syncStatusFromEvent('order-1', OrderStatus.FAILED);
 
       expect(orders.updateStatus).not.toHaveBeenCalled();
       expect(kafkaProducer.publish).not.toHaveBeenCalled();
@@ -285,21 +287,21 @@ describe('OrdersService', () => {
     it('a late payment.failed after the customer cancelled is skipped instead of failing the consumer', async () => {
       orders.findById.mockResolvedValue(withStatus(OrderStatus.CANCELLED) as any);
 
-      await expect(service.syncFromPaymentEvent('order-1', OrderStatus.FAILED)).resolves.toBeUndefined();
+      await expect(service.syncStatusFromEvent('order-1', OrderStatus.FAILED)).resolves.toBeUndefined();
       expect(orders.updateStatus).not.toHaveBeenCalled();
     });
 
     it('a stale payment.created arriving after confirmation is skipped', async () => {
       orders.findById.mockResolvedValue(withStatus(OrderStatus.CONFIRMED) as any);
 
-      await service.syncFromPaymentEvent('order-1', OrderStatus.PAYMENT_PENDING);
+      await service.syncStatusFromEvent('order-1', OrderStatus.PAYMENT_PENDING);
 
       expect(orders.updateStatus).not.toHaveBeenCalled();
     });
 
     it('ignores events for unknown orders', async () => {
       orders.findById.mockResolvedValue(null);
-      await expect(service.syncFromPaymentEvent('missing', OrderStatus.FAILED)).resolves.toBeUndefined();
+      await expect(service.syncStatusFromEvent('missing', OrderStatus.FAILED)).resolves.toBeUndefined();
     });
 
     it('publishes order.confirmed once when two writers race to CONFIRMED (compare-and-set)', async () => {
@@ -337,9 +339,63 @@ describe('OrdersService', () => {
       orders.findById.mockResolvedValue(withStatus(OrderStatus.CREATED) as any);
       orders.updateStatus.mockResolvedValue(withStatus(OrderStatus.PAYMENT_PENDING) as any);
 
-      await service.syncFromPaymentEvent('order-1', OrderStatus.PAYMENT_PENDING);
+      await service.syncStatusFromEvent('order-1', OrderStatus.PAYMENT_PENDING);
 
       expect(kafkaProducer.publish.mock.calls[0][1].eventType).toBe(OrderEventType.PAYMENT_PENDING);
+    });
+  });
+
+  describe('delivery events', () => {
+    const withStatus = (status: OrderStatus) => ({ ...baseOrder, status });
+
+    async function handlerFor(eventType: DeliveryEventType) {
+      await service.onModuleInit();
+      const call = kafkaConsumer.subscribe.mock.calls.find(([, type]) => type === eventType);
+      return call![2] as (event: { payload: { orderId: string } }) => Promise<void>;
+    }
+
+    it('delivery.driver_assigned moves a READY_FOR_PICKUP order on (event arrived before the HTTP sync)', async () => {
+      orders.findById.mockResolvedValue(withStatus(OrderStatus.READY_FOR_PICKUP) as any);
+      orders.updateStatus.mockResolvedValue(withStatus(OrderStatus.DRIVER_ASSIGNED) as any);
+
+      await (await handlerFor(DeliveryEventType.DRIVER_ASSIGNED))({ payload: { orderId: 'order-1' } });
+
+      expect(orders.updateStatus).toHaveBeenCalledWith(
+        'order-1',
+        OrderStatus.READY_FOR_PICKUP,
+        OrderStatus.DRIVER_ASSIGNED,
+      );
+    });
+
+    it('delivery.completed after the HTTP sync already delivered the order is a no-op', async () => {
+      orders.findById.mockResolvedValue(withStatus(OrderStatus.DELIVERED) as any);
+
+      await (await handlerFor(DeliveryEventType.COMPLETED))({ payload: { orderId: 'order-1' } });
+
+      expect(orders.updateStatus).not.toHaveBeenCalled();
+      expect(kafkaProducer.publish).not.toHaveBeenCalled();
+    });
+
+    it('a late delivery.driver_assigned once the order is picked up is skipped, not dead-lettered', async () => {
+      orders.findById.mockResolvedValue(withStatus(OrderStatus.PICKED_UP) as any);
+
+      await expect(
+        (await handlerFor(DeliveryEventType.DRIVER_ASSIGNED))({ payload: { orderId: 'order-1' } }),
+      ).resolves.toBeUndefined();
+      expect(orders.updateStatus).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('event identity', () => {
+    it('uses a stable eventId per (order, event type), so a re-publish dedupes downstream', async () => {
+      orders.findById.mockResolvedValue({ ...baseOrder, status: OrderStatus.CONFIRMED } as any);
+      orders.updateStatus.mockResolvedValue({ ...baseOrder, status: OrderStatus.PREPARING } as any);
+
+      await service.updateStatus('order-1', 'system', UserRole.ADMIN, { status: OrderStatus.PREPARING });
+
+      expect(kafkaProducer.publish.mock.calls[0][1].eventId).toBe(
+        lifecycleEventId('order-1', OrderEventType.PREPARING),
+      );
     });
   });
 

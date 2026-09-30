@@ -1,6 +1,6 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { CorrelationIdMiddleware, KafkaModule } from '@food-delivery/shared';
+import { CorrelationIdMiddleware } from '@food-delivery/shared';
 import { DriversModule } from './modules/drivers/drivers.module';
 import { HealthController } from './controllers/health.controller';
 import { ConfigModule } from './config/config.module';
@@ -14,11 +14,6 @@ const config = loadConfig();
   imports: [
     ConfigModule,
     TypeOrmModule.forRoot(buildTypeOrmConfig(config.databaseUrl, [Driver])),
-    KafkaModule.register({
-      clientId: 'driver-service',
-      brokers: [process.env.KAFKA_BROKER || 'localhost:9092'],
-      groupId: 'driver-service-group',
-    }),
     DriversModule,
   ],
   controllers: [HealthController],

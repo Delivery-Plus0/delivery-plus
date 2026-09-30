@@ -15,13 +15,13 @@ import {
   TOPICS,
   DeliveryEventType,
   generateCorrelationId,
+  lifecycleEventId,
 } from '@food-delivery/shared';
 import { DeliveriesRepository } from '../repositories/deliveries.repository';
 import { OrderServiceClient } from '../common/order-service.client';
 import { DriverServiceClient } from '../common/driver-service.client';
 import { CreateDeliveryDto } from '../dto/create-delivery.dto';
 import { Delivery } from '../entities/delivery.entity';
-import { v4 as uuidv4 } from 'uuid';
 
 const DISPATCH_ROLES = [UserRole.RESTAURANT_OWNER, UserRole.ADMIN];
 
@@ -56,7 +56,9 @@ export class DeliveriesService {
       );
     }
 
-    return this.deliveries.create(dto.orderId);
+    const delivery = await this.deliveries.create(dto.orderId);
+    await this.publishEvent(DeliveryEventType.CREATED, delivery);
+    return delivery;
   }
 
   async assignDriver(deliveryId: string, requester: DeliveryRequester): Promise<Delivery> {
@@ -77,6 +79,7 @@ export class DeliveriesService {
     });
 
     await this.orderClient.updateOrderStatus(delivery.orderId, OrderStatus.DRIVER_ASSIGNED);
+    await this.publishEvent(DeliveryEventType.DRIVER_ASSIGNED, updated as Delivery);
 
     return updated as Delivery;
   }
@@ -88,6 +91,7 @@ export class DeliveriesService {
 
     const updated = await this.deliveries.update(deliveryId, { status: DeliveryStatus.PICKED_UP });
     await this.orderClient.updateOrderStatus(delivery.orderId, OrderStatus.PICKED_UP);
+    await this.publishEvent(DeliveryEventType.PICKED_UP, updated as Delivery);
     return updated as Delivery;
   }
 
@@ -99,6 +103,7 @@ export class DeliveriesService {
     // No order-service call: order has no IN_TRANSIT counterpart, it
     // remains PICKED_UP until DELIVERED.
     const updated = await this.deliveries.update(deliveryId, { status: DeliveryStatus.IN_TRANSIT });
+    await this.publishEvent(DeliveryEventType.IN_TRANSIT, updated as Delivery);
     return updated as Delivery;
   }
 
@@ -112,6 +117,7 @@ export class DeliveriesService {
     if (delivery.driverId) {
       await this.driverClient.updateDriverStatus(delivery.driverId, DriverStatus.AVAILABLE);
     }
+    await this.publishEvent(DeliveryEventType.COMPLETED, updated as Delivery);
     return updated as Delivery;
   }
 
@@ -126,6 +132,7 @@ export class DeliveriesService {
     if (delivery.driverId) {
       await this.driverClient.updateDriverStatus(delivery.driverId, DriverStatus.AVAILABLE);
     }
+    await this.publishEvent(DeliveryEventType.CANCELLED, updated as Delivery);
     return updated as Delivery;
   }
 
@@ -231,9 +238,15 @@ export class DeliveriesService {
     return delivery;
   }
 
+  /**
+   * Published after the HTTP syncs to order-service and driver-service succeed, so consumers see
+   * the same state the synchronous path already applied. Keyed by orderId (same partition as the
+   * order's own events); the eventId is stable per (delivery, event type), so a re-publish after a
+   * retried request is deduplicated by consumers.
+   */
   private async publishEvent(eventType: DeliveryEventType, delivery: Delivery) {
     await this.kafkaProducer.publish(TOPICS.DELIVERY_EVENTS, {
-      eventId: uuidv4(),
+      eventId: lifecycleEventId(delivery.id, eventType),
       eventType,
       timestamp: new Date().toISOString(),
       correlationId: generateCorrelationId(),

@@ -32,7 +32,7 @@ describe('DriversService', () => {
       findAvailable: jest.fn(),
     } as unknown as jest.Mocked<DriversRepository>;
 
-    service = new DriversService(drivers, { subscribe: jest.fn(), start: jest.fn() } as any);
+    service = new DriversService(drivers);
   });
 
   describe('register', () => {

@@ -34,6 +34,7 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
   async subscribe<T>(topic: string, eventType: string, handler: MessageHandler<T>) {
     if (!this.handlers.has(topic)) {
       this.handlers.set(topic, new Map());
+      await this.ensureTopic(topic);
       await this.consumer.subscribe({ topic, fromBeginning: false });
     }
     this.handlers.get(topic)!.set(eventType, handler);
@@ -97,6 +98,22 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
         }
       },
     });
+  }
+
+  /**
+   * Topics are otherwise only auto-created when first produced to. On a fresh cluster a consumer
+   * that subscribes before any producer has written (e.g. driver-service to delivery.events) gets
+   * "This server does not host this topic-partition" and the service crashes on boot. Creating the
+   * topic first is idempotent (resolves false when it already exists) and waits for a leader.
+   */
+  private async ensureTopic(topic: string) {
+    const admin = this.kafka.admin();
+    await admin.connect();
+    try {
+      await admin.createTopics({ topics: [{ topic }], waitForLeaders: true });
+    } finally {
+      await admin.disconnect();
+    }
   }
 
   private async commitOffset(topic: string, partition: number, offset: string) {

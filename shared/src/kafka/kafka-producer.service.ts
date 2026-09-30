@@ -1,6 +1,7 @@
 import { Injectable, Inject, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
-import { Kafka, Producer } from 'kafkajs';
+import { Kafka, Message, Producer } from 'kafkajs';
 import { BaseEvent } from '../events/base-event';
+import { eventPartitionKey } from '../events/event-identity';
 import { KafkaModuleOptions } from './kafka.module';
 
 @Injectable()
@@ -27,23 +28,25 @@ export class KafkaProducerService implements OnModuleInit, OnModuleDestroy {
   }
 
   async publish<T>(topic: string, event: BaseEvent<T>) {
+    const key = eventPartitionKey(event);
     try {
       await this.producer.send({
         topic,
-        messages: [
-          {
-            key: event.correlationId, // Keeps related events in the same partition
-            value: JSON.stringify(event),
-          },
-        ],
+        messages: [{ key, value: JSON.stringify(event) }],
       });
       this.logger.log(`Published event ${event.eventType} to topic ${topic}`, {
         correlationId: event.correlationId,
         eventId: event.eventId,
+        key,
       });
     } catch (error) {
       this.logger.error(`Failed to publish event ${event.eventType} to topic ${topic}`, error);
       throw error;
     }
+  }
+
+  /** Sends messages as-is (key, value and headers untouched), e.g. to a dead-letter topic. */
+  async send(topic: string, messages: Message[]) {
+    await this.producer.send({ topic, messages });
   }
 }

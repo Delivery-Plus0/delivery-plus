@@ -27,3 +27,6 @@ apis.md
 
 # React Native mobile app lives in a separate repository
 /apps/
+
+# E2E seed output (ids for UI tests; contains the test-only password)
+e2e-seed-manifest.json

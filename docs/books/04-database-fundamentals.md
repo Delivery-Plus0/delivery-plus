@@ -105,7 +105,7 @@ Normalize facts that **change**; snapshot facts that must be **frozen in time**.
 - `payments.customerId` duplicates `orders.customerId` — needed because payment-service cannot join to another service's database, and because it authorizes `GET /payments/:id` locally.
 - `orders.totalAmount` is derivable from `order_items` but stored — a snapshot of what was charged.
 - `user_profiles.email` duplicates `credentials.email` across two services (auth and user) — a known synchronization risk if email change is ever added.
-- **Missing snapshot (PLANNED, issue #95):** orders store no delivery address; the only address is on the mutable profile.
+- **Delivery address snapshot (CURRENT, issue #95):** orders copy the drop-off address at checkout (`deliveryAddress`, `deliveryNotes`, optional coordinates), from the request or else from the mutable profile, so later profile edits don't move a placed order.
 
 ### 5. Example
 ```sql
@@ -492,7 +492,7 @@ During a rolling deploy, *old code runs against the new schema*. Every migration
 - CI: `.github/workflows/migration-verification.yml` runs all migrations on fresh databases and fails if any are pending; it also tests a legacy payment schema upgrade.
 - Enum change example: `notification_type` includes `PAYMENT_COMPLETED`, `DRIVER_ASSIGNED`, … already, so new notification handlers (issue #5) won't need an enum migration.
 
-### 5. Example — adding the order delivery address (issue #95), safely
+### 5. Example — adding the order delivery address (issue #95), safely (this is what migration `003-order-delivery-address` does)
 ```sql
 -- expand (compatible with old code)
 ALTER TABLE orders ADD COLUMN "deliveryAddress" varchar NULL;

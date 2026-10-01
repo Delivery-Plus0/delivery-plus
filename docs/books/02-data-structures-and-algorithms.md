@@ -382,7 +382,7 @@ ETA and "nearest by road" are shortest-path problems on a road graph.
 Dijkstra floods outwards in rings of equal cost. A* floods in a cone pointed at the destination.
 
 ### 4. Delivery Plus mapping — **FUTURE**
-Delivery Plus stores no coordinates for restaurants or customers today (restaurants have a text `address`; orders have no address — issue #95). Only the driver's last location exists (`driver:location:{userId}` in Redis). Any routing is future work; realistically it would be bought (OSRM, Valhalla, Google/Mapbox) rather than built ([Book 23](23-geo-location-systems.md)).
+Delivery Plus stores no coordinates for restaurants or customers today (restaurants have a text `address`; orders snapshot a text `deliveryAddress` at checkout, issue #95, with optional client-sent coordinates). Only the driver's last location exists (`driver:location:{userId}` in Redis). Any routing is future work; realistically it would be bought (OSRM, Valhalla, Google/Mapbox) rather than built ([Book 23](23-geo-location-systems.md)).
 
 ### 5. Example
 A* on a grid with Manhattan distance as `h` — see the lab.

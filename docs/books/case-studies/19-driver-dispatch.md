@@ -23,7 +23,7 @@ So the algorithm is: **the most recently updated available driver**. Location pl
 | "most recently updated" | the driver who just came online or just finished gets the job; drivers who waited longest get nothing (unfair) |
 | a human must press "assign" | orders wait whenever the restaurant is busy (#97) |
 | no driver accept or decline | a driver can't refuse; no timeout or reassignment |
-| no address on the order | even with driver locations there is no drop-off point (#95) |
+| ~~no address on the order~~ (**fixed, #95**) | orders now snapshot a text drop-off address; coordinates are optional and there is no geocoding yet |
 | claim race (**fixed, #33**) | two concurrent assigns can pick the **same** first driver. The BUSY claim used to be a blind write, so both could "succeed". It is now compare-and-set: exactly one claim wins, and the loser tries the next available driver |
 
 ## What already helps
@@ -35,7 +35,7 @@ So the algorithm is: **the most recently updated available driver**. Location pl
 
 1. ~~**Atomic claim** in driver-service~~: **done for #33.** `transitionStatus` runs `UPDATE … WHERE id = $1 AND status = 'AVAILABLE'`, and `claimAvailableDriver` tries the next driver on a lost claim.
 2. **Automatic dispatch** (#97): consume `order.ready_for_pickup` (or poll), create and assign. It must be idempotent per order.
-3. **Nearest available driver** ([case study 20](20-nearest-driver-search.md)) once orders have coordinates (#95).
+3. **Nearest available driver** ([case study 20](20-nearest-driver-search.md)) once orders reliably have coordinates (#95 stores them when the client sends them; geocoding is still missing).
 4. **Offer, accept or timeout** with the driver app (#99).
 5. **Batch assignment** when volume is high ([GEO-07](../labs/geo-and-algorithms-labs.md#geo-07-greedy-vs-batch-assignment)): greedy-nearest is locally good and globally poor.
 

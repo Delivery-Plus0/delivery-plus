@@ -21,11 +21,13 @@ import {
   generateCorrelationId,
   lifecycleEventId,
 } from '@food-delivery/shared';
-import { OrdersRepository } from '../repositories/orders.repository';
+import { DeliveryAddress, OrdersRepository } from '../repositories/orders.repository';
 import { CartServiceClient } from '../common/cart-service.client';
 import { RestaurantServiceClient } from '../common/restaurant-service.client';
+import { UserServiceClient } from '../common/user-service.client';
 import { isRoleAllowedForTransition } from '../common/order-transition-rules';
 import { UpdateOrderStatusDto } from '../dto/update-order-status.dto';
+import { CreateOrderDto } from '../dto/create-order.dto';
 import { Order } from '../entities/order.entity';
 
 @Injectable()
@@ -38,6 +40,7 @@ export class OrdersService implements OnModuleInit {
     private readonly restaurantClient: RestaurantServiceClient,
     private readonly kafkaProducer: KafkaProducerService,
     private readonly kafkaConsumer: KafkaConsumerService,
+    private readonly userClient: UserServiceClient,
   ) {}
 
   async onModuleInit() {
@@ -94,7 +97,12 @@ export class OrdersService implements OnModuleInit {
     await this.kafkaConsumer.start();
   }
 
-  async createFromCart(customerId: string, authHeader: string, idempotencyKey?: string): Promise<Order> {
+  async createFromCart(
+    customerId: string,
+    authHeader: string,
+    idempotencyKey?: string,
+    checkout: CreateOrderDto = {},
+  ): Promise<Order> {
     if (idempotencyKey) {
       const prior = await this.orders.findByCustomerAndIdempotencyKey(customerId, idempotencyKey);
       if (prior) {
@@ -113,6 +121,8 @@ export class OrdersService implements OnModuleInit {
       throw new BadRequestError('Restaurant is currently closed');
     }
 
+    const delivery = await this.resolveDeliveryAddress(checkout, authHeader);
+
     try {
       const order = await this.orders.create(
         customerId,
@@ -125,6 +135,7 @@ export class OrdersService implements OnModuleInit {
         })),
         cart.total,
         idempotencyKey,
+        delivery,
       );
 
       await this.cartClient.clearCart(authHeader);
@@ -168,6 +179,34 @@ export class OrdersService implements OnModuleInit {
     }
 
     throw new ForbiddenError('You do not have access to this order');
+  }
+
+  /**
+   * The drop-off address for a new order: the one sent at checkout, otherwise the customer's profile
+   * address. It is copied onto the order, so later profile edits never move a placed order.
+   * Coordinates are only taken together with an address sent at checkout.
+   */
+  private async resolveDeliveryAddress(checkout: CreateOrderDto, authHeader: string): Promise<DeliveryAddress> {
+    const notes = checkout.deliveryNotes || null;
+    if (checkout.deliveryAddress) {
+      return {
+        address: checkout.deliveryAddress,
+        notes,
+        latitude: checkout.deliveryLatitude ?? null,
+        longitude: checkout.deliveryLongitude ?? null,
+      };
+    }
+    if (checkout.deliveryLatitude !== undefined || checkout.deliveryLongitude !== undefined) {
+      throw new BadRequestError('deliveryLatitude/deliveryLongitude require a deliveryAddress');
+    }
+
+    const profileAddress = (await this.userClient.getOwnProfile(authHeader)).address?.trim();
+    if (!profileAddress) {
+      throw new BadRequestError(
+        'A delivery address is required: send deliveryAddress or add an address to your profile',
+      );
+    }
+    return { address: profileAddress, notes, latitude: null, longitude: null };
   }
 
   async listByCustomer(customerId: string, page: number, limit: number): Promise<PaginatedResult<Order>> {

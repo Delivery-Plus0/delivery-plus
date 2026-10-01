@@ -5,6 +5,14 @@ import { OrderStatus } from '@food-delivery/shared';
 import { Order } from '../entities/order.entity';
 import { OrderItem } from '../entities/order-item.entity';
 
+/** Drop-off address snapshot stored on a new order. */
+export interface DeliveryAddress {
+  address: string;
+  notes: string | null;
+  latitude: number | null;
+  longitude: number | null;
+}
+
 export interface NewOrderItem {
   menuItemId: string;
   name: string;
@@ -28,7 +36,8 @@ export class OrdersRepository {
     restaurantId: string,
     items: NewOrderItem[],
     totalAmount: number,
-    idempotencyKey?: string,
+    idempotencyKey: string | undefined,
+    delivery: DeliveryAddress,
   ): Promise<Order> {
     const order = this.repo.create({
       customerId,
@@ -36,6 +45,10 @@ export class OrdersRepository {
       status: OrderStatus.CREATED,
       totalAmount: totalAmount.toFixed(2),
       idempotencyKey: idempotencyKey ?? null,
+      deliveryAddress: delivery.address,
+      deliveryNotes: delivery.notes,
+      deliveryLatitude: delivery.latitude,
+      deliveryLongitude: delivery.longitude,
       items: items.map(
         (item) =>
           ({

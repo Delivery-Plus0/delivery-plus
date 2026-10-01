@@ -38,6 +38,22 @@ export class Order {
   @Column({ type: 'varchar', length: 255, nullable: true })
   idempotencyKey?: string | null;
 
+  /**
+   * Drop-off address copied at checkout and never updated afterwards. Nullable only because orders
+   * created before this column existed have none; every new order gets one.
+   */
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  deliveryAddress!: string | null;
+
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  deliveryNotes!: string | null;
+
+  @Column({ type: 'double precision', nullable: true })
+  deliveryLatitude!: number | null;
+
+  @Column({ type: 'double precision', nullable: true })
+  deliveryLongitude!: number | null;
+
   @OneToMany(() => OrderItem, (item) => item.order, { cascade: true, eager: true })
   items!: OrderItem[];
 

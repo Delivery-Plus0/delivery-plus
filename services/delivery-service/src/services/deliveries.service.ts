@@ -19,11 +19,14 @@ import {
 } from '@food-delivery/shared';
 import { DeliveriesRepository } from '../repositories/deliveries.repository';
 import { OrderServiceClient } from '../common/order-service.client';
-import { DriverServiceClient } from '../common/driver-service.client';
+import { DriverDto, DriverServiceClient, DriverStatusRejectedError } from '../common/driver-service.client';
 import { CreateDeliveryDto } from '../dto/create-delivery.dto';
 import { Delivery } from '../entities/delivery.entity';
 
 const DISPATCH_ROLES = [UserRole.RESTAURANT_OWNER, UserRole.ADMIN];
+
+/** How many drivers one assignment tries when it keeps losing claims to concurrent assignments. */
+const MAX_DRIVER_CLAIM_ATTEMPTS = 3;
 
 /** The order statuses a delivery drives, in order. */
 const ORDER_DELIVERY_PATH = [
@@ -89,12 +92,7 @@ export class DeliveriesService {
     }
     this.assertTransition(delivery.status, DeliveryStatus.DRIVER_ASSIGNED);
 
-    const driver = await this.driverClient.findAvailableDriver();
-    if (!driver) {
-      throw new ConflictError('No available drivers to assign');
-    }
-
-    await this.driverClient.updateDriverStatus(driver.id, DriverStatus.BUSY);
+    const driver = await this.claimAvailableDriver();
     let updated: Delivery | null;
     try {
       updated = await this.deliveries.transition(deliveryId, delivery.status, {
@@ -299,6 +297,26 @@ export class DeliveriesService {
   }
 
   /** assignDriver claimed a driver but could not record the assignment: give the driver back. */
+  /**
+   * Picks an available driver and claims them (AVAILABLE -> BUSY). driver-service's claim is
+   * compare-and-set, so when two assignments race for the same driver exactly one wins; the loser
+   * gets DriverStatusRejectedError and moves on to the next available driver.
+   */
+  private async claimAvailableDriver(): Promise<DriverDto> {
+    for (let attempt = 0; attempt < MAX_DRIVER_CLAIM_ATTEMPTS; attempt++) {
+      const driver = await this.driverClient.findAvailableDriver();
+      if (!driver) break;
+      try {
+        await this.driverClient.updateDriverStatus(driver.id, DriverStatus.BUSY);
+        return driver;
+      } catch (error) {
+        if (!(error instanceof DriverStatusRejectedError)) throw error;
+        this.logger.warn(`Driver ${driver.id} was claimed by another assignment first; trying the next one`);
+      }
+    }
+    throw new ConflictError('No available drivers to assign');
+  }
+
   private async giveBackClaimedDriver(driverId: string): Promise<void> {
     try {
       await this.driverClient.releaseDriver(driverId);

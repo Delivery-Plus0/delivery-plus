@@ -105,7 +105,7 @@ Services react to incoming events by updating their own internal state or creati
 
 - `notification-service` subscribes to order/payment/delivery topics and persists order notifications; payment and delivery handlers currently contain no-op behavior because the required lookup/contract work is not implemented
 - `order-service` converges its status from payment and delivery events (tolerant of duplicates and stale events)
-- `driver-service` consumes nothing; availability is set synchronously by delivery-service
+- `driver-service` consumes nothing; availability is set synchronously by delivery-service (compare-and-set claim and release; a BUSY driver cannot make themselves AVAILABLE)
 
 ## Why this matters for maintainers
 

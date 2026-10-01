@@ -104,7 +104,7 @@ A service boundary is a *language* boundary. If two services constantly need eac
 
 ### 5. Example — "status" means three different things: `order_status` (10 values), `delivery_status` (6), `driver_status` (4). The **mapping** between them lives in delivery-service (`ORDER_DELIVERY_PATH`, `syncOrderAlongDelivery`) — a translation between contexts, like an anticorruption layer.
 
-### 6. Failure scenario — the driver's availability (fleet context) and the driver's current assignment (fulfilment context) live in different services. A BUSY driver can set themselves AVAILABLE through driver-service because driver-service doesn't know about deliveries (issue #33).
+### 6. Failure scenario — the driver's availability (fleet context) and the driver's current assignment (fulfilment context) live in different services. Until issue #33 was fixed, a BUSY driver could set themselves AVAILABLE through driver-service, because driver-service doesn't know about deliveries. The fix keeps the boundary: driver-service still knows nothing about deliveries, but only delivery-service (system token) may move a driver out of BUSY.
 
 ### 7. Trade-offs — fine-grained contexts = clear ownership, more integration; coarse contexts = fewer calls, bigger models.
 ### 8. Performance — chatty boundaries (menu-service asking restaurant-service about ownership on every write) cost a round trip per mutation.

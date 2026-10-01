@@ -24,7 +24,7 @@ So the algorithm is: **the most recently updated available driver**. Location pl
 | a human must press "assign" | orders wait whenever the restaurant is busy (#97) |
 | no driver accept or decline | a driver can't refuse; no timeout or reassignment |
 | no address on the order | even with driver locations there is no drop-off point (#95) |
-| claim race | two concurrent assigns can pick the **same** first driver; the BUSY update is a blind write (#33), so both may "succeed" in marking them BUSY. Delivery CAS prevents double-assigning one *delivery*, not one *driver* across two deliveries |
+| claim race (**fixed, #33**) | two concurrent assigns can pick the **same** first driver. The BUSY claim used to be a blind write, so both could "succeed". It is now compare-and-set: exactly one claim wins, and the loser tries the next available driver |
 
 ## What already helps
 
@@ -33,7 +33,7 @@ So the algorithm is: **the most recently updated available driver**. Location pl
 
 ## A path forward
 
-1. **Atomic claim** in driver-service: `UPDATE drivers SET status='BUSY' WHERE id=$1 AND status='AVAILABLE'`. Only one assign wins; the loser tries the next driver (#33).
+1. ~~**Atomic claim** in driver-service~~: **done for #33.** `transitionStatus` runs `UPDATE … WHERE id = $1 AND status = 'AVAILABLE'`, and `claimAvailableDriver` tries the next driver on a lost claim.
 2. **Automatic dispatch** (#97): consume `order.ready_for_pickup` (or poll), create and assign. It must be idempotent per order.
 3. **Nearest available driver** ([case study 20](20-nearest-driver-search.md)) once orders have coordinates (#95).
 4. **Offer, accept or timeout** with the driver app (#99).

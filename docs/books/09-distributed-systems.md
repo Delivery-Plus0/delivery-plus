@@ -138,7 +138,7 @@ Consistency is a per-feature product decision: "may the customer see a stale ord
 | Delivery status in the customer app | eventual, ≤ 10 s (polling) | **CURRENT** |
 | Menu / restaurant via Redis cache | eventual, until invalidation | **CURRENT** |
 | Payment uniqueness per order | strong (unique index) | **CURRENT** |
-| Driver availability vs delivery assignment | two services, synchronously updated, can diverge on failure | **PARTIAL** (#33) |
+| Driver availability vs delivery assignment | two services, synchronously updated. Claims and releases are compare-and-set and retry-safe, and drivers can't leave BUSY themselves (#33); drift after a crash is not reconciled | **PARTIAL** |
 
 ### 5. Example — read-your-writes on the customer app: after "Place order", the app navigates to the order it just received in the response, not to a list that might be served from a stale cache.
 ### 6. Failure scenario — strong consistency where it isn't needed (synchronous notification on checkout) makes checkout fail when notifications are down.

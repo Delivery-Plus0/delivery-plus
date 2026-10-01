@@ -83,7 +83,7 @@ For every route, answer two questions: "which roles?" and "whose objects?". If y
 | Notifications | any user could mark any notification read | owner only, 404 otherwise | [04](case-studies/04-notification-ownership.md) |
 | Refunds | a customer could refund their own completed payment, even after delivery | admin only | [Book 25](25-payment-systems.md) |
 | **Still open** | restaurant `ownerId` returned in public restaurant payloads; `GET /restaurants/:id/ownership/:userId` is unauthenticated (an ownership oracle) | — | issue #59 |
-| **Still open** | a BUSY driver can set themselves AVAILABLE | — | issue #33 |
+| **Fixed (#33)** | a BUSY driver could set themselves AVAILABLE and take a second delivery; drivers may now only go online/offline (403 while BUSY) | `driver-transition-rules.ts` | issue #33 |
 | **Fixed (PR #105)**; one part still open | public registration accepted `role: "ADMIN"`. Fixed with an allow-list plus a service re-check. **Still open:** DRIVER/RESTAURANT_OWNER are self-assigned without any approval | — | [case study 21](case-studies/21-self-registered-admin.md) |
 
 ### 5. Example — ownership delegated to the source of truth: delivery-service doesn't re-implement order access rules; it calls `GET /orders/:id` on order-service **with the caller's own token** (`OrderServiceClient.assertReadableBy` in `services/delivery-service/src/common/order-service.client.ts`). Whatever order-service decides (owner, restaurant owner, admin) is what delivery-service enforces.

@@ -48,6 +48,47 @@ async function waitFor<T>(
   }
 }
 
+/** HTTP status of a request, whether it succeeded or failed. */
+async function statusOf(request: Promise<unknown>): Promise<number> {
+  try {
+    const response = (await request) as { status: number };
+    return response.status;
+  } catch (error: any) {
+    if (error.response) return error.response.status;
+    throw error;
+  }
+}
+
+/**
+ * Public registration must never yield admin privileges: asking for ADMIN is refused without
+ * creating anything, and an ordinary sign-up cannot reach an admin-only route.
+ */
+async function assertNoSelfRegisteredAdmin() {
+  const email = `e2e.no-admin.${Date.now()}@example.com`;
+  const body = { email, password: 'password123', fullName: 'E2E No Admin' };
+
+  const adminAttempt = await statusOf(axios.post(`${API_URL}/api/auth/register`, { ...body, role: 'ADMIN' }));
+  if (adminAttempt !== 400) {
+    throw new Error(`Registering with role ADMIN returned ${adminAttempt}, expected 400`);
+  }
+
+  // A 409 here would mean the refused attempt still created the account.
+  const signup = await axios.post(`${API_URL}/api/auth/register`, body);
+  if (signup.data.role !== 'CUSTOMER') {
+    throw new Error(`Public registration produced role ${signup.data.role}, expected CUSTOMER`);
+  }
+
+  const adminRoute = await statusOf(
+    axios.get(`${API_URL}/api/drivers/available`, {
+      headers: { Authorization: `Bearer ${signup.data.accessToken}` },
+    }),
+  );
+  if (adminRoute !== 403) {
+    throw new Error(`A self-registered account got ${adminRoute} on an admin-only route, expected 403`);
+  }
+  console.log('Self-registration cannot obtain ADMIN (400 on request, 403 on admin route)');
+}
+
 async function runE2E() {
   console.log('Starting E2E test...');
 
@@ -74,6 +115,9 @@ async function runE2E() {
     });
     const driverToken = driverLogin.data.accessToken;
     const driverAuth = { headers: { Authorization: `Bearer ${driverToken}` } };
+
+    // 0. Registration is a privilege boundary.
+    await assertNoSelfRegisteredAdmin();
 
     // 1. Get Restaurants
     const restaurantsRes = await axios.get(`${API_URL}/api/restaurants`, customerAuth);

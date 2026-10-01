@@ -2,7 +2,8 @@ import { AuthService } from './auth.service';
 import { CredentialsRepository } from '../repositories/credentials.repository';
 import { UserServiceClient } from '../common/user-service.client';
 import { JwtService } from '@nestjs/jwt';
-import { UserRole, ConflictError, UnauthorizedError, RateLimitGuard, RATE_LIMIT_KEY } from '@food-delivery/shared';
+import { UserRole, ConflictError, ForbiddenError, UnauthorizedError, RateLimitGuard, RATE_LIMIT_KEY } from '@food-delivery/shared';
+import { SELF_SERVICE_ROLES } from '../dto/register.dto';
 import * as bcrypt from 'bcrypt';
 import { createHash } from 'node:crypto';
 import { loadConfig } from '../config/app-config';
@@ -225,6 +226,73 @@ describe('AuthService', () => {
       ).rejects.toThrow('user-service down');
 
       expect(credentials.deleteById).toHaveBeenCalledWith('orphan-id');
+    });
+
+    describe('role is server-authoritative (no self-assigned privileges)', () => {
+      // The repository returns what the service asked it to persist, so the token's role can only
+      // come from the role the service decided on.
+      beforeEach(() => {
+        credentials.findByEmail.mockResolvedValue(null);
+        credentials.create.mockImplementation(async (data) =>
+          ({ id: 'new-user-id', ...data, createdAt: new Date(), updatedAt: new Date() }) as any,
+        );
+        userServiceClient.createProfile.mockResolvedValue(undefined);
+      });
+
+      // Every role outside the self-service allow-list: ADMIN today, and any privileged role added later.
+      const privilegedRoles = Object.values(UserRole).filter((role) => !SELF_SERVICE_ROLES.includes(role));
+
+      it('keeps ADMIN out of the self-service roles', () => {
+        expect(privilegedRoles).toContain(UserRole.ADMIN);
+        expect(SELF_SERVICE_ROLES).not.toContain(UserRole.ADMIN);
+      });
+
+      it.each(privilegedRoles)('refuses to register a %s account and persists nothing', async (role) => {
+        await expect(
+          service.register({ email: 'attacker@example.com', password: 'valid-password', fullName: 'Attacker', role }),
+        ).rejects.toThrow(ForbiddenError);
+
+        expect(credentials.findByEmail).not.toHaveBeenCalled();
+        expect(credentials.create).not.toHaveBeenCalled();
+        expect(userServiceClient.createProfile).not.toHaveBeenCalled();
+        expect(jwtService.signAsync).not.toHaveBeenCalled();
+      });
+
+      it('registers a normal user as CUSTOMER with a hashed password and a CUSTOMER token', async () => {
+        const result = await service.register({ email: 'jane@example.com', password: 'valid-password', fullName: 'Jane' });
+
+        const persisted = credentials.create.mock.calls[0][0];
+        expect(persisted.role).toBe(UserRole.CUSTOMER);
+        expect(persisted.passwordHash).not.toBe('valid-password');
+        await expect(bcrypt.compare('valid-password', persisted.passwordHash)).resolves.toBe(true);
+        expect(userServiceClient.createProfile).toHaveBeenCalled();
+        expect(jwtService.signAsync).toHaveBeenCalledWith({
+          sub: 'new-user-id',
+          email: 'jane@example.com',
+          role: UserRole.CUSTOMER,
+        });
+        expect(result.role).toBe(UserRole.CUSTOMER);
+      });
+
+      it('treats an explicit null role like an omitted one (CUSTOMER)', async () => {
+        const result = await service.register({
+          email: 'nullrole@example.com',
+          password: 'valid-password',
+          fullName: 'Null Role',
+          role: null as unknown as UserRole,
+        });
+
+        expect(credentials.create.mock.calls[0][0].role).toBe(UserRole.CUSTOMER);
+        expect(result.role).toBe(UserRole.CUSTOMER);
+      });
+
+      it.each(SELF_SERVICE_ROLES)('still lets a caller register as %s', async (role) => {
+        const result = await service.register({ email: 'b@b.com', password: 'valid-password', fullName: 'B', role });
+
+        expect(credentials.create.mock.calls[0][0].role).toBe(role);
+        expect(jwtService.signAsync).toHaveBeenCalledWith(expect.objectContaining({ role }));
+        expect(result.role).toBe(role);
+      });
     });
   });
 

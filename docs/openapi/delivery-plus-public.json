@@ -2824,8 +2824,7 @@
             "enum": [
               "CUSTOMER",
               "RESTAURANT_OWNER",
-              "DRIVER",
-              "ADMIN"
+              "DRIVER"
             ]
           }
         }

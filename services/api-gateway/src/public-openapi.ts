@@ -202,7 +202,8 @@ const baseSchemas = {
       password: { type: 'string', format: 'password' },
       fullName: { type: 'string' },
       phone: { type: 'string', nullable: true },
-      role: { type: 'string', enum: ['CUSTOMER', 'RESTAURANT_OWNER', 'DRIVER', 'ADMIN'] },
+      // ADMIN is deliberately absent: it cannot be self-assigned at registration.
+      role: { type: 'string', enum: ['CUSTOMER', 'RESTAURANT_OWNER', 'DRIVER'] },
     },
   },
   VerifyEmailRequest: {

@@ -23,9 +23,13 @@ export class DriversRepository {
     return this.repo.save(this.repo.create(data));
   }
 
-  async updateStatus(id: string, status: DriverStatus): Promise<Driver | null> {
-    await this.repo.update({ id }, { status });
-    return this.findById(id);
+  /**
+   * Compare-and-set: moves the driver from `from` to `to` only if it is still in `from`.
+   * Returns the updated driver, or null when another writer changed the status first.
+   */
+  async transitionStatus(id: string, from: DriverStatus, to: DriverStatus): Promise<Driver | null> {
+    const result = await this.repo.update({ id, status: from }, { status: to });
+    return result.affected ? this.findById(id) : null;
   }
 
   findAvailable(page: number, limit: number): Promise<[Driver[], number]> {

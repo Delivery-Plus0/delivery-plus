@@ -120,7 +120,7 @@ AI is strongest at breadth (scanning many files, listing edge cases) and weakest
 ### 9. Security — AI security reviews find common patterns (injection, missing guards) and miss business-logic authorization; combine with the BOLA checklist in [Book 17](17-security-engineering.md).
 ### 10. Operations — AI-assisted incident analysis: paste sanitised logs and timelines, ask for hypotheses, test each.
 
-### 11. Lab — ask an AI tool to review `services/driver-service/src/services/drivers.service.ts` for authorization issues. Does it find issue #33 (a BUSY driver can set themselves AVAILABLE)?
+### 11. Lab — check out a commit from before the issue #33 fix (`git log -- services/driver-service/src/common/driver-transition-rules.ts`), then ask an AI tool to review `services/driver-service/src/services/drivers.service.ts` for authorization issues. Does it find the bug (a BUSY driver can set themselves AVAILABLE)?
 ### 12. Verification — whether it finds it or not, you can explain the bug from the code.
 
 ### 13. Interview questions

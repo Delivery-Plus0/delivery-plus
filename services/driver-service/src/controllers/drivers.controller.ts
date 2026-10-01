@@ -33,7 +33,7 @@ export class DriversController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.DRIVER)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Go online (OFFLINE -> AVAILABLE)' })
+  @ApiOperation({ summary: 'Go online (OFFLINE -> AVAILABLE; no-op if already AVAILABLE; 403 while BUSY)' })
   goOnline(@CurrentUser() user: JwtPayload) {
     return this.driversService.updateStatus(user.sub, user.role, { status: DriverStatus.AVAILABLE });
   }
@@ -42,7 +42,7 @@ export class DriversController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.DRIVER)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Go offline (AVAILABLE -> OFFLINE)' })
+  @ApiOperation({ summary: 'Go offline (AVAILABLE -> OFFLINE; no-op if already OFFLINE; 409 while BUSY)' })
   goOffline(@CurrentUser() user: JwtPayload) {
     return this.driversService.updateStatus(user.sub, user.role, { status: DriverStatus.OFFLINE });
   }
@@ -51,7 +51,7 @@ export class DriversController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.DRIVER, UserRole.ADMIN)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Set driver status explicitly (role- and transition-checked)' })
+  @ApiOperation({ summary: 'Set driver status explicitly. A DRIVER may only go online/offline; ADMIN any valid transition' })
   setStatus(@CurrentUser() user: JwtPayload, @Body() dto: UpdateDriverStatusDto) {
     return this.driversService.updateStatus(user.sub, user.role, dto);
   }

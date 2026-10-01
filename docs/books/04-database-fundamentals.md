@@ -365,7 +365,7 @@ CAS turns a race into a *decision*: exactly one writer wins, the others learn th
 
 What the service does after losing the race (`OrdersService.updateStatus`): re-read; if the row is already at the target status, return it and **publish nothing** (someone else already did); otherwise throw `InvalidStateTransitionError`.
 
-**Remaining gap — PARTIAL:** driver status updates (`DriversRepository.updateStatus`) are plain `UPDATE … WHERE id = :id` with the transition checked in code beforehand — a check-then-act race (issue #33).
+**Same fix for drivers (issue #33):** driver status updates used to be a plain `UPDATE … WHERE id = :id` after checking the transition in code, a check-then-act race in which two assignments could both claim one driver. `DriversRepository.transitionStatus(id, from, to)` is now compare-and-set too; the loser gets a 409, and delivery-service tries the next driver.
 
 ### 5. Example
 ```sql

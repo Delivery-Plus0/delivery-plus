@@ -1,7 +1,8 @@
 import { DeliveriesService } from './deliveries.service';
 import { DeliveriesRepository } from '../repositories/deliveries.repository';
 import { OrderServiceClient } from '../common/order-service.client';
-import { DriverServiceClient } from '../common/driver-service.client';
+import { DriverServiceClient, DriverStatusRejectedError } from '../common/driver-service.client';
+import { Delivery } from '../entities/delivery.entity';
 import {
   BadRequestError,
   ConflictError,
@@ -136,6 +137,52 @@ describe('DeliveriesService', () => {
       expect(driverClient.updateDriverStatus).toHaveBeenCalledWith('driver-1', DriverStatus.BUSY);
       expect(orderClient.updateOrderStatus).toHaveBeenCalledWith('order-1', OrderStatus.DRIVER_ASSIGNED);
       expect(result.status).toBe(DeliveryStatus.DRIVER_ASSIGNED);
+    });
+
+    describe('when another assignment claims the same driver first', () => {
+      const driverA = { id: 'driver-a', userId: 'user-a', status: DriverStatus.AVAILABLE };
+      const driverB = { id: 'driver-b', userId: 'user-b', status: DriverStatus.AVAILABLE };
+
+      beforeEach(() => {
+        deliveries.findById.mockResolvedValue(baseDelivery);
+        deliveries.transition.mockImplementation(async (_id, _from, data) => ({ ...baseDelivery, ...data }) as Delivery);
+      });
+
+      it('moves on to the next available driver', async () => {
+        driverClient.findAvailableDriver.mockResolvedValueOnce(driverA).mockResolvedValueOnce(driverB);
+        driverClient.updateDriverStatus
+          .mockRejectedValueOnce(new DriverStatusRejectedError('driver-a', DriverStatus.BUSY))
+          .mockResolvedValueOnce(undefined);
+
+        const result = await service.assignDriver('delivery-1', actor(UserRole.ADMIN));
+
+        expect(result.driverId).toBe('driver-b');
+        expect(deliveries.transition).toHaveBeenCalledWith('delivery-1', DeliveryStatus.CREATED, {
+          driverId: 'driver-b',
+          status: DeliveryStatus.DRIVER_ASSIGNED,
+        });
+        // The driver it lost is not "given back": it belongs to the assignment that won.
+        expect(driverClient.releaseDriver).not.toHaveBeenCalled();
+      });
+
+      it('gives up with 409 after a bounded number of lost claims', async () => {
+        driverClient.findAvailableDriver.mockResolvedValue(driverA);
+        driverClient.updateDriverStatus.mockRejectedValue(new DriverStatusRejectedError('driver-a', DriverStatus.BUSY));
+
+        await expect(service.assignDriver('delivery-1', actor(UserRole.ADMIN))).rejects.toThrow(
+          'No available drivers to assign',
+        );
+        expect(driverClient.updateDriverStatus).toHaveBeenCalledTimes(3);
+        expect(deliveries.transition).not.toHaveBeenCalled();
+      });
+
+      it('does not retry on other driver-service failures', async () => {
+        driverClient.findAvailableDriver.mockResolvedValue(driverA);
+        driverClient.updateDriverStatus.mockRejectedValue(new Error('driver-service down'));
+
+        await expect(service.assignDriver('delivery-1', actor(UserRole.ADMIN))).rejects.toThrow('driver-service down');
+        expect(driverClient.updateDriverStatus).toHaveBeenCalledTimes(1);
+      });
     });
   });
 

@@ -1,6 +1,6 @@
 # Case Study 09 — Driver Availability Lifecycle
 
-**Status: PARTIAL (release made retry-safe in `67835d3`; deterministic transitions open in [#33](https://github.com/Yousefa7medmaher/delivery-plus/issues/33))** · [Case studies](README.md) · Books: [09](../09-distributed-systems.md), [10](../10-microservices-and-domain-design.md), [23](../23-geo-location-systems.md) · Lab: [DS-06](../labs/distributed-systems-labs.md#ds-06-repeat-delivery-completion-with-a-service-down)
+**Status: PARTIAL (release made retry-safe in `67835d3`; deterministic transitions fixed for [#33](https://github.com/Yousefa7medmaher/delivery-plus/issues/33); drift reconciliation still open)** · [Case studies](README.md) · Books: [09](../09-distributed-systems.md), [10](../10-microservices-and-domain-design.md), [23](../23-geo-location-systems.md) · Lab: [DS-06](../labs/distributed-systems-labs.md#ds-06-repeat-delivery-completion-with-a-service-down)
 
 ## The lifecycle
 
@@ -50,10 +50,15 @@ In `services/delivery-service/src/services/deliveries.service.ts`:
 - `driver-service.client.spec.ts`: release is idempotent.
 - The fix was verified live on the E2E stack with order-service down and, separately, with driver-service down.
 
-## What is still open (#33)
+## Fixed for #33
 
-- driver-service's own status update is a **blind write**: read, check the transition, then update. There is no CAS. A driver tapping "go offline" while delivery-service marks them BUSY can interleave.
-- A BUSY driver calling `/me/online` or `/me/offline` gets an invalid-transition error, and there is no "I'm going offline after this delivery" intent.
+- **A BUSY driver could make themselves AVAILABLE** (`/me/online` or `/me/status`): the role rules only looked at the *target* status, and BUSY → AVAILABLE is a valid transition. Rules are now per *(from → to)* pair (`services/driver-service/src/common/driver-transition-rules.ts`). A DRIVER may only go OFFLINE ↔ AVAILABLE; claim and release are ADMIN-only (delivery-service's system token). A BUSY driver now gets 403.
+- **Status updates were a blind write** (read, check, `UPDATE … WHERE id`). Two assignments could both claim one driver, and "go offline" could interleave with a claim. Writes are now compare-and-set (`transitionStatus`), so exactly one wins and the loser gets 409. delivery-service's `claimAvailableDriver` then tries the next driver (up to 3).
+- **Repeated requests:** going online/offline twice, or releasing twice, is a no-op. Claiming a BUSY driver is never a no-op.
+
+## What is still open
+
+- There is no "I'm going offline after this delivery" intent: a BUSY driver must wait for the release.
 - Nothing **reconciles** drift. A driver who is BUSY with no active delivery stays BUSY until someone notices.
 - The location TTL (`driver:location:{userId}`, 300 s) is independent of status: an AVAILABLE driver may have no known location ([case study 19](19-driver-dispatch.md)).
 
@@ -64,6 +69,6 @@ In `services/delivery-service/src/services/deliveries.service.ts`:
 ## What a senior engineer would ask
 
 1. Which service *owns* driver availability: driver-service, or delivery-service, which knows about active deliveries?
-2. Write the CAS version of `updateStatus` in driver-service. What does the caller do on `null`?
+2. Read `transitionStatus` and `DriversService.transition`. Why is a repeated AVAILABLE a no-op but a repeated BUSY a conflict? What does each caller do on `null`?
 3. Design a reconciliation job: what query finds drift, and what does it do automatically versus alert on?
 4. What should "go offline" mean for a BUSY driver?

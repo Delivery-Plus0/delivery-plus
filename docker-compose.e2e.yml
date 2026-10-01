@@ -1,0 +1,55 @@
+# E2E (UI automation) environment.
+#
+# Layered on top of the deterministic test layout and run as its own Compose project, so it gets its
+# own containers, network and volumes (an isolated, throw-away database) and can run next to the dev
+# stack:
+#
+#   docker compose -p delivery-plus-e2e \
+#     -f docker-compose.base.yml -f docker-compose.test.yml -f docker-compose.e2e.yml \
+#     up -d --build --wait --wait-timeout 300
+#
+# Only the two ports a client needs are published, on non-default host ports:
+#   - API Gateway   http://localhost:3100
+#   - Object store  http://localhost:9100   (presigned uploads + public media URLs)
+# `npm run e2e:env:up` / `e2e:env:down` wrap the command above; see docs/e2e.md.
+
+services:
+  media-storage:
+    ports: !override
+      - '127.0.0.1:9100:9000'
+
+  postgres:
+    ports: !reset []
+
+  redis:
+    ports: !reset []
+
+  kafka:
+    ports: !reset []
+
+  api-gateway:
+    ports: !override
+      - '127.0.0.1:3100:3000'
+
+  # Media URLs handed to clients must point at the E2E object store, not the dev one on :9000.
+  user-service:
+    environment:
+      AWS_S3_PUBLIC_ENDPOINT: http://localhost:9100
+      AWS_PUBLIC_BASE_URL: http://localhost:9100/delivery-plus-media
+
+  restaurant-service:
+    environment:
+      AWS_S3_PUBLIC_ENDPOINT: http://localhost:9100
+      AWS_PUBLIC_BASE_URL: http://localhost:9100/delivery-plus-media
+
+  menu-service:
+    environment:
+      AWS_S3_PUBLIC_ENDPOINT: http://localhost:9100
+      AWS_PUBLIC_BASE_URL: http://localhost:9100/delivery-plus-media
+
+  # payment-service declines ~10% of payments at random by default (PAYMENT_SUCCESS_RATE=0.9).
+  # UI checkout tests must be deterministic, so every payment succeeds unless a test forces a
+  # decline via the API (`simulateFailure: true`, used by seed:e2e for the FAILED scenario).
+  payment-service:
+    environment:
+      PAYMENT_SUCCESS_RATE: '1'

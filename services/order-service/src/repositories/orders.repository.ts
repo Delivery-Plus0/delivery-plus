@@ -55,9 +55,13 @@ export class OrdersRepository {
     });
   }
 
-  async updateStatus(id: string, status: OrderStatus): Promise<Order | null> {
-    await this.repo.update({ id }, { status });
-    return this.findById(id);
+  /**
+   * Compare-and-set: moves the order from `from` to `to` only if it is still in `from`.
+   * Returns the updated order, or null when another writer changed it first.
+   */
+  async updateStatus(id: string, from: OrderStatus, to: OrderStatus): Promise<Order | null> {
+    const result = await this.repo.update({ id, status: from }, { status: to });
+    return result.affected ? this.findById(id) : null;
   }
 
   async findByCustomer(customerId: string, page: number, limit: number): Promise<[Order[], number]> {

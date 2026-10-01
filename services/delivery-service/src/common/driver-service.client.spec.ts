@@ -21,7 +21,10 @@ describe('DeliveryServiceClient.DriverServiceClient', () => {
     } as any);
 
     await expect(client.getDriver(validDriverId)).resolves.toMatchObject({ id: validDriverId });
-    expect(fetchMock).toHaveBeenCalledWith(`http://driver-service:3009/drivers/${validDriverId}`);
+    // Driver profiles are no longer public: the service authenticates with its system token.
+    expect(fetchMock).toHaveBeenCalledWith(`http://driver-service:3009/drivers/${validDriverId}`, {
+      headers: { Authorization: 'token' },
+    });
   });
 
   it('rejects malformed driverId before making the request', async () => {
@@ -36,5 +39,18 @@ describe('DeliveryServiceClient.DriverServiceClient', () => {
     await expect(promise).rejects.toThrow(BadRequestError);
     await expect(promise).rejects.toThrow('driverId must be a valid UUID v4');
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('lists available drivers with the system token', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ items: [] }) });
+    global.fetch = fetchMock as any;
+    const client = new DriverServiceClient({ driverServiceUrl: 'http://driver-service:3009' } as any, {
+      mint: async () => 'Bearer system',
+    } as any);
+
+    await expect(client.findAvailableDriver()).resolves.toBeNull();
+    expect(fetchMock).toHaveBeenCalledWith('http://driver-service:3009/drivers/available?page=1&limit=1', {
+      headers: { Authorization: 'Bearer system' },
+    });
   });
 });

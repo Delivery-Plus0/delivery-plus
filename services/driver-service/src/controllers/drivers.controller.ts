@@ -57,15 +57,21 @@ export class DriversController {
   }
 
   @Get('available')
-  @ApiOperation({ summary: 'List currently available drivers (used by delivery-service)' })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'List currently available drivers (admin / delivery-service system token only)' })
   listAvailable(@Query() query: ListDriversQueryDto) {
     return this.driversService.listAvailable(query.page, query.limit);
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get a driver by id (internal use)' })
-  getById(@Param('id') id: string) {
-    return this.driversService.getById(id);
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.DRIVER, UserRole.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get a driver by id (the driver themself, admin, or a service system token)' })
+  getById(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.driversService.getByIdFor(id, user);
   }
 
   @Patch(':id/status')

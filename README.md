@@ -190,7 +190,7 @@ docker compose -f docker-compose.base.yml -f docker-compose.prod.yml config --qu
 
 Each HTTP service exposes Swagger UI at `http://localhost:<service-port>/docs`, and the API Gateway aggregates the service docs at `http://localhost:3000/docs`.
 
-The API Gateway will be available at `http://localhost:3000`; see [`docs/deployment.md`](./docs/deployment.md) for the Compose variants, ports, and environment configuration. `npm run seed` bootstraps the sample environment through the API Gateway only. It is safe to rerun: existing accounts and catalog records are reused, while each run creates a new order/payment/delivery scenario. `npm run e2e` assumes the seed has completed successfully.
+The API Gateway will be available at `http://localhost:3000`; see [`docs/deployment.md`](./docs/deployment.md) for the Compose variants, ports, and environment configuration. `npm run seed` bootstraps the sample environment through the API Gateway only. It is safe to rerun: existing accounts and catalog records are reused, while each run creates a new order/payment/delivery scenario. `npm run e2e` assumes the seed has completed successfully. For manual testing of the customer app, `npm run seed:demo` adds a richer catalog (6 restaurants across OPEN/BUSY/CLOSED, categorized menus with sold-out items, cover and avatar images) and a demo customer (`demo.customer@example.com` / `password123`) with a profile, a filled cart, notifications, and orders in delivered, cancelled, failed-payment, preparing, and on-the-way states. It is also rerunnable and does not interfere with `npm run seed` / `npm run e2e`.
 
 ## <img src="./assets/icons/testing.png" width="26" valign="middle"> Testing
 

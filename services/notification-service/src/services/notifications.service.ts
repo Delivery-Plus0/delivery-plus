@@ -1,6 +1,6 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { NotificationsRepository } from '../repositories/notifications.repository';
-import { PaginatedResult, KafkaConsumerService, TOPICS, OrderEventType, OrderEvent, PaymentEventType, PaymentEvent, DeliveryEventType, DeliveryEvent } from '@food-delivery/shared';
+import { NotFoundError, PaginatedResult, KafkaConsumerService, TOPICS, OrderEventType, OrderEvent, PaymentEventType, PaymentEvent, DeliveryEventType, DeliveryEvent } from '@food-delivery/shared';
 import { Notification, NotificationType } from '../entities/notification.entity';
 
 @Injectable()
@@ -59,8 +59,12 @@ export class NotificationsService implements OnModuleInit {
     return { items, page, limit, total, totalPages: Math.ceil(total / limit) || 1 };
   }
 
-  async markAsRead(id: string): Promise<void> {
-    await this.notifications.markAsRead(id);
+  /** 404 (not 403) for someone else's notification, so ids can't be probed for existence. */
+  async markAsRead(id: string, userId: string): Promise<void> {
+    const updated = await this.notifications.markAsReadForUser(id, userId);
+    if (!updated) {
+      throw new NotFoundError(`Notification ${id} not found`);
+    }
   }
 
   async markAllAsRead(userId: string): Promise<void> {

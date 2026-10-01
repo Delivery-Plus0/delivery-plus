@@ -49,6 +49,8 @@ docker compose exec postgres psql -U postgres -d restaurant_service \
 
 The result must show `gen_random_uuid()` as `column_default`. If the database already existed before the UUID fix, rebuild/recreate the affected service so migration `002-uuid-primary-key-defaults` runs. If testing from zero, use `docker compose down -v` before rebuilding; this removes all local data.
 
+`npm run seed:demo` follows the same API-only rule and adds richer demo data for the customer app. It uses its own `demo.driver@example.com`, which stays BUSY on the demo's "on the way" order, so `driver@example.com` remains available for the base seed and E2E. Unlike the base seed, it waits out `429` responses and retries.
+
 If seed receives `429 TooManyRequests` during repeated setup, wait for the auth rate-limit window to expire. The seed logs in before attempting registration for known accounts and does not weaken the authentication limiter.
 
 In CI, the integration workflow clears the test Redis database between seed and E2E. This resets rate-limit counters while preserving PostgreSQL users, restaurants, menu items, and other seeded records.

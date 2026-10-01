@@ -4,6 +4,7 @@ import {
   DRIVER_TRANSITIONS,
   ForbiddenError,
   InvalidStateTransitionError,
+  JwtPayload,
   NotFoundError,
   PaginatedResult,
   UserRole,
@@ -68,6 +69,15 @@ export class DriversService implements OnModuleInit {
     const driver = await this.drivers.findByUserId(userId);
     if (!driver) {
       throw new NotFoundError(`Driver profile not found for user ${userId}`);
+    }
+    return driver;
+  }
+
+  /** A driver profile (user id, plate) is visible only to that driver and to admins/services. */
+  async getByIdFor(id: string, requester: Pick<JwtPayload, 'sub' | 'role'>): Promise<Driver> {
+    const driver = await this.getById(id);
+    if (requester.role !== UserRole.ADMIN && driver.userId !== requester.sub) {
+      throw new ForbiddenError('You can only view your own driver profile');
     }
     return driver;
   }

@@ -57,6 +57,14 @@ Delivery semantics (payment-service):
 - Each payment emits at most one event per type in normal operation; `publishedEventStatus` on the payment row tracks what was already published.
 - The payload shape `{ paymentId, orderId, amount, status }` and event type names are unchanged; `eventId` remains a UUID, so existing consumers are unaffected.
 - The order-service status update is a separate HTTP call, not driven by the event; it is tracked the same way (`orderSyncedStatus`) and retried by the client's next `process`/create retry, not by Kafka.
+- payment-service owns the payment → order transition (`PENDING` → `PAYMENT_PENDING`, `COMPLETED` → `CONFIRMED`, `FAILED` → `FAILED`). order-service's payment-event consumers apply the **same** statuses as a convergence path (`syncFromPaymentEvent`): a same-status update is a no-op, and a stale or late event (e.g. `payment.failed` after the customer cancelled) is logged and skipped rather than retried. If the HTTP sync of a `FAILED` payment hits an order that is already terminal, payment-service marks it synced; a `COMPLETED` payment on a closed order still errors (needs a refund).
+- order-service publishes `order.payment_pending` and `order.failed` for those transitions (added in Phase 0; they were previously mislabeled `order.created`).
+- Order status writes are compare-and-set (`UPDATE … WHERE status = <expected>`): when the HTTP sync and the consumer race to the same status only the winner publishes, so `order.confirmed` (and its notification) is emitted once.
+
+### Partitioning and topic provisioning
+
+- The shared producer keys every message by the event's `correlationId`, which is generated fresh for each event. Events for one order therefore do not share a partition key; ordering per order only holds today because auto-created topics have a single partition. Keying by `orderId` is required before adding partitions.
+- `KafkaConsumerService.subscribe` creates the topic first (idempotent, waits for a leader). Before this, a consumer subscribing to a topic nobody had produced to yet (driver-service → `delivery.events`) crashed on a fresh cluster.
 
 ### delivery.events
 

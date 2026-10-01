@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { BadRequestError, NotFoundError, OrderStatus, assertValidUuidV4 } from '@food-delivery/shared';
+import { BadRequestError, ForbiddenError, NotFoundError, OrderStatus, assertValidUuidV4 } from '@food-delivery/shared';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { SystemTokenService } from './system-token.service';
 
@@ -32,6 +32,28 @@ export class OrderServiceClient {
     }
 
     return (await response.json()) as OrderDto;
+  }
+
+  /**
+   * Asks order-service whether the requester may read this order, using the requester's own token
+   * so order-service's rules (owning customer, owning restaurant owner, admin) stay the single
+   * source of truth for order access.
+   */
+  async assertReadableBy(orderId: string, authHeader: string): Promise<void> {
+    const safeOrderId = assertValidUuidV4(orderId, 'orderId');
+    const response = await fetch(`${this.config.orderServiceUrl}/orders/${safeOrderId}`, {
+      headers: { Authorization: authHeader },
+    });
+
+    if (response.status === 404) {
+      throw new NotFoundError(`Order ${safeOrderId} not found`);
+    }
+    if (response.status === 401 || response.status === 403) {
+      throw new ForbiddenError('You do not have access to this order');
+    }
+    if (!response.ok) {
+      throw new BadRequestError(`Failed to fetch order ${safeOrderId}`);
+    }
   }
 
   async updateOrderStatus(orderId: string, status: OrderStatus): Promise<void> {

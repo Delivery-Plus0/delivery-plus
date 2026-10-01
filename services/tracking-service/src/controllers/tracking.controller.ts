@@ -19,9 +19,14 @@ export class TrackingController {
   }
 
   @Get('driver/:userId')
-  @ApiOperation({ summary: "Get a driver's last reported location (by driver user id)" })
-  getDriverLocation(@Param('userId') userId: string) {
-    return this.trackingService.getDriverLocation(userId);
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.DRIVER, UserRole.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: "Get a driver's last reported location (the driver themself or admin). Customers use /tracking/delivery/:id",
+  })
+  getDriverLocation(@Param('userId') userId: string, @CurrentUser() user: JwtPayload) {
+    return this.trackingService.getDriverLocation(userId, user);
   }
 
   @Get('delivery/:deliveryId')

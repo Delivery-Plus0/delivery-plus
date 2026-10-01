@@ -19,7 +19,12 @@
     "migration:revert": "npm run migration:revert --workspaces --if-present",
     "migration:show": "npm run migration:show --workspaces --if-present",
     "seed": "tsx scripts/seed.ts",
-    "e2e": "tsx scripts/e2e.ts"
+    "seed:demo": "tsx scripts/seed-demo.ts",
+    "e2e": "tsx scripts/e2e.ts",
+    "seed:e2e": "tsx scripts/seed-e2e.ts",
+    "e2e:env:up": "docker compose -p delivery-plus-e2e -f docker-compose.base.yml -f docker-compose.test.yml -f docker-compose.e2e.yml up -d --build --wait --wait-timeout 300",
+    "e2e:env:down": "docker compose -p delivery-plus-e2e -f docker-compose.base.yml -f docker-compose.test.yml -f docker-compose.e2e.yml down --volumes --remove-orphans",
+    "e2e:env:reset": "npm run e2e:env:down && npm run e2e:env:up && npm run seed:e2e"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^7.18.0",

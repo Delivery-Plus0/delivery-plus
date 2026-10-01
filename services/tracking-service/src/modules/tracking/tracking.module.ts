@@ -5,6 +5,7 @@ import { TrackingService } from '../../services/tracking.service';
 import { TrackingController } from '../../controllers/tracking.controller';
 import { DeliveryServiceClient } from '../../common/delivery-service.client';
 import { DriverServiceClient } from '../../common/driver-service.client';
+import { SystemTokenService } from '../../common/system-token.service';
 import { APP_CONFIG, AppConfig } from '../../config/app-config';
 
 @Module({
@@ -20,6 +21,7 @@ import { APP_CONFIG, AppConfig } from '../../config/app-config';
     LocationRepository,
     DeliveryServiceClient,
     DriverServiceClient,
+    SystemTokenService,
   ],
   exports: [LocationRepository],
 })

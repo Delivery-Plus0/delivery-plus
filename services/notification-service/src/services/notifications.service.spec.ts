@@ -3,6 +3,7 @@ import { NotificationsRepository } from '../repositories/notifications.repositor
 import {
   DeliveryEventType,
   KafkaConsumerService,
+  NotFoundError,
   OrderEventType,
   OrderStatus,
   PaymentEventType,
@@ -19,7 +20,7 @@ describe('NotificationsService', () => {
     repository = {
       create: jest.fn(),
       findByUserId: jest.fn(),
-      markAsRead: jest.fn(),
+      markAsReadForUser: jest.fn(),
       markAllAsRead: jest.fn(),
     } as unknown as jest.Mocked<NotificationsRepository>;
 
@@ -152,9 +153,15 @@ describe('NotificationsService', () => {
   });
 
   describe('markAsRead and markAllAsRead', () => {
-    it('marks one notification as read', async () => {
-      await service.markAsRead('notification-9');
-      expect(repository.markAsRead).toHaveBeenCalledWith('notification-9');
+    it("marks the caller's own notification as read", async () => {
+      repository.markAsReadForUser.mockResolvedValue(true);
+      await service.markAsRead('notification-9', 'customer-4');
+      expect(repository.markAsReadForUser).toHaveBeenCalledWith('notification-9', 'customer-4');
+    });
+
+    it("404s for another user's notification (and nothing is updated for them)", async () => {
+      repository.markAsReadForUser.mockResolvedValue(false);
+      await expect(service.markAsRead('notification-9', 'intruder')).rejects.toThrow(NotFoundError);
     });
 
     it('marks all unread notifications for a user as read', async () => {

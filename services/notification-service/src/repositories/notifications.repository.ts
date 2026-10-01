@@ -24,8 +24,10 @@ export class NotificationsRepository {
     });
   }
 
-  async markAsRead(id: string): Promise<void> {
-    await this.repo.update(id, { isRead: true });
+  /** Marks the notification read only if it belongs to `userId`; returns whether it did. */
+  async markAsReadForUser(id: string, userId: string): Promise<boolean> {
+    const result = await this.repo.update({ id, userId }, { isRead: true });
+    return (result.affected ?? 0) > 0;
   }
 
   async markAllAsRead(userId: string): Promise<void> {

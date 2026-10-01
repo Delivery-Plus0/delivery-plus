@@ -162,6 +162,7 @@ describe('PaymentsService', () => {
     payments = new FakePaymentsRepository();
     orderClient = {
       getOrder: jest.fn().mockResolvedValue(order()),
+      getOrderAsSystem: jest.fn().mockResolvedValue(order()),
       updateOrderStatus: jest.fn().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<OrderServiceClient>;
     kafka = { publish: jest.fn().mockResolvedValue(undefined) };
@@ -580,6 +581,50 @@ describe('PaymentsService', () => {
     });
   });
 
+  describe('failed payment vs. an order that already moved on', () => {
+    it('a decline after the customer cancelled settles FAILED without erroring and marks the order synced', async () => {
+      const p = seedSynced(PaymentStatus.PENDING);
+      orderClient.updateOrderStatus.mockRejectedValueOnce(new ConflictError('Order order-1 cannot move to FAILED'));
+      orderClient.getOrderAsSystem.mockResolvedValueOnce(order({ status: OrderStatus.CANCELLED }));
+
+      const result = await service.processPayment(p.id, 'customer-1', { simulateFailure: true });
+
+      expect(result.status).toBe(PaymentStatus.FAILED);
+      expect(result.orderSyncedStatus).toBe(PaymentStatus.FAILED);
+      expect(publishedEventTypes()).toEqual([PaymentEventType.FAILED]);
+    });
+
+    it('a repeated process call after that is a no-op', async () => {
+      const p = seedSynced(PaymentStatus.PENDING);
+      orderClient.updateOrderStatus.mockRejectedValueOnce(new ConflictError('conflict'));
+      orderClient.getOrderAsSystem.mockResolvedValueOnce(order({ status: OrderStatus.CANCELLED }));
+      await service.processPayment(p.id, 'customer-1', { simulateFailure: true });
+
+      await service.processPayment(p.id, 'customer-1', { simulateFailure: true });
+
+      expect(orderClient.updateOrderStatus).toHaveBeenCalledTimes(1);
+      expect(kafka.publish).toHaveBeenCalledTimes(1);
+    });
+
+    it('still surfaces a conflict when the order is not terminal', async () => {
+      const p = seedSynced(PaymentStatus.PENDING);
+      orderClient.updateOrderStatus.mockRejectedValueOnce(new ConflictError('conflict'));
+      orderClient.getOrderAsSystem.mockResolvedValueOnce(order({ status: OrderStatus.CONFIRMED }));
+
+      await expect(service.processPayment(p.id, 'customer-1', { simulateFailure: true })).rejects.toThrow(ConflictError);
+      expect(payments.rows.get(p.id)!.orderSyncedStatus).not.toBe(PaymentStatus.FAILED);
+    });
+
+    it('never hides a COMPLETED payment on a cancelled order (needs a refund)', async () => {
+      const p = seedSynced(PaymentStatus.PENDING);
+      orderClient.updateOrderStatus.mockRejectedValueOnce(new ConflictError('conflict'));
+      orderClient.getOrderAsSystem.mockResolvedValueOnce(order({ status: OrderStatus.CANCELLED }));
+
+      await expect(service.processPayment(p.id, 'customer-1', { simulateFailure: false })).rejects.toThrow(ConflictError);
+      expect(orderClient.getOrderAsSystem).not.toHaveBeenCalled();
+    });
+  });
+
   describe('getStatus', () => {
     it('allows the owning customer', async () => {
       const p = seedSynced(PaymentStatus.PENDING);
@@ -602,13 +647,25 @@ describe('PaymentsService', () => {
   describe('refund', () => {
     it('rejects refunding a non-COMPLETED payment', async () => {
       const p = seedSynced(PaymentStatus.PENDING);
-      await expect(service.refund(p.id, 'customer-1', UserRole.CUSTOMER)).rejects.toThrow(InvalidStateTransitionError);
+      await expect(service.refund(p.id, 'admin-1', UserRole.ADMIN)).rejects.toThrow(InvalidStateTransitionError);
     });
 
-    it('refunds a COMPLETED payment for its owner', async () => {
+    it('lets support (admin) refund a COMPLETED payment', async () => {
       const p = seedSynced(PaymentStatus.COMPLETED);
-      const result = await service.refund(p.id, 'customer-1', UserRole.CUSTOMER);
+      const result = await service.refund(p.id, 'admin-1', UserRole.ADMIN);
       expect(result.status).toBe(PaymentStatus.REFUNDED);
+    });
+
+    it('no longer lets a customer refund their own completed payment (e.g. after delivery)', async () => {
+      const p = seedSynced(PaymentStatus.COMPLETED);
+      await expect(service.refund(p.id, 'customer-1', UserRole.CUSTOMER)).rejects.toThrow(ForbiddenError);
+      expect(payments.rows.get(p.id)!.status).toBe(PaymentStatus.COMPLETED);
+    });
+
+    it('rejects restaurant owners and drivers too', async () => {
+      const p = seedSynced(PaymentStatus.COMPLETED);
+      await expect(service.refund(p.id, 'owner-1', UserRole.RESTAURANT_OWNER)).rejects.toThrow(ForbiddenError);
+      await expect(service.refund(p.id, 'driver-1', UserRole.DRIVER)).rejects.toThrow(ForbiddenError);
     });
   });
 });

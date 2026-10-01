@@ -3,6 +3,7 @@ import { DeliveriesRepository } from '../repositories/deliveries.repository';
 import { OrderServiceClient } from '../common/order-service.client';
 import { DriverServiceClient, DriverStatusRejectedError } from '../common/driver-service.client';
 import { Delivery } from '../entities/delivery.entity';
+import { RestaurantServiceClient } from '../common/restaurant-service.client';
 import {
   BadRequestError,
   ConflictError,
@@ -11,6 +12,7 @@ import {
   DriverStatus,
   ForbiddenError,
   InvalidStateTransitionError,
+  KafkaProducerService,
   NotFoundError,
   OrderStatus,
   TOPICS,
@@ -30,6 +32,7 @@ describe('DeliveriesService', () => {
   let orderClient: jest.Mocked<OrderServiceClient>;
   let driverClient: jest.Mocked<DriverServiceClient>;
   let kafkaProducer: { publish: jest.Mock };
+  let restaurantClient: jest.Mocked<RestaurantServiceClient>;
 
   const baseDelivery = {
     id: 'delivery-1',
@@ -57,13 +60,21 @@ describe('DeliveriesService', () => {
 
     driverClient = {
       getDriver: jest.fn(),
+      getOwnProfile: jest.fn(),
       findAvailableDriver: jest.fn(),
       updateDriverStatus: jest.fn(),
       releaseDriver: jest.fn(),
     } as unknown as jest.Mocked<DriverServiceClient>;
 
     kafkaProducer = { publish: jest.fn() };
-    service = new DeliveriesService(deliveries, orderClient, driverClient, kafkaProducer as any);
+    restaurantClient = { getRestaurant: jest.fn() } as unknown as jest.Mocked<RestaurantServiceClient>;
+    service = new DeliveriesService(
+      deliveries,
+      orderClient,
+      driverClient,
+      kafkaProducer as unknown as KafkaProducerService,
+      restaurantClient,
+    );
   });
 
   describe('create', () => {
@@ -182,6 +193,88 @@ describe('DeliveriesService', () => {
 
         await expect(service.assignDriver('delivery-1', actor(UserRole.ADMIN))).rejects.toThrow('driver-service down');
         expect(driverClient.updateDriverStatus).toHaveBeenCalledTimes(1);
+      });
+    });
+  });
+
+  describe('getCurrentForDriver', () => {
+    const me = { id: 'driver-1', userId: 'user-1', status: DriverStatus.BUSY };
+    const assigned = { ...baseDelivery, driverId: 'driver-1', status: DeliveryStatus.DRIVER_ASSIGNED } as Delivery;
+    const fullOrder = {
+      ...orderAt(OrderStatus.DRIVER_ASSIGNED),
+      totalAmount: '19.98',
+      items: [{ name: 'Burger', quantity: 2, price: '9.99' }],
+      deliveryAddress: '9 Nile Corniche',
+      deliveryNotes: 'Gate 42',
+      deliveryLatitude: 30.0444,
+      deliveryLongitude: 31.2357,
+    };
+
+    beforeEach(() => {
+      driverClient.getOwnProfile.mockResolvedValue(me);
+      orderClient.getOrder.mockResolvedValue(fullOrder);
+      restaurantClient.getRestaurant.mockResolvedValue({ id: 'r1', name: 'Burger Palace', address: '123 Main St' });
+    });
+
+    it('returns the assigned delivery with pickup, drop-off, order summary and the next action', async () => {
+      deliveries.findActiveByDriverId.mockResolvedValue([assigned]);
+
+      const current = await service.getCurrentForDriver('Bearer driver');
+
+      expect(driverClient.getOwnProfile).toHaveBeenCalledWith('Bearer driver');
+      expect(deliveries.findActiveByDriverId).toHaveBeenCalledWith('driver-1');
+      expect(orderClient.getOrder).toHaveBeenCalledWith('order-1');
+      expect(restaurantClient.getRestaurant).toHaveBeenCalledWith('r1');
+      expect(current).toEqual({
+        id: 'delivery-1',
+        status: DeliveryStatus.DRIVER_ASSIGNED,
+        orderId: 'order-1',
+        createdAt: assigned.createdAt,
+        updatedAt: assigned.updatedAt,
+        pickup: { restaurantId: 'r1', name: 'Burger Palace', address: '123 Main St' },
+        dropOff: { address: '9 Nile Corniche', notes: 'Gate 42', latitude: 30.0444, longitude: 31.2357 },
+        order: { id: 'order-1', items: [{ name: 'Burger', quantity: 2 }], totalAmount: '19.98' },
+        nextActions: ['pickup'],
+      });
+    });
+
+    it.each([
+      [DeliveryStatus.PICKED_UP, ['start']],
+      [DeliveryStatus.IN_TRANSIT, ['complete']],
+    ])('offers the next driver action for %s', async (status, actions) => {
+      deliveries.findActiveByDriverId.mockResolvedValue([{ ...assigned, status }]);
+      await expect(service.getCurrentForDriver('Bearer driver')).resolves.toMatchObject({ nextActions: actions });
+    });
+
+    it('returns null when the driver has no active delivery (terminal ones are excluded by the query)', async () => {
+      deliveries.findActiveByDriverId.mockResolvedValue([]);
+
+      await expect(service.getCurrentForDriver('Bearer driver')).resolves.toBeNull();
+      expect(orderClient.getOrder).not.toHaveBeenCalled();
+    });
+
+    it('returns null when the user has no driver profile yet', async () => {
+      driverClient.getOwnProfile.mockResolvedValue(null);
+
+      await expect(service.getCurrentForDriver('Bearer driver')).resolves.toBeNull();
+      expect(deliveries.findActiveByDriverId).not.toHaveBeenCalled();
+    });
+
+    it('returns the most recent one if drift ever leaves two active deliveries', async () => {
+      const older = { ...assigned, id: 'older', updatedAt: new Date('2026-01-01') } as Delivery;
+      const newer = { ...assigned, id: 'newer', updatedAt: new Date('2026-02-01') } as Delivery;
+      deliveries.findActiveByDriverId.mockResolvedValue([older, newer]);
+
+      await expect(service.getCurrentForDriver('Bearer driver')).resolves.toMatchObject({ id: 'newer' });
+    });
+
+    it('reports a null drop-off address for orders placed before addresses were stored', async () => {
+      deliveries.findActiveByDriverId.mockResolvedValue([assigned]);
+      orderClient.getOrder.mockResolvedValue(orderAt(OrderStatus.DRIVER_ASSIGNED));
+
+      await expect(service.getCurrentForDriver('Bearer driver')).resolves.toMatchObject({
+        dropOff: { address: null, notes: null, latitude: null, longitude: null },
+        order: { items: [] },
       });
     });
   });

@@ -203,9 +203,28 @@ async function runE2E() {
     const assigned = await axios.post(`${API_URL}/api/deliveries/${deliveryId}/assign`, {}, ownerAuth);
     console.log(`Driver assigned: ${assigned.data.driverId}`);
 
+    // The driver discovers the job from their own token alone, with pickup and drop-off details.
+    const current = await axios.get(`${API_URL}/api/deliveries/me/current`, driverAuth);
+    if (current.status !== 200 || current.data.id !== deliveryId) {
+      throw new Error(`Driver current delivery: expected ${deliveryId}, got ${current.status} ${JSON.stringify(current.data)}`);
+    }
+    if (current.data.dropOff.address !== orderRes.data.deliveryAddress || current.data.nextActions[0] !== 'pickup') {
+      throw new Error(`Driver current delivery is missing the drop-off or next action: ${JSON.stringify(current.data)}`);
+    }
+    const customerCurrent = await statusOf(axios.get(`${API_URL}/api/deliveries/me/current`, customerAuth));
+    if (customerCurrent !== 403) {
+      throw new Error(`A customer got ${customerCurrent} on the driver-only current-delivery route, expected 403`);
+    }
+    console.log(`Driver sees current delivery: pickup ${current.data.pickup.name}, drop-off ${current.data.dropOff.address}`);
+
     await axios.post(`${API_URL}/api/deliveries/${deliveryId}/pickup`, {}, driverAuth);
     await axios.post(`${API_URL}/api/deliveries/${deliveryId}/start`, {}, driverAuth);
     await axios.post(`${API_URL}/api/deliveries/${deliveryId}/complete`, {}, driverAuth);
+
+    const afterComplete = await axios.get(`${API_URL}/api/deliveries/me/current`, driverAuth);
+    if (afterComplete.status !== 204) {
+      throw new Error(`After completion the driver should have no current delivery (204), got ${afterComplete.status}`);
+    }
 
     const deliveredOrder = await waitFor(
       'order to reach DELIVERED',

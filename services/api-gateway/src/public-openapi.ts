@@ -107,6 +107,7 @@ export const SERVICE_DEFINITIONS = [
       { method: 'post', path: '/:id/start', summary: 'Start a delivery run', auth: true, statusCode: 201 },
       { method: 'post', path: '/:id/complete', summary: 'Complete a delivery', auth: true, statusCode: 201 },
       { method: 'post', path: '/:id/cancel', summary: 'Cancel a delivery', auth: true, statusCode: 201 },
+      { method: 'get', path: '/me/current', summary: "Get the calling driver's active delivery (204 when none)", auth: true, statusCode: 200 },
       { method: 'get', path: '/by-order/:orderId', summary: 'Get the delivery for an order', auth: true, statusCode: 200 },
       { method: 'get', path: '/:id', summary: 'Get a delivery by id', auth: true, statusCode: 200 },
     ],
@@ -215,6 +216,39 @@ const baseSchemas = {
       deliveryNotes: { type: 'string', maxLength: 500 },
       deliveryLatitude: { type: 'number', minimum: -90, maximum: 90, description: 'Requires deliveryAddress and deliveryLongitude.' },
       deliveryLongitude: { type: 'number', minimum: -180, maximum: 180, description: 'Requires deliveryAddress and deliveryLatitude.' },
+    },
+  },
+  DriverCurrentDelivery: {
+    type: 'object',
+    required: ['id', 'status', 'orderId', 'pickup', 'dropOff', 'order', 'nextActions'],
+    properties: {
+      id: { type: 'string', format: 'uuid' },
+      status: { type: 'string', enum: ['DRIVER_ASSIGNED', 'PICKED_UP', 'IN_TRANSIT'] },
+      orderId: { type: 'string', format: 'uuid' },
+      createdAt: { type: 'string', format: 'date-time' },
+      updatedAt: { type: 'string', format: 'date-time' },
+      pickup: {
+        type: 'object',
+        properties: { restaurantId: { type: 'string', format: 'uuid' }, name: { type: 'string' }, address: { type: 'string' } },
+      },
+      dropOff: {
+        type: 'object',
+        properties: {
+          address: { type: 'string', nullable: true },
+          notes: { type: 'string', nullable: true },
+          latitude: { type: 'number', nullable: true },
+          longitude: { type: 'number', nullable: true },
+        },
+      },
+      order: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          items: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, quantity: { type: 'integer' } } } },
+          totalAmount: { type: 'string', example: '19.98' },
+        },
+      },
+      nextActions: { type: 'array', items: { type: 'string', enum: ['pickup', 'start', 'complete'] } },
     },
   },
   VerifyEmailRequest: {
@@ -374,6 +408,14 @@ export function generatePublicOpenApiDocument() {
             'application/json': { schema: { $ref: `#/components/schemas/${requestSchema}` } },
           },
         };
+      }
+
+      if (route.method === 'get' && service.service === 'deliveries' && route.path === '/me/current') {
+        operation.responses['200'] = {
+          description: "The calling driver's active delivery (DRIVER role only)",
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/DriverCurrentDelivery' } } },
+        };
+        operation.responses['204'] = { description: 'No active delivery (or no driver profile yet)' };
       }
 
       if (route.method === 'post' && service.service === 'orders' && route.path === '') {

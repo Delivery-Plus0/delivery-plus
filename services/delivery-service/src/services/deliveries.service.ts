@@ -20,6 +20,8 @@ import {
 import { DeliveriesRepository } from '../repositories/deliveries.repository';
 import { OrderServiceClient } from '../common/order-service.client';
 import { DriverDto, DriverServiceClient, DriverStatusRejectedError } from '../common/driver-service.client';
+import { RestaurantServiceClient } from '../common/restaurant-service.client';
+import { DriverCurrentDeliveryDto, NEXT_DRIVER_ACTIONS } from '../dto/driver-current-delivery.dto';
 import { CreateDeliveryDto } from '../dto/create-delivery.dto';
 import { Delivery } from '../entities/delivery.entity';
 
@@ -52,6 +54,7 @@ export class DeliveriesService {
     private readonly orderClient: OrderServiceClient,
     private readonly driverClient: DriverServiceClient,
     private readonly kafkaProducer: KafkaProducerService,
+    private readonly restaurantClient: RestaurantServiceClient,
   ) {}
 
   async create(requester: DeliveryRequester, dto: CreateDeliveryDto): Promise<Delivery> {
@@ -155,6 +158,48 @@ export class DeliveriesService {
       await this.orderClient.updateOrderStatus(updated.orderId, OrderStatus.CANCELLED);
       await this.publishEvent(DeliveryEventType.CANCELLED, updated);
     });
+  }
+
+  /**
+   * The calling driver's active delivery with what they need to act on it (pickup, drop-off, order
+   * summary, next actions), or null when they have none or no driver profile yet. Which driver is
+   * asking comes from their own token via driver-service; nothing is taken from the request.
+   */
+  async getCurrentForDriver(authHeader: string): Promise<DriverCurrentDeliveryDto | null> {
+    const driver = await this.driverClient.getOwnProfile(authHeader);
+    if (!driver) return null;
+
+    const active = await this.deliveries.findActiveByDriverId(driver.id);
+    if (active.length === 0) return null;
+    if (active.length > 1) {
+      // Claims are exclusive (#33), so this means drift; show the most recent rather than failing.
+      this.logger.warn(`Driver ${driver.id} has ${active.length} active deliveries; returning the most recent`);
+    }
+    const delivery = active.reduce((latest, d) => (d.updatedAt > latest.updatedAt ? d : latest));
+
+    const order = await this.orderClient.getOrder(delivery.orderId);
+    const restaurant = await this.restaurantClient.getRestaurant(order.restaurantId);
+
+    return {
+      id: delivery.id,
+      status: delivery.status,
+      orderId: delivery.orderId,
+      createdAt: delivery.createdAt,
+      updatedAt: delivery.updatedAt,
+      pickup: { restaurantId: restaurant.id, name: restaurant.name, address: restaurant.address },
+      dropOff: {
+        address: order.deliveryAddress ?? null,
+        notes: order.deliveryNotes ?? null,
+        latitude: order.deliveryLatitude ?? null,
+        longitude: order.deliveryLongitude ?? null,
+      },
+      order: {
+        id: order.id,
+        items: (order.items ?? []).map((item) => ({ name: item.name, quantity: item.quantity })),
+        totalAmount: order.totalAmount ?? '0.00',
+      },
+      nextActions: NEXT_DRIVER_ACTIONS[delivery.status] ?? [],
+    };
   }
 
   async getById(id: string, reader: DeliveryRequester): Promise<Delivery> {

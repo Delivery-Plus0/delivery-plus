@@ -37,6 +37,22 @@ export class DriverServiceClient {
     return (await response.json()) as DriverDto;
   }
 
+  /**
+   * The calling driver's own profile, read with their own token (driver-service GET /drivers/me), so
+   * "which driver is this?" comes from the verified JWT, never from a client-supplied id.
+   * Null when the user has no driver profile yet.
+   */
+  async getOwnProfile(authHeader: string): Promise<DriverDto | null> {
+    const response = await fetch(`${this.config.driverServiceUrl}/drivers/me`, {
+      headers: { Authorization: authHeader },
+    });
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      throw new BadRequestError(`Failed to read the driver profile (status ${response.status})`);
+    }
+    return (await response.json()) as DriverDto;
+  }
+
   /** Returns the first currently available driver, or null if none. */
   async findAvailableDriver(): Promise<DriverDto | null> {
     const response = await fetch(`${this.config.driverServiceUrl}/drivers/available?page=1&limit=1`, {

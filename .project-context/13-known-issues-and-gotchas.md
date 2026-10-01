@@ -49,6 +49,7 @@ The workspace root defines commands, but actual validation is still service-spec
 ## 11. Current implementation gaps
 
 - No transactional outbox: order-service and delivery-service publish after their database write, so a crash in between loses the event (consumers dedupe and dead-letter, but cannot recover an event that was never sent).
+- Delivery side effects (driver release, order sync, event) are repaired by a client retry of the same action, but nothing repairs them if the client never retries: a driver can stay BUSY. Needs an outbox or a reconciliation job.
 - Notification payment and delivery handlers are currently no-ops; payment and delivery payloads carry no `customerId`.
 - Kafka handlers must finish well within the 30 s session timeout and the 60 s idempotency lease; neither is enforced. Services have no graceful shutdown hooks, so a stopped consumer stays in its group until the session expires (resetting offsets has to wait for that).
 - kafkajs logs `Topic creation errors` at ERROR on every consumer start when the topics already exist; it is harmless.

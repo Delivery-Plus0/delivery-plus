@@ -75,7 +75,7 @@ Delivery semantics (payment-service):
 
 delivery-service publishes one event per lifecycle transition: `delivery.created`, `delivery.driver_assigned`, `delivery.picked_up`, `delivery.in_transit`, `delivery.completed`, `delivery.cancelled`, with `{ deliveryId, orderId, driverId?, status }`.
 
-- Published after the HTTP syncs to order-service (order status) and driver-service (availability) succeed; those HTTP calls remain the authoritative path.
+- Published after the HTTP syncs to order-service (order status) and driver-service (availability) succeed; those HTTP calls remain the authoritative path. Delivery actions are retry-safe: repeating an action on a delivery already in the target status re-runs the syncs and the publish (same `eventId`), so a failed driver release or order sync is repaired by the client's retry (see [docs/services/delivery-service.md](../docs/services/delivery-service.md#retry-safety)). Verified live: with order-service down, `complete` failed after releasing the driver; the retry delivered the order and re-published `delivery.completed` with the same id.
 - order-service applies `driver_assigned`, `picked_up` and `completed` through `syncStatusFromEvent` (same status → no-op; stale → logged and skipped), so a late or redelivered event never fails the consumer.
 - driver-service does **not** consume delivery events. Its old release-on-completion consumer was removed: a late `delivery.completed` could free a driver already on the next delivery, and AVAILABLE → AVAILABLE is not a valid transition.
 - notification-service subscribes to `delivery.driver_assigned` but does nothing yet (no `customerId` in the payload).

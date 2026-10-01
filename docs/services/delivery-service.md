@@ -23,7 +23,7 @@ From `services/delivery-service/src/controllers/deliveries.controller.ts`:
 ## Events published/consumed
 Every lifecycle transition publishes to `delivery.events`: `delivery.created`, `delivery.driver_assigned`, `delivery.picked_up`, `delivery.in_transit`, `delivery.completed`, `delivery.cancelled`. Payload: `{ deliveryId, orderId, driverId?, status }`.
 
-- Published after the HTTP syncs to order-service and driver-service succeed, so consumers see state the synchronous path already applied.
+- Published after the HTTP syncs to order-service and driver-service succeed, so consumers see state the synchronous path already applied. A retried action re-publishes with the same `eventId`.
 - Keyed by `orderId` (same partition as the order's own events).
 - `eventId` is stable per (delivery, event type), so a re-publish is deduplicated by consumers.
 - At-least-once and not transactional with the database write: a crash between the update and the publish loses the event (no outbox yet).
@@ -41,6 +41,17 @@ From `services/delivery-service/src/config/app-config.ts`:
 - `KAFKA_BROKER` (used in Docker Compose as `kafka:29092`)
 - `PORT` (default: `3008`)
 - `NODE_ENV` (default: `development`)
+
+## Retry safety
+
+Every action writes the delivery first (compare-and-set on the current status), then runs its side effects: driver release, order-service sync, event. If a side effect fails (a service is down, or delivery-service restarts mid-request), the request errors but the delivery has already moved. **Repeating the same action on a delivery already in the target status skips the write and re-runs the side effects** instead of answering 409, so a client retry always converges:
+
+- `complete` / `cancel` release the driver **first** (so the driver is freed even if order-service is down), then sync the order, then publish. The release is idempotent (a driver who is no longer BUSY counts as released) and is skipped if the driver already has another active delivery.
+- The order is moved forward along `READY_FOR_PICKUP → DRIVER_ASSIGNED → PICKED_UP → DELIVERED` one allowed step at a time, so an order left behind by an earlier failed sync catches up (`start` also syncs `PICKED_UP`). An order that left that path (e.g. `CANCELLED`) is not forced back; the delivery and the driver release still complete.
+- `assignDriver` gives the claimed driver back if recording the assignment fails, and a retried assign on an already-assigned delivery does not claim a second driver.
+- Re-published events keep their deterministic `eventId`, so consumers drop the duplicate.
+
+Not covered: if a request fails and the client **never** retries, the side effects stay undone (e.g. a driver left BUSY). Closing that needs a transactional outbox or a reconciliation job.
 
 ## Notes
 Driver assignment is a core orchestration task in this service, with explicit transition rules. Some role restrictions are enforced inside the service rather than uniformly at the controller boundary.

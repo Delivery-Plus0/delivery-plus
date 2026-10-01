@@ -73,20 +73,19 @@ flowchart LR
     TRK --> DEL
     TRK --> DRV
 
-    ORD -. order.events .-> KAFKA[(Kafka)]
-    PAY -. payment.events .-> KAFKA
-    DEL -. delivery.events, not published yet .-> KAFKA
+    ORD -.->|order.events| KAFKA[(Kafka)]
+    PAY -.->|payment.events| KAFKA
+    DEL -.->|delivery.events| KAFKA
 
-    KAFKA -. events .-> ORD
-    KAFKA -. events .-> DRV
-    KAFKA -. events .-> NOTIF
+    KAFKA -.->|payment + delivery events| ORD
+    KAFKA -.->|order, payment, delivery events| NOTIF
 
-    CART -. carts .-> REDIS[(Redis)]
-    TRK -. live location .-> REDIS
+    CART -.->|carts| REDIS[(Redis)]
+    TRK -.->|live location| REDIS
 
-    USER -. avatars .-> S3[(S3-compatible storage)]
-    REST -. images .-> S3
-    MENU -. images .-> S3
+    USER -.->|avatars| S3[(S3-compatible storage)]
+    REST -.->|images| S3
+    MENU -.->|images| S3
 
     AUTH --> PG[(PostgreSQL)]
     USER --> PG

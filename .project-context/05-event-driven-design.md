@@ -136,7 +136,7 @@ Per message, in order:
 1. Unparseable (not JSON, or no `eventId`/`eventType`) → sent to `<topic>.dlq` with reason `unparseable`, offset committed.
 2. No handler in this group for the event type → offset committed.
 3. **Claim** the event in Redis via `DurableEventIdempotencyService.tryAcquire(groupId, eventId)`. `processed` → skip and commit. `in-progress` (another consumer mid-handler after a rebalance) → poll until it finishes or its lease expires (the partition stays blocked, preserving order), then give the message back to kafkajs.
-4. Run the handler, up to 3 attempts with exponential backoff (200 ms, 400 ms).
+4. Run the handler, up to `maxHandlerAttempts` attempts (default 3) with exponential backoff (200 ms, 400 ms, …).
 5. Success → `markProcessed`, then commit. Exhausted → send to `<topic>.dlq` with reason `handler-failed` and the error, **release** the claim (not marked processed, so a replay can run it), then commit.
 
 The offset is only committed once the event is handled, already handled, or safely in the dead-letter topic. If Redis or the dead-letter send fails, the error propagates and kafkajs redelivers the message.

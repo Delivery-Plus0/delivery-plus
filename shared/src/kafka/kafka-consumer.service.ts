@@ -30,7 +30,7 @@ export const DEAD_LETTER_HEADERS = {
 
 export type DeadLetterReason = 'unparseable' | 'handler-failed';
 
-const MAX_ATTEMPTS = 3;
+export const DEFAULT_MAX_HANDLER_ATTEMPTS = 3;
 const CLAIM_POLL_MS = 500;
 /** Wait past a crashed consumer's lease before giving the message back to kafkajs to retry. */
 const CLAIM_WAIT_MS = DEFAULT_EVENT_LEASE_TTL_MS + 5_000;
@@ -42,6 +42,7 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
   private kafka: Kafka;
   private consumer: Consumer;
   private readonly groupId: string;
+  private readonly maxAttempts: number;
   private handlers = new Map<string, Map<string, MessageHandler<any>>>();
   /** Only used without durable idempotency: dedupes within this process, forgotten on restart. */
   private processedInMemory = new Set<string>();
@@ -57,6 +58,10 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
       brokers: this.options.brokers,
     });
     this.groupId = this.options.groupId || `${this.options.clientId}-group`;
+    this.maxAttempts = this.options.maxHandlerAttempts ?? DEFAULT_MAX_HANDLER_ATTEMPTS;
+    if (!Number.isSafeInteger(this.maxAttempts) || this.maxAttempts < 1) {
+      throw new RangeError('maxHandlerAttempts must be a positive integer');
+    }
     this.consumer = this.kafka.consumer({ groupId: this.groupId });
   }
 
@@ -142,8 +147,8 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
         await handler(event);
         return undefined;
       } catch (error) {
-        this.logger.warn(`Failed to process event ${event.eventId}, attempt ${attempt}/${MAX_ATTEMPTS}`, error);
-        if (attempt >= MAX_ATTEMPTS) return error ?? new Error('Handler failed');
+        this.logger.warn(`Failed to process event ${event.eventId}, attempt ${attempt}/${this.maxAttempts}`, error);
+        if (attempt >= this.maxAttempts) return error ?? new Error('Handler failed');
         // Exponential backoff
         await sleep(Math.pow(2, attempt) * 100);
       }

@@ -203,6 +203,24 @@ describe('KafkaConsumerService message handling', () => {
     expect(producer.send.mock.invocationCallOrder[0]).toBeLessThan(consumer.commitOffsets.mock.invocationCallOrder[0]);
   });
 
+  it('honours a configured attempt count (1 = dead-letter on the first failure)', async () => {
+    const handler = jest.fn().mockRejectedValue(new Error('boom'));
+    const producer = producerMock();
+    const service = new KafkaConsumerService({ ...options, maxHandlerAttempts: 1 }, producer, idempotencyMock());
+    await service.subscribe('order.events', 'order.confirmed', handler);
+    await service.start();
+    const eachMessage = consumer.run.mock.calls[0][0].eachMessage as (p: EachMessagePayload) => Promise<void>;
+
+    await eachMessage(message(event));
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(producer.send.mock.calls[0][0]).toBe('order.events.dlq');
+  });
+
+  it('rejects an invalid attempt count at startup', () => {
+    expect(() => new KafkaConsumerService({ ...options, maxHandlerAttempts: 0 }, producerMock())).toThrow(RangeError);
+  });
+
   it('keeps the offset uncommitted when the dead-letter send fails, so nothing is lost', async () => {
     const handler = jest.fn().mockRejectedValue(new Error('boom'));
     const producer = producerMock();

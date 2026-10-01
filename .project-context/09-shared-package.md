@@ -22,10 +22,19 @@ The shared package is structured around common concerns, including:
 - internal service authentication (HMAC request signing and verification helpers)
 - Redis helpers: `RedisModule` (provides the shared `REDIS_CLIENT`), `CacheService`, `RateLimiterService` and `RateLimitGuard`
 - Kafka helpers: `KafkaModule`, `KafkaProducerService`, `KafkaConsumerService`
-- `DurableEventIdempotencyService`: Redis-backed, consumer-group-scoped event deduplication with atomic lease/processed state (see [05-event-driven-design.md](./05-event-driven-design.md)); exported but not yet used by `KafkaConsumerService`
+- `DurableEventIdempotencyService`: Redis-backed, consumer-group-scoped event deduplication with atomic lease/processed state (see [05-event-driven-design.md](./05-event-driven-design.md)); used by `KafkaConsumerService` when enabled
+- Event identity helpers: `lifecycleEventId` (deterministic UUID v5 per entity + event type) and `eventPartitionKey` (the payload's `orderId`)
 - S3-compatible media storage with presigned POST generation, upload-size policies, byte verification, and staging-object promotion
 
-`KafkaModule` does not register `DurableEventIdempotencyService`: services that consume Kafka without Redis (driver-service, notification-service) would otherwise fail dependency injection at startup. A service opts in by importing `RedisModule` and adding the service to its providers.
+`KafkaModule.register` options for consumers:
+
+| Option | Default | Effect |
+| --- | --- | --- |
+| `groupId` | `<clientId>-group` | Consumer group; also scopes idempotency keys and is recorded on dead-lettered messages |
+| `durableIdempotency` | `false` | Registers `DurableEventIdempotencyService` (requires `RedisModule`); handled events are recorded per group in Redis. Without it, duplicates are skipped only within one process, and a warning is logged at startup |
+| `maxHandlerAttempts` | `3` | Attempts per event (backoff 200 ms, 400 ms, …) before it goes to `<topic>.dlq` |
+
+order-service and notification-service enable `durableIdempotency`. Dead-letter topics are `<topic>.dlq`, created on subscribe; `npm run kafka:dlq -- <topic> [--replay]` inspects and replays them.
 
 This makes it the contract layer that services depend on for common language and behavior.
 

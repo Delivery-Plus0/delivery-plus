@@ -12,6 +12,8 @@ export interface KafkaModuleOptions {
    * rebalance are skipped. Requires RedisModule to be registered in the same application.
    */
   durableIdempotency?: boolean;
+  /** Attempts per event before it is dead-lettered (default 3, exponential backoff between them). */
+  maxHandlerAttempts?: number;
 }
 
 @Global()

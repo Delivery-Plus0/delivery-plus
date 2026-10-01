@@ -8,6 +8,12 @@ export interface OrderDto {
   customerId: string;
   restaurantId: string;
   status: OrderStatus;
+  totalAmount?: string;
+  items?: { name: string; quantity: number }[];
+  deliveryAddress?: string | null;
+  deliveryNotes?: string | null;
+  deliveryLatitude?: number | null;
+  deliveryLongitude?: number | null;
 }
 
 @Injectable()

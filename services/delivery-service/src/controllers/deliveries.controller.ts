@@ -1,8 +1,10 @@
-import { Body, Controller, Get, Headers, Param, Post, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
-import { JwtAuthGuard, CurrentUser, JwtPayload } from '@food-delivery/shared';
+import { Body, Controller, Get, Headers, HttpStatus, Param, Post, Res, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiNoContentResponse, ApiOkResponse } from '@nestjs/swagger';
+import type { Response } from 'express';
+import { JwtAuthGuard, CurrentUser, JwtPayload, Roles, RolesGuard, UserRole } from '@food-delivery/shared';
 import { DeliveriesService } from '../services/deliveries.service';
 import { CreateDeliveryDto } from '../dto/create-delivery.dto';
+import { DriverCurrentDeliveryDto } from '../dto/driver-current-delivery.dto';
 
 @ApiTags('deliveries')
 @ApiBearerAuth()
@@ -49,6 +51,24 @@ export class DeliveriesController {
   @ApiOperation({ summary: 'Cancel a delivery (dispatch role only)' })
   cancel(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Headers('authorization') authHeader: string) {
     return this.deliveriesService.cancel(id, { userId: user.sub, role: user.role, authHeader });
+  }
+
+  @Get('me/current')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.DRIVER)
+  @ApiOperation({ summary: "The calling driver's active delivery: pickup, drop-off, order summary and next actions" })
+  @ApiOkResponse({ type: DriverCurrentDeliveryDto })
+  @ApiNoContentResponse({ description: 'The driver has no active delivery (or no driver profile yet)' })
+  async getMyCurrent(
+    @Headers('authorization') authHeader: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<DriverCurrentDeliveryDto | undefined> {
+    const current = await this.deliveriesService.getCurrentForDriver(authHeader);
+    if (!current) {
+      res.status(HttpStatus.NO_CONTENT);
+      return undefined;
+    }
+    return current;
   }
 
   @Get('by-order/:orderId')

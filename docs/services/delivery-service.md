@@ -12,11 +12,14 @@ From `services/delivery-service/src/controllers/deliveries.controller.ts`:
 - `POST /deliveries/:id/start` – driver starts the route
 - `POST /deliveries/:id/complete` – mark the delivery as completed
 - `POST /deliveries/:id/cancel` – cancel a delivery
+- `GET /deliveries/me/current` – the calling driver's active delivery (DRIVER only; see below)
+- `GET /deliveries/by-order/:orderId` – the delivery for an order (order owner, its restaurant owner, the assigned driver, admin)
 - `GET /deliveries/:id` – get a delivery by ID
 
 ## Dependencies
 - Calls `order-service` to validate order state and update order status
-- Calls `driver-service` to find and update drivers
+- Calls `driver-service` to find and update drivers, and to resolve the calling driver (`GET /drivers/me` with their own token)
+- Calls `restaurant-service` (public read) for the pickup name and address
 - Uses PostgreSQL for delivery records
 - Publishes `delivery.events`
 
@@ -38,9 +41,25 @@ From `services/delivery-service/src/config/app-config.ts`:
 - `JWT_SECRET`
 - `ORDER_SERVICE_URL` (default: `http://localhost:3006`)
 - `DRIVER_SERVICE_URL` (default: `http://localhost:3009`)
+- `RESTAURANT_SERVICE_URL` (default: `http://localhost:3003`)
 - `KAFKA_BROKER` (used in Docker Compose as `kafka:29092`)
 - `PORT` (default: `3008`)
 - `NODE_ENV` (default: `development`)
+
+## Driver's current delivery
+
+`GET /deliveries/me/current` (role DRIVER) lets a driver find their job without knowing any id:
+
+1. **Identity.** The driver is resolved from **the caller's own token**: driver-service `GET /drivers/me`. No id comes from the request.
+2. **Which delivery.** It is the driver's single non-terminal delivery (`findActiveByDriverId`). Claims are exclusive (#33). If drift ever leaves two, the most recently updated one is returned and a warning is logged.
+3. **Response (200):**
+   - `id`, `status`, `orderId` and timestamps;
+   - `pickup` (restaurant id, name, address);
+   - `dropOff` (the order's snapshot address, notes and optional coordinates; null fields for orders placed before addresses were stored);
+   - `order` (item names and quantities, total);
+   - `nextActions`: `pickup` when DRIVER_ASSIGNED, `start` when PICKED_UP, `complete` when IN_TRANSIT. Each maps to `POST /deliveries/:id/<action>`.
+4. **204 No Content** when the driver has no active delivery, or no driver profile yet.
+5. **Other roles get 403**, so the route can't be used to read someone else's delivery.
 
 ## Retry safety
 

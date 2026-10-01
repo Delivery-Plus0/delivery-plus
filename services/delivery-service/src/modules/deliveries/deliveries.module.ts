@@ -7,6 +7,7 @@ import { DeliveriesService } from '../../services/deliveries.service';
 import { DeliveriesController } from '../../controllers/deliveries.controller';
 import { OrderServiceClient } from '../../common/order-service.client';
 import { DriverServiceClient } from '../../common/driver-service.client';
+import { RestaurantServiceClient } from '../../common/restaurant-service.client';
 import { SystemTokenService } from '../../common/system-token.service';
 import { APP_CONFIG, AppConfig } from '../../config/app-config';
 
@@ -24,6 +25,7 @@ import { APP_CONFIG, AppConfig } from '../../config/app-config';
     DeliveriesRepository,
     OrderServiceClient,
     DriverServiceClient,
+    RestaurantServiceClient,
     SystemTokenService,
   ],
 })

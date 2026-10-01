@@ -1,5 +1,7 @@
 import { BadRequestError } from '@food-delivery/shared';
 import { DriverServiceClient } from './driver-service.client';
+import { SystemTokenService } from './system-token.service';
+import { AppConfig } from '../config/app-config';
 
 describe('DeliveryServiceClient.DriverServiceClient', () => {
   const validDriverId = '550e8400-e29b-41d4-a716-446655440000';
@@ -24,6 +26,32 @@ describe('DeliveryServiceClient.DriverServiceClient', () => {
     // Driver profiles are no longer public: the service authenticates with its system token.
     expect(fetchMock).toHaveBeenCalledWith(`http://driver-service:3009/drivers/${validDriverId}`, {
       headers: { Authorization: 'token' },
+    });
+  });
+
+  describe('getOwnProfile', () => {
+    const client = new DriverServiceClient({ driverServiceUrl: 'http://driver-service:3009' } as AppConfig, {
+      mint: async () => 'system-token',
+    } as unknown as SystemTokenService);
+
+    it("reads the caller's own profile with the caller's token, never the system token", async () => {
+      const fetchMock = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ id: validDriverId }) });
+      global.fetch = fetchMock as unknown as typeof fetch;
+
+      await expect(client.getOwnProfile('Bearer driver')).resolves.toMatchObject({ id: validDriverId });
+      expect(fetchMock).toHaveBeenCalledWith('http://driver-service:3009/drivers/me', {
+        headers: { Authorization: 'Bearer driver' },
+      });
+    });
+
+    it('returns null when the user has no driver profile (404)', async () => {
+      global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 404 }) as unknown as typeof fetch;
+      await expect(client.getOwnProfile('Bearer driver')).resolves.toBeNull();
+    });
+
+    it('fails on other errors', async () => {
+      global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 503 }) as unknown as typeof fetch;
+      await expect(client.getOwnProfile('Bearer driver')).rejects.toThrow(BadRequestError);
     });
   });
 

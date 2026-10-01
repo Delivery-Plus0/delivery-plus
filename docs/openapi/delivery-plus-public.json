@@ -2132,6 +2132,51 @@
         ]
       }
     },
+    "/api/deliveries/me/current": {
+      "get": {
+        "summary": "Get the calling driver's active delivery (204 when none)",
+        "tags": [
+          "deliveries"
+        ],
+        "operationId": "deliveries_get_api_deliveries_me_current",
+        "responses": {
+          "200": {
+            "description": "The calling driver's active delivery (DRIVER role only)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DriverCurrentDelivery"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "No active delivery (or no driver profile yet)"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/deliveries/by-order/{orderId}": {
       "get": {
         "summary": "Get the delivery for an order",
@@ -2862,6 +2907,118 @@
             "minimum": -180,
             "maximum": 180,
             "description": "Requires deliveryAddress and deliveryLatitude."
+          }
+        }
+      },
+      "DriverCurrentDelivery": {
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "orderId",
+          "pickup",
+          "dropOff",
+          "order",
+          "nextActions"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "DRIVER_ASSIGNED",
+              "PICKED_UP",
+              "IN_TRANSIT"
+            ]
+          },
+          "orderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "pickup": {
+            "type": "object",
+            "properties": {
+              "restaurantId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "name": {
+                "type": "string"
+              },
+              "address": {
+                "type": "string"
+              }
+            }
+          },
+          "dropOff": {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string",
+                "nullable": true
+              },
+              "notes": {
+                "type": "string",
+                "nullable": true
+              },
+              "latitude": {
+                "type": "number",
+                "nullable": true
+              },
+              "longitude": {
+                "type": "number",
+                "nullable": true
+              }
+            }
+          },
+          "order": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "quantity": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              },
+              "totalAmount": {
+                "type": "string",
+                "example": "19.98"
+              }
+            }
+          },
+          "nextActions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "pickup",
+                "start",
+                "complete"
+              ]
+            }
           }
         }
       },

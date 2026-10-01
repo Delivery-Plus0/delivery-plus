@@ -5,7 +5,7 @@
 ## What exists (CURRENT)
 
 - **Driver location:** `driver:location:{userId}` in Redis (JSON with lat/lng, 300 s TTL), written by `POST /api/tracking/location`.
-- **No coordinates** on restaurants, orders or addresses. The only geographic data in the system is driver positions.
+- **Almost no coordinates.** Restaurants have none. Orders store a text `deliveryAddress` and *optional* client-sent `deliveryLatitude`/`deliveryLongitude` (issue #95), with no geocoding. The only systematic geographic data is driver positions.
 - **Dispatch ignores location** ([case study 19](19-driver-dispatch.md)).
 
 ## The question

@@ -6,7 +6,7 @@
 
 **What exists today:**
 - **CURRENT:** drivers can report `{ latitude, longitude }` (validated with `@IsLatitude`/`@IsLongitude`, `services/tracking-service/src/dto/update-location.dto.ts`); the latest point is stored as JSON at `driver:location:{userId}` for 300 s (`LOCATION_TTL_SECONDS`) with a server-side `updatedAt`.
-- **NOT PRESENT:** coordinates for restaurants (only a text `address`) or customers (the order has no address yet — issue #95), any spatial query, routing, ETA, or geofences. Dispatch picks the most recently updated AVAILABLE driver regardless of distance.
+- **NOT PRESENT:** coordinates for restaurants (only a text `address`) or customers (orders carry a text `deliveryAddress` since issue #95; coordinates only when the client sends them, no geocoding), any spatial query, routing, ETA, or geofences. Dispatch picks the most recently updated AVAILABLE driver regardless of distance.
 
 Everything beyond storing the last point is **FUTURE** and taught as design plus local experiments. Labs: [geo-and-algorithms-labs.md](labs/geo-and-algorithms-labs.md).
 

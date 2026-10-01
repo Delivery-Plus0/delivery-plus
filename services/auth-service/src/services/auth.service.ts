@@ -2,10 +2,10 @@ import { Inject, Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { createHash, randomBytes } from 'node:crypto';
-import { ConflictError, UnauthorizedError, generateCorrelationId } from '@food-delivery/shared';
+import { ConflictError, ForbiddenError, UnauthorizedError, generateCorrelationId } from '@food-delivery/shared';
 import { CredentialsRepository } from '../repositories/credentials.repository';
 import { UserServiceClient } from '../common/user-service.client';
-import { RegisterDto } from '../dto/register.dto';
+import { RegisterDto, SELF_SERVICE_ROLES } from '../dto/register.dto';
 import { LoginDto } from '../dto/login.dto';
 import { VerifyEmailDto } from '../dto/verify-email.dto';
 import { ResendVerificationDto } from '../dto/resend-verification.dto';
@@ -25,13 +25,13 @@ export class AuthService {
   ) {}
 
   async register(dto: RegisterDto, correlationId = generateCorrelationId()): Promise<AuthResponseDto> {
+    const role = this.resolveRegistrationRole(dto.role);
     const existing = await this.credentials.findByEmail(dto.email);
     if (existing) {
       throw new ConflictError(`Email ${dto.email} is already registered`);
     }
 
     const passwordHash = await bcrypt.hash(dto.password, SALT_ROUNDS);
-    const role = dto.role ?? UserRole.CUSTOMER;
     const verificationToken = this.generateVerificationToken();
 
     const credential = await this.credentials.create({
@@ -137,6 +137,19 @@ export class AuthService {
     });
 
     return { message: 'If that account exists, a verification email has been sent' };
+  }
+
+  /**
+   * The role is server-authoritative: the DTO already rejects privileged roles, and this repeats the
+   * check so the invariant holds for any caller of register(), not only requests through the pipe.
+   */
+  private resolveRegistrationRole(requested: UserRole | null | undefined): UserRole {
+    // @IsOptional() lets null through, and it has always meant "use the default", like omitting it.
+    if (requested === undefined || requested === null) return UserRole.CUSTOMER;
+    if (!SELF_SERVICE_ROLES.includes(requested)) {
+      throw new ForbiddenError(`Role ${String(requested)} cannot be self-assigned at registration`);
+    }
+    return requested;
   }
 
   private async issueToken(userId: string, email: string, role: UserRole): Promise<AuthResponseDto> {

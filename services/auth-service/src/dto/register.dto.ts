@@ -1,6 +1,17 @@
 import { UserRole } from '@food-delivery/shared';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEmail, IsEnum, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsIn, IsOptional, IsString, MinLength } from 'class-validator';
+
+/**
+ * Roles a caller may choose for themselves at public registration. An allow-list, so a role added
+ * to `UserRole` later is not self-assignable until someone decides it should be. ADMIN is never on
+ * it: admin accounts are provisioned outside public registration.
+ */
+export const SELF_SERVICE_ROLES: readonly UserRole[] = [
+  UserRole.CUSTOMER,
+  UserRole.RESTAURANT_OWNER,
+  UserRole.DRIVER,
+];
 
 export class RegisterDto {
   @ApiProperty({
@@ -36,11 +47,11 @@ export class RegisterDto {
   phone?: string;
 
   @ApiPropertyOptional({
-    description: 'Role to create the account with. Defaults to CUSTOMER when omitted.',
-    enum: UserRole,
+    description: 'Account type to register as. Defaults to CUSTOMER when omitted. ADMIN cannot be self-assigned.',
+    enum: SELF_SERVICE_ROLES,
     example: UserRole.CUSTOMER,
   })
   @IsOptional()
-  @IsEnum(UserRole, { message: 'role must be one of CUSTOMER, RESTAURANT_OWNER, DRIVER, ADMIN' })
+  @IsIn(SELF_SERVICE_ROLES, { message: `role must be one of ${SELF_SERVICE_ROLES.join(', ')}` })
   role?: UserRole;
 }

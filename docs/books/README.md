@@ -29,7 +29,7 @@ A curriculum that uses the **real Delivery Plus codebase** as its laboratory. It
 | 14 | [Docker & Containers](14-docker-and-containers.md) | Junior | multi-stage image, Compose overlays, healthchecks |
 | 15 | [Linux & OS Fundamentals](15-linux-and-os.md) | Junior | processes, signals, files, memory, PID 1 |
 | 16 | [Networking](16-networking.md) | Intermediate | DNS, ports, proxies, TLS, timeouts |
-| 17 | [Security Engineering](17-security-engineering.md) | Intermediate | authn/authz, BOLA, service identity, uploads, **open critical finding** |
+| 17 | [Security Engineering](17-security-engineering.md) | Intermediate | authn/authz, BOLA, service identity, uploads, a critical finding and its fix |
 | 18 | [CI/CD & DevOps](18-cicd-and-devops.md) | Intermediate | the six workflows, gates, releases |
 | 19 | [Kubernetes](19-kubernetes.md) | Advanced | **FUTURE** for this project: what it would take |
 | 20 | [Observability](20-observability.md) | Advanced | logs, correlation IDs, metrics and alerts (mostly missing) |
@@ -55,7 +55,7 @@ A curriculum that uses the **real Delivery Plus codebase** as its laboratory. It
   - [Geo & algorithms](labs/geo-and-algorithms-labs.md) (GEO-01 … GEO-08)
   - [E2E](labs/e2e-labs.md) (E2E-01 … E2E-05)
   - [Security](labs/security-labs.md) (SEC-01 … SEC-08)
-- **[Case studies](case-studies/README.md):** 21 real problems, from symptom to what a senior engineer would ask. Case study 21 ([self-registered admin](case-studies/21-self-registered-admin.md)) is an **open, critical** finding.
+- **[Case studies](case-studies/README.md):** 21 real problems, from symptom to what a senior engineer would ask. Case study 21 ([self-registered admin](case-studies/21-self-registered-admin.md)) is a critical finding from this library's review, reproduced live and fixed in PR #105.
 - **[Teaching ADRs](adrs/README.md):** nine reconstructed decisions and one proposal (outbox). The project's official ADRs are in [`docs/adr/`](../adr/README.md).
 - **[Checkpoints](checkpoints.md):** Junior, Intermediate, Advanced and Senior.
 - **[Code-reading guide](code-reading-guide.md):** service layout, plus request paths for orders, payments, Kafka, delivery and the customer app.
@@ -122,7 +122,7 @@ What was checked, and how:
    - The Node-only labs (GEO-02 … GEO-08 and GEO-03's lifecycle graph check) were **executed** and pass.
    - The stack labs (DB, RD, KF, DS, OPS, SEC, E2E) were written against the code, the Compose files and the scripts, but **were not executed end to end while writing**, because no Docker daemon was available.
    - Expected outputs in those labs are predictions. If you find one wrong, fix the lab.
-5. **Not verified:** the open finding in [case study 21](case-studies/21-self-registered-admin.md) is confirmed by reading the code, not reproduced live.
+5. **Reproduced:** the finding in [case study 21](case-studies/21-self-registered-admin.md) was reproduced live before its fix (PR #105), and the fix was verified live afterwards.
 
 Re-verify after big changes: re-run the path and link checks, and spot-check the labs of the areas that changed.
 

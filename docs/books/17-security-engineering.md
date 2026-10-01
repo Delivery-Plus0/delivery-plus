@@ -33,7 +33,7 @@ Assume the credential database will leak one day. Hashing decides whether that's
 | Enumeration | login always says "Invalid email or password"; resend says "If that account exists, a verification email has been sent" |
 | Email verification | 32 random bytes, stored only as SHA-256, with expiry; enforcement controlled by `EMAIL_VERIFICATION_REQUIRED` (default **false**) |
 | Tokens | HS256 JWT, 1 h, no refresh token (**PLANNED** #34); no password reset/change (**PLANNED** #35) |
-| Self-chosen role at registration | **OPEN, critical:** `RegisterDto.role` accepts any `UserRole` including `ADMIN`, and `register` stores `dto.role ?? CUSTOMER` (`services/auth-service/src/dto/register.dto.ts`, `auth.service.ts`). Anyone can create an ADMIN account through the public `POST /api/auth/register` — [case study 21](case-studies/21-self-registered-admin.md) |
+| Self-chosen role at registration | **Fixed in PR #105 (was critical):** `RegisterDto.role` used to accept any `UserRole` including `ADMIN`, and `register` stored `dto.role ?? CUSTOMER`. Now only `SELF_SERVICE_ROLES` are accepted, checked in the DTO and again in the service (`services/auth-service/src/dto/register.dto.ts`, `auth.service.ts`). Before the fix, anyone could create an ADMIN account through the public `POST /api/auth/register` — [case study 21](case-studies/21-self-registered-admin.md) |
 
 ### 5. Example — the lockout counter makes online guessing expensive: 5 tries per 15 minutes per account ≈ 480 guesses per day, regardless of how many IPs the attacker uses.
 ### 6. Failure scenario — lockout as a DoS: an attacker who knows a customer's email can lock them out forever by failing 5 logins every 15 minutes. Mitigations: lock per (account, IP/device), progressive delays instead of hard locks, MFA.
@@ -84,7 +84,7 @@ For every route, answer two questions: "which roles?" and "whose objects?". If y
 | Refunds | a customer could refund their own completed payment, even after delivery | admin only | [Book 25](25-payment-systems.md) |
 | **Still open** | restaurant `ownerId` returned in public restaurant payloads; `GET /restaurants/:id/ownership/:userId` is unauthenticated (an ownership oracle) | — | issue #59 |
 | **Still open** | a BUSY driver can set themselves AVAILABLE | — | issue #33 |
-| **Still open — critical** | public registration accepts `role: "ADMIN"` (and self-assigned DRIVER/RESTAURANT_OWNER without any approval) | — | [case study 21](case-studies/21-self-registered-admin.md) |
+| **Fixed (PR #105)**; one part still open | public registration accepted `role: "ADMIN"`. Fixed with an allow-list plus a service re-check. **Still open:** DRIVER/RESTAURANT_OWNER are self-assigned without any approval | — | [case study 21](case-studies/21-self-registered-admin.md) |
 
 ### 5. Example — ownership delegated to the source of truth: delivery-service doesn't re-implement order access rules; it calls `GET /orders/:id` on order-service **with the caller's own token** (`OrderServiceClient.assertReadableBy` in `services/delivery-service/src/common/order-service.client.ts`). Whatever order-service decides (owner, restaurant owner, admin) is what delivery-service enforces.
 
@@ -95,7 +95,7 @@ For every route, answer two questions: "which roles?" and "whose objects?". If y
 ### 10. Operations — log authorization denials with user ID and resource ID (not just "403") to detect probing.
 
 ### 11. Lab
-[SEC-07 Reproduce a BOLA check](labs/security-labs.md#sec-07-reproduce-a-bola-check). And [SEC-08 Self-registered admin](labs/security-labs.md#sec-08-self-registered-admin) — the most severe open finding in the codebase.
+[SEC-07 Reproduce a BOLA check](labs/security-labs.md#sec-07-reproduce-a-bola-check). And [SEC-08 Self-registered admin](labs/security-labs.md#sec-08-self-registered-admin) — the most severe finding in the codebase, fixed in PR #105: run it before and after the fix.
 
 ### 12. Verification
 Customer B gets 403 for customer A's order and delivery, and 404 when marking A's notification read.

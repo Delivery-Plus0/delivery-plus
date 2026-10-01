@@ -49,7 +49,7 @@ It is narrower and auditable, but needs a secret per caller–receiver pair.
 ## What can still go wrong today
 
 - A leaked `.env`, or a container shell, gives a full admin. [SEC-03](../labs/security-labs.md#sec-03-mint-and-inspect-a-system-token) shows it in three commands.
-- With the [self-registered admin](21-self-registered-admin.md) flaw, an attacker doesn't even need the secret.
+- Before PR #105, the [self-registered admin](21-self-registered-admin.md) flaw meant an attacker didn't even need the secret.
 
 ## What a senior engineer would ask
 

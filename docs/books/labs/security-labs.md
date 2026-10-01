@@ -154,7 +154,7 @@ curl -s -o /dev/null -w "payment:        %{http_code}\n" $API/api/payments/$PAYM
 
 ## SEC-08 Self-registered admin
 
-**Goal:** confirm the most severe open finding, on your local stack only.
+**Goal:** see a privilege-escalation bug and its fix, on your local stack only. The bug was fixed in PR #105. To see it, run this lab on a checkout from before that PR (`git checkout 4791804`, then rebuild `auth-service`); then run it again on current `dev`.
 ```bash
 reset_limits
 curl -s $API/api/auth/register -H 'content-type: application/json'   -d '{"email":"lab.admin@example.com","password":"password123","fullName":"Lab Admin","role":"ADMIN"}' | j role
@@ -162,8 +162,9 @@ LABADMIN=$(login lab.admin@example.com | j accessToken)
 curl -s -o /dev/null -w "admin-only route: %{http_code}
 " $API/api/drivers/available -H "Authorization: Bearer $LABADMIN"
 ```
-**Expected (from reading the code):** the response role is `ADMIN` and the admin-only route answers 200 — i.e. self-service privilege escalation.
-**Why:** `RegisterDto.role` is validated only as "any `UserRole`" and `AuthService.register` uses it directly. The fix is to accept only self-service roles at public registration (e.g. CUSTOMER, and DRIVER/RESTAURANT_OWNER behind an approval step) and create admins through a separate, protected path — with a negative test.
+**Expected before the fix (reproduced live):** the response role is `ADMIN` and the admin-only route answers 200, i.e. self-service privilege escalation.
+**Expected after the fix:** registration answers **400** ("role must be one of CUSTOMER, RESTAURANT_OWNER, DRIVER"), no account is created, and `login` fails. Registering the same email without `role` gives a CUSTOMER account that gets **403** on the admin-only route.
+**Why:** `RegisterDto.role` is validated only as "any `UserRole`" and `AuthService.register` uses it directly. The fix (PR #105) accepts only self-service roles at public registration, in the DTO and again in the service, with negative tests at three layers. Approval for DRIVER/RESTAURANT_OWNER and a protected admin-provisioning path are still open decisions.
 **Cleanup:** delete the account from `auth_service.credentials` and `user_service.user_profiles`.
 **Links:** [case study 21](../case-studies/21-self-registered-admin.md), [Book 17 Ch. 2](../17-security-engineering.md#chapter-2--authorization-rbac-ownership-and-idorbola).
 

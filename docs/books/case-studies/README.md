@@ -30,7 +30,7 @@ Status tags: **CURRENT** (fixed and in the code), **PARTIAL** (partly addressed)
 | 18 | [System token](18-system-token.md) | CURRENT (weakness) | 17, 10 |
 | 19 | [Driver dispatch](19-driver-dispatch.md) | PARTIAL | 23, 24 |
 | 20 | [Nearest-driver search](20-nearest-driver-search.md) | FUTURE | 23, 02 |
-| 21 | [Self-registered admin](21-self-registered-admin.md) | **OPEN, critical** | 17 |
+| 21 | [Self-registered admin](21-self-registered-admin.md) | CURRENT (fixed, PR #105; was critical) | 17 |
 
 ## How to use them
 

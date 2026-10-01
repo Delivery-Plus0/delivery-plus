@@ -1,6 +1,6 @@
 # Case Study 21 — Self-Registered Admin
 
-**Status: OPEN — CRITICAL (found while writing this library; not fixed; confirmed by reading the code, not yet reproduced live)** · [Case studies](README.md) · Book: [17](../17-security-engineering.md) · Lab: [SEC-08](../labs/security-labs.md#sec-08-self-registered-admin)
+**Status: CURRENT — FIXED in PR #105 (sprint 0a)**. Critical; found while writing this library, then reproduced live before the fix (role `ADMIN`, 200 on an admin-only route). · [Case studies](README.md) · Book: [17](../17-security-engineering.md) · Lab: [SEC-08](../labs/security-labs.md#sec-08-self-registered-admin)
 
 ## Symptom
 
@@ -42,7 +42,15 @@ Anyone can become **ADMIN** with one request, and ADMIN bypasses ownership check
 
 This also defeats the fixes in case studies [02](02-delivery-ownership-bug.md), [03](03-public-driver-endpoint.md) and [18](18-system-token.md). Self-selecting `RESTAURANT_OWNER` or `DRIVER` is a lesser, related problem: business roles normally need vetting.
 
-## Fix (proposed; not applied, per this library's "no application changes" rule)
+## Fix (applied in PR #105, commit `8e4a57b`)
+
+Items 1 and 5 below were implemented. Items 2–4 remain open decisions.
+
+- `SELF_SERVICE_ROLES` (CUSTOMER, RESTAURANT_OWNER, DRIVER) in `services/auth-service/src/dto/register.dto.ts`, enforced by `@IsIn` (400).
+- `AuthService.resolveRegistrationRole` re-checks the same list before any database work (403). A missing or `null` role still means CUSTOMER.
+- Tests: `auth.service.spec.ts`, `register.dto.spec.ts` (same `ValidationPipe` options as `main.ts`), and `scripts/e2e.ts` (400 on ADMIN with no account created; 403 on an admin-only route for a public sign-up).
+
+The original proposal:
 
 1. **Public registration accepts only self-service roles.** Remove ADMIN from the accepted values, with an explicit allow-list:
    ```ts

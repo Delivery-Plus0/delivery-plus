@@ -1,11 +1,11 @@
 # Case Study 19 — Driver Dispatch
 
-**Status: PARTIAL (manual dispatch CURRENT; automatic dispatch PLANNED in [#97](https://github.com/Yousefa7medmaher/delivery-plus/issues/97))** · [Case studies](README.md) · Books: [23](../23-geo-location-systems.md), [24](../24-system-design.md) · Lab: [GEO-07](../labs/geo-and-algorithms-labs.md#geo-07-greedy-vs-batch-assignment)
+**Status: PARTIAL (automatic dispatch CURRENT since [#97](https://github.com/Yousefa7medmaher/delivery-plus/issues/97); driver choice still ignores location and fairness)** · [Case studies](README.md) · Books: [23](../23-geo-location-systems.md), [24](../24-system-design.md) · Lab: [GEO-07](../labs/geo-and-algorithms-labs.md#geo-07-greedy-vs-batch-assignment)
 
 ## How dispatch works today (CURRENT)
 
 1. The order reaches `READY_FOR_PICKUP` (the restaurant owner moves it).
-2. The **restaurant owner or an admin** calls `POST /api/deliveries` (create), then `POST /api/deliveries/:id/assign`.
+2. **delivery-service dispatches automatically** (#97): it consumes `order.ready_for_pickup`, creates the delivery and assigns it. With no driver free, the delivery waits and a sweep (`AUTO_DISPATCH_SWEEP_MS`) retries it. The restaurant owner or an admin can still call `POST /api/deliveries` and `/assign` by hand.
 3. `assignDriver` (`services/delivery-service/src/services/deliveries.service.ts`):
    - asks driver-service for an available driver (`findAvailableDriver`);
    - marks that driver BUSY;
@@ -21,7 +21,7 @@ So the algorithm is: **the most recently updated available driver**. Location pl
 | --- | --- |
 | no location input | a driver 20 km away can be picked over one next door |
 | "most recently updated" | the driver who just came online or just finished gets the job; drivers who waited longest get nothing (unfair) |
-| a human must press "assign" | orders wait whenever the restaurant is busy (#97) |
+| ~~a human must press "assign"~~ (**fixed, #97**) | auto-dispatch on `order.ready_for_pickup`, retried by a sweep when no driver is free |
 | no driver accept or decline | a driver can't refuse; no timeout or reassignment |
 | ~~no address on the order~~ (**fixed, #95**) | orders now snapshot a text drop-off address; coordinates are optional and there is no geocoding yet |
 | claim race (**fixed, #33**) | two concurrent assigns can pick the **same** first driver. The BUSY claim used to be a blind write, so both could "succeed". It is now compare-and-set: exactly one claim wins, and the loser tries the next available driver |
@@ -34,7 +34,7 @@ So the algorithm is: **the most recently updated available driver**. Location pl
 ## A path forward
 
 1. ~~**Atomic claim** in driver-service~~: **done for #33.** `transitionStatus` runs `UPDATE … WHERE id = $1 AND status = 'AVAILABLE'`, and `claimAvailableDriver` tries the next driver on a lost claim.
-2. **Automatic dispatch** (#97): consume `order.ready_for_pickup` (or poll), create and assign. It must be idempotent per order.
+2. ~~**Automatic dispatch**~~: **done for #97.** It consumes `order.ready_for_pickup`, creates and assigns, and is idempotent per order (durable dedup, unique `orderId`, compare-and-set claims). A sweep retries deliveries waiting for a driver.
 3. **Nearest available driver** ([case study 20](20-nearest-driver-search.md)) once orders reliably have coordinates (#95 stores them when the client sends them; geocoding is still missing).
 4. **Offer, accept or timeout** with the driver app (#99).
 5. **Batch assignment** when volume is high ([GEO-07](../labs/geo-and-algorithms-labs.md#geo-07-greedy-vs-batch-assignment)): greedy-nearest is locally good and globally poor.

@@ -21,7 +21,8 @@ From `services/delivery-service/src/controllers/deliveries.controller.ts`:
 - Calls `driver-service` to find and update drivers, and to resolve the calling driver (`GET /drivers/me` with their own token)
 - Calls `restaurant-service` (public read) for the pickup name and address
 - Uses PostgreSQL for delivery records
-- Publishes `delivery.events`
+- Uses Redis for durable Kafka idempotency (consumer group `delivery-service-group`)
+- Publishes `delivery.events`; consumes `order.ready_for_pickup` (auto-dispatch)
 
 ## Events published/consumed
 Every lifecycle transition publishes to `delivery.events`: `delivery.created`, `delivery.driver_assigned`, `delivery.picked_up`, `delivery.in_transit`, `delivery.completed`, `delivery.cancelled`. Payload: `{ deliveryId, orderId, driverId?, status }`.
@@ -32,7 +33,7 @@ Every lifecycle transition publishes to `delivery.events`: `delivery.created`, `
 - At-least-once and not transactional with the database write: a crash between the update and the publish loses the event (no outbox yet).
 
 Consumed from:
-- none directly implemented in this service
+- `order.events` → `order.ready_for_pickup` (auto-dispatch, below), with durable per-group idempotency
 
 ## Required env vars
 From `services/delivery-service/src/config/app-config.ts`:
@@ -42,9 +43,27 @@ From `services/delivery-service/src/config/app-config.ts`:
 - `ORDER_SERVICE_URL` (default: `http://localhost:3006`)
 - `DRIVER_SERVICE_URL` (default: `http://localhost:3009`)
 - `RESTAURANT_SERVICE_URL` (default: `http://localhost:3003`)
+- `REDIS_URL` (default: `redis://localhost:6379`), for Kafka idempotency
+- `AUTO_DISPATCH_SWEEP_MS` (default: `15000`), how often deliveries waiting for a driver are retried; `0` disables the retry (the E2E stack uses `2000`)
 - `KAFKA_BROKER` (used in Docker Compose as `kafka:29092`)
 - `PORT` (default: `3008`)
 - `NODE_ENV` (default: `development`)
+
+## Automatic dispatch
+
+Orders reach a driver without anyone calling the API (`src/services/auto-dispatch.service.ts`):
+
+1. **Trigger.** order-service publishes `order.ready_for_pickup` when the restaurant marks the order ready. delivery-service consumes it and creates the delivery through the normal `create` path. If a delivery already exists (a manual dispatch, or a replayed event), that one is used.
+2. **Assignment** goes through the normal `assignDriver` path: the exclusive, compare-and-set driver claim (#33). The dispatcher acts with dispatch rights (ADMIN).
+3. **No driver free.** The delivery stays `CREATED`, and the event counts as handled: it is not retried and not dead-lettered. Every `AUTO_DISPATCH_SWEEP_MS` (default 15 s) a sweep assigns waiting deliveries, oldest first, and stops at the first "no driver free". A waiting delivery is therefore assigned **within one sweep interval** of a driver coming online. Manually created deliveries that are still waiting are assigned by the sweep too.
+4. **Duplicates and races:**
+   - Redelivered and replayed events are deduplicated (durable idempotency). A delivery that is already assigned is left alone.
+   - `deliveries.orderId` is unique. A manual create racing the automatic one gets `409` (not 500), and the dispatcher continues with the existing delivery.
+   - The delivery transition is compare-and-set, and a lost assignment counts as done.
+5. **Stale events.** An order that is no longer ready (e.g. cancelled) is skipped with a warning. Other failures (e.g. order-service down) are retried by the consumer and then dead-lettered.
+6. **Not covered.** An order whose `ready_for_pickup` event was lost (no outbox yet, #98) gets no delivery automatically; the restaurant owner can still dispatch it manually.
+
+Manual `POST /deliveries` and `/assign` stay available to admins and restaurant owners.
 
 ## Driver's current delivery
 

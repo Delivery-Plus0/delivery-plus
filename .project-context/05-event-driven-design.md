@@ -105,6 +105,7 @@ Services react to incoming events by updating their own internal state or creati
 
 - `notification-service` subscribes to order/payment/delivery topics and persists order notifications; payment and delivery handlers currently contain no-op behavior because the required lookup/contract work is not implemented
 - `order-service` converges its status from payment and delivery events (tolerant of duplicates and stale events)
+- `delivery-service` consumes `order.ready_for_pickup` and dispatches automatically: it creates the delivery if none exists and assigns a driver. With no driver free, the delivery waits and a periodic sweep retries; the event is not dead-lettered. Durable idempotency is used, and races with manual dispatch end in one delivery and one driver (see [docs/services/delivery-service.md](../docs/services/delivery-service.md#automatic-dispatch))
 - `driver-service` consumes nothing; availability is set synchronously by delivery-service (compare-and-set claim and release; a BUSY driver cannot make themselves AVAILABLE)
 
 ## Why this matters for maintainers

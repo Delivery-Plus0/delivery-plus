@@ -65,7 +65,7 @@ Read `e2e/flows/business/customer-order-lifecycle.yaml` alongside the run and fi
 | --- | --- | --- | --- |
 | customer places the order | UI | `checkout-place-order` | — |
 | restaurant prepares, marks ready | stand-in | `restaurant/prepare`, `restaurant/ready` | restaurant dashboard (#100) |
-| delivery created and assigned | stand-in | `restaurant/dispatch` | automatic dispatch (#97) |
+| delivery created and assigned | **automatic** since #97 (no stand-in) | `order.ready_for_pickup` → auto-dispatch | — |
 | pickup, start, complete | stand-in | `driver/pickup`, `driver/start`, `driver/complete` | driver app (#99) |
 | customer sees each stage and "Delivered" | UI (polling every 10 s) | `delivery-stage`, `order-status` | — |
 | confirmation notification visible | UI | `/notifications` page, text `…has been confirmed.` | — |

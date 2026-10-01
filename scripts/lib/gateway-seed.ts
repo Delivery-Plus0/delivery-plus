@@ -314,7 +314,7 @@ export async function placeOrder(
 
 /**
  * delivery-service assigns the most recently updated AVAILABLE driver, so cycle the driver
- * offline → online right before dispatch to make sure it is the one picked.
+ * offline → online right before the order becomes ready to make sure it is the one picked.
  */
 export async function prepareDriver(driver: Auth) {
   const { status } = await get<{ status: string }>('/api/drivers/me', driver);
@@ -325,7 +325,34 @@ export async function prepareDriver(driver: Auth) {
   await post('/api/drivers/me/online', {}, driver);
 }
 
-/** Restaurant side: prepare, mark ready, create the delivery, assign `driver`. Returns the delivery id. */
+/** Polls the order's delivery until a driver is assigned (auto-dispatch creates and assigns it). */
+export async function waitForAssignment(
+  orderId: string,
+  auth: Auth,
+): Promise<{ id: string; driverId?: string; status: string }> {
+  const deadline = Date.now() + 30_000;
+  let last = 'no delivery yet';
+  while (Date.now() < deadline) {
+    try {
+      const delivery = await get<{ id: string; driverId?: string; status: string }>(
+        `/api/deliveries/by-order/${orderId}`,
+        auth,
+      );
+      if (delivery.status !== 'CREATED') return delivery;
+      last = 'delivery waiting for a driver';
+    } catch (error) {
+      if (statusOf(error) !== 404) throw error;
+    }
+    await sleep(500);
+  }
+  throw new Error(`Timed out waiting for a driver to be assigned to order ${orderId} (${last})`);
+}
+
+/**
+ * Restaurant side: prepare and mark ready. delivery-service then creates the delivery and assigns a
+ * driver by itself (auto-dispatch). `driver` is brought online last so it is the one picked.
+ * Returns the delivery id.
+ */
 export async function dispatch(
   orderId: string,
   owner: Auth,
@@ -333,17 +360,12 @@ export async function dispatch(
   driverId: string,
 ): Promise<string> {
   await patch(`/api/orders/${orderId}/status`, { status: 'PREPARING' }, owner);
-  await patch(`/api/orders/${orderId}/status`, { status: 'READY_FOR_PICKUP' }, owner);
-  const delivery = await post<{ id: string }>('/api/deliveries', { orderId }, owner);
   await prepareDriver(driver);
-  const assigned = await post<{ driverId?: string }>(
-    `/api/deliveries/${delivery.id}/assign`,
-    {},
-    owner,
-  );
-  if (assigned.driverId !== driverId) {
+  await patch(`/api/orders/${orderId}/status`, { status: 'READY_FOR_PICKUP' }, owner);
+  const delivery = await waitForAssignment(orderId, owner);
+  if (delivery.driverId !== driverId) {
     throw new Error(
-      `Delivery was assigned to driver ${assigned.driverId}, not the expected driver — another driver went online at the same moment; rerun.`,
+      `Delivery was assigned to driver ${delivery.driverId}, not the expected driver — another driver went online at the same moment; rerun.`,
     );
   }
   return delivery.id;

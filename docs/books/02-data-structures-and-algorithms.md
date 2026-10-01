@@ -431,7 +431,7 @@ Greedy answers each order alone. Batch matching waits a few seconds, collects or
 
 ### 4. Delivery Plus mapping
 - **CURRENT:** `DeliveriesService.assignDriver` → `DriverServiceClient.findAvailableDriver()` → `GET /drivers/available?page=1&limit=1` → `findAvailable` in `services/driver-service/src/repositories/drivers.repository.ts`, ordered by `updatedAt DESC`. That is a *recency* heuristic: the driver who most recently changed status wins. No distance is involved.
-- **PLANNED:** automatic dispatch on `order.ready_for_pickup` (issue #97) — still greedy, but triggered by an event.
+- **CURRENT (issue #97):** automatic dispatch on `order.ready_for_pickup`. It's still greedy (most recently updated AVAILABLE driver), but triggered by an event, with a periodic sweep for deliveries waiting for a driver.
 - **FUTURE:** distance-aware ranking and batch matching.
 
 ### 5. Example

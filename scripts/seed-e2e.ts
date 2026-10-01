@@ -176,14 +176,9 @@ async function seedE2e() {
     failed = await placeOrder(customer, [{ item: item('QA Fries'), quantity: 1 }], 'failure');
   }
 
-  // S3 ready for pickup, no delivery yet: the "Finding a driver" state on order detail.
-  let awaiting = await findOrder(customer, 'READY_FOR_PICKUP');
-  if (!awaiting) {
-    log('• S3 ready for pickup, no delivery (1× QA Pasta)');
-    awaiting = await placeOrder(customer, [{ item: item('QA Pasta'), quantity: 1 }], 'success');
-    await patch(`/api/orders/${awaiting.id}/status`, { status: 'PREPARING' }, owner);
-    await patch(`/api/orders/${awaiting.id}/status`, { status: 'READY_FOR_PICKUP' }, owner);
-  }
+  // No seeded "waiting for a driver" order: with auto-dispatch a ready order is assigned as soon as
+  // any driver is free, so that state can't stay put. The customer app's regression suite creates
+  // it at runtime instead (driver offline -> order ready -> "Finding a driver" -> driver online).
 
   // S4 another customer's order: the QA customer must not be able to open it.
   let foreign = await findOrder(otherCustomer, 'CONFIRMED');
@@ -210,7 +205,6 @@ async function seedE2e() {
     orders: {
       delivered: delivered.id,
       failed: failed.id,
-      awaitingDriver: awaiting.id,
       otherCustomer: foreign.id,
     },
   };

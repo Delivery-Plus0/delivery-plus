@@ -9,6 +9,8 @@ export interface AppConfig {
   orderServiceUrl: string;
   driverServiceUrl: string;
   restaurantServiceUrl: string;
+  /** How often auto-dispatch retries deliveries waiting for a driver; 0 disables the retry. */
+  autoDispatchSweepMs: number;
 }
 
 export function loadConfig(): AppConfig {
@@ -27,5 +29,6 @@ export function loadConfig(): AppConfig {
     orderServiceUrl: process.env.ORDER_SERVICE_URL || 'http://localhost:3006',
     driverServiceUrl: process.env.DRIVER_SERVICE_URL || 'http://localhost:3009',
     restaurantServiceUrl: process.env.RESTAURANT_SERVICE_URL || 'http://localhost:3003',
+    autoDispatchSweepMs: parseInt(process.env.AUTO_DISPATCH_SWEEP_MS || '15000', 10),
   };
 }

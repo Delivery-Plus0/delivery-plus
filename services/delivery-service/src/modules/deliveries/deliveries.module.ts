@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Delivery } from '../../entities/delivery.entity';
 import { DeliveriesRepository } from '../../repositories/deliveries.repository';
 import { DeliveriesService } from '../../services/deliveries.service';
+import { AutoDispatchService } from '../../services/auto-dispatch.service';
 import { DeliveriesController } from '../../controllers/deliveries.controller';
 import { OrderServiceClient } from '../../common/order-service.client';
 import { DriverServiceClient } from '../../common/driver-service.client';
@@ -22,6 +23,7 @@ import { APP_CONFIG, AppConfig } from '../../config/app-config';
   controllers: [DeliveriesController],
   providers: [
     DeliveriesService,
+    AutoDispatchService,
     DeliveriesRepository,
     OrderServiceClient,
     DriverServiceClient,

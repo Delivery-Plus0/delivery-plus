@@ -242,7 +242,7 @@ Orchestration = conductor. Choreography = dancers who know the music.
 | Order status convergence from payments/deliveries | choreography (events) + direct HTTP | **CURRENT** |
 | Delivery lifecycle | orchestration by **delivery-service** (it calls order- and driver-service) | **CURRENT** |
 | Kitchen (prepare, ready) | manual (restaurant owner API calls; no client yet) | **CURRENT** |
-| Dispatch on ready-for-pickup | choreography (delivery-service consumes `order.ready_for_pickup`) | **PLANNED** (#97) |
+| Dispatch on ready-for-pickup | choreography (delivery-service consumes `order.ready_for_pickup`) | **CURRENT** (#97) |
 | Cancellation + refund | none yet | **PLANNED** (#53) |
 
 ### 5. Example — automatic dispatch as choreography: order-service doesn't know dispatch exists; it publishes `order.ready_for_pickup`, delivery-service reacts.

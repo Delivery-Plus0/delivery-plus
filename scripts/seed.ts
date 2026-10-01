@@ -37,6 +37,8 @@ async function seed() {
     const ownerAuth = await loginOrRegister('owner@example.com', 'Restaurant Owner', 'RESTAURANT_OWNER');
     console.log('Registering customer...');
     const customerAuth = await loginOrRegister('customer@example.com', 'Hungry Customer', 'CUSTOMER');
+    // Checkout needs a drop-off address; without one in the body, orders copy the profile address.
+    await axios.patch(`${API_URL}/api/users/me`, { address: '1 Seed Street, Apt 2' }, customerAuth);
     console.log('Registering driver...');
     const driverAuth = await loginOrRegister('driver@example.com', 'Speedy Driver', 'DRIVER');
 

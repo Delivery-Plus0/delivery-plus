@@ -264,6 +264,7 @@ services:
       - KAFKA_BROKER=kafka:29092
       - CART_SERVICE_URL=http://cart-service:3005
       - RESTAURANT_SERVICE_URL=http://restaurant-service:3003
+      - USER_SERVICE_URL=http://user-service:3002
     healthcheck:
       test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3006/health']
       interval: 5s

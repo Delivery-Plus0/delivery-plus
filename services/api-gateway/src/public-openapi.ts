@@ -206,6 +206,17 @@ const baseSchemas = {
       role: { type: 'string', enum: ['CUSTOMER', 'RESTAURANT_OWNER', 'DRIVER'] },
     },
   },
+  CreateOrderRequest: {
+    type: 'object',
+    description:
+      "Optional. Without deliveryAddress the customer's profile address is used; the address is copied onto the order. 400 if neither has one.",
+    properties: {
+      deliveryAddress: { type: 'string', maxLength: 500 },
+      deliveryNotes: { type: 'string', maxLength: 500 },
+      deliveryLatitude: { type: 'number', minimum: -90, maximum: 90, description: 'Requires deliveryAddress and deliveryLongitude.' },
+      deliveryLongitude: { type: 'number', minimum: -180, maximum: 180, description: 'Requires deliveryAddress and deliveryLatitude.' },
+    },
+  },
   VerifyEmailRequest: {
     type: 'object',
     required: ['email', 'token'],
@@ -361,6 +372,15 @@ export function generatePublicOpenApiDocument() {
           required: true,
           content: {
             'application/json': { schema: { $ref: `#/components/schemas/${requestSchema}` } },
+          },
+        };
+      }
+
+      if (route.method === 'post' && service.service === 'orders' && route.path === '') {
+        operation.requestBody = {
+          required: false,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/CreateOrderRequest' } },
           },
         };
       }

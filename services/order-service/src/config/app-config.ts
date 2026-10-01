@@ -8,6 +8,7 @@ export interface AppConfig {
   jwtSecret: string;
   cartServiceUrl: string;
   restaurantServiceUrl: string;
+  userServiceUrl: string;
 }
 
 export function loadConfig(): AppConfig {
@@ -25,5 +26,6 @@ export function loadConfig(): AppConfig {
     jwtSecret: process.env.JWT_SECRET as string,
     cartServiceUrl: process.env.CART_SERVICE_URL || 'http://localhost:3005',
     restaurantServiceUrl: process.env.RESTAURANT_SERVICE_URL || 'http://localhost:3003',
+    userServiceUrl: process.env.USER_SERVICE_URL || 'http://localhost:3002',
   };
 }

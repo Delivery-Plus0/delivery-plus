@@ -4,6 +4,7 @@ import { JwtAuthGuard, CurrentUser, JwtPayload, RateLimit, RateLimitGuard } from
 import { OrdersService } from '../services/orders.service';
 import { UpdateOrderStatusDto } from '../dto/update-order-status.dto';
 import { ListOrdersQueryDto } from '../dto/list-orders-query.dto';
+import { CreateOrderDto } from '../dto/create-order.dto';
 import { IDEMPOTENCY_KEY_HEADER, parseIdempotencyKey } from '../common/idempotency-key';
 
 @ApiTags('orders')
@@ -15,7 +16,11 @@ export class OrdersController {
 
   @Post()
   @RateLimit({ limit: 5, windowSeconds: 60 })
-  @ApiOperation({ summary: 'Create an order from the current cart' })
+  @ApiOperation({
+    summary: 'Create an order from the current cart',
+    description:
+      "The drop-off address is taken from the body, or else from the customer's profile, and copied onto the order. 400 if neither has one.",
+  })
   @ApiHeader({
     name: 'Idempotency-Key',
     required: false,
@@ -25,9 +30,10 @@ export class OrdersController {
   create(
     @CurrentUser() user: JwtPayload,
     @Headers('authorization') authHeader: string,
+    @Body() checkout: CreateOrderDto,
     @Headers(IDEMPOTENCY_KEY_HEADER) idempotencyKey?: string,
   ) {
-    return this.ordersService.createFromCart(user.sub, authHeader, parseIdempotencyKey(idempotencyKey));
+    return this.ordersService.createFromCart(user.sub, authHeader, parseIdempotencyKey(idempotencyKey), checkout);
   }
 
   @Get()

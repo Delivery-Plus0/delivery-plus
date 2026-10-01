@@ -23,9 +23,20 @@ Behavior:
 
 This is enforced in the application layer and backed by a database uniqueness rule on `(customerId, idempotencyKey)` where the key is not null.
 
+## Delivery address
+
+Every new order carries a drop-off address, **copied at checkout and never updated afterwards**: `deliveryAddress`, `deliveryNotes`, `deliveryLatitude`, `deliveryLongitude`.
+
+- `POST /orders` accepts an optional JSON body (`CreateOrderDto`): `deliveryAddress` (≤ 500 chars, trimmed), `deliveryNotes`, and `deliveryLatitude` + `deliveryLongitude` (only together, and only with an address).
+- Without `deliveryAddress`, the customer's profile address is used. It is read from user-service `GET /users/me` with the customer's own token.
+- No address in either place → `400 A delivery address is required…`. Nothing is created and the cart is kept.
+- Editing the profile later does not change placed orders. An idempotent retry returns the original order and its original address.
+- Orders created before migration `003-order-delivery-address` have `null` address columns.
+
 ## Dependencies
 - Reads the current cart from `cart-service`
 - Validates restaurant ownership and status from `restaurant-service`
+- Reads the customer's profile address from `user-service` when checkout sends none
 - Responds to payment and delivery events via Kafka consumers
 - Persists order data in PostgreSQL
 
@@ -49,6 +60,7 @@ From `services/order-service/src/config/app-config.ts`:
 - `JWT_SECRET`
 - `CART_SERVICE_URL` (default: `http://localhost:3005`)
 - `RESTAURANT_SERVICE_URL` (default: `http://localhost:3003`)
+- `USER_SERVICE_URL` (default: `http://localhost:3002`), used to read the customer's profile address at checkout
 - `KAFKA_BROKER` (used in Docker Compose as `kafka:29092`)
 - `PORT` (default: `3006`)
 - `NODE_ENV` (default: `development`)

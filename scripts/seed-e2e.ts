@@ -43,7 +43,11 @@ export const QA = {
     phone: '+1 555 000 0001',
     address: '1 Test Street, Apt 1',
   },
-  otherCustomer: { email: 'qa.customer2@delivery-plus.test', fullName: 'QA Other Customer' },
+  otherCustomer: {
+    email: 'qa.customer2@delivery-plus.test',
+    fullName: 'QA Other Customer',
+    address: '2 Test Street, Apt 2',
+  },
   restaurant: { email: 'qa.restaurant@delivery-plus.test', fullName: 'QA Restaurant Owner' },
   driver: { email: 'qa.driver@delivery-plus.test', fullName: 'QA Driver', plate: 'QA-0001' },
 } as const;
@@ -140,6 +144,8 @@ async function seedE2e() {
     { fullName: QA.customer.fullName, phone: QA.customer.phone, address: QA.customer.address },
     customer,
   );
+  // Checkout needs a drop-off address; the S4 order is placed as this customer.
+  await patch('/api/users/me', { address: QA.otherCustomer.address }, otherCustomer);
   await ensureDriverProfile(driver, 'Bicycle', QA.driver.plate);
   const driverProfile = await get<{ id: string }>('/api/drivers/me', driver);
 

@@ -2,6 +2,7 @@ import { OrdersService } from './orders.service';
 import { OrdersRepository } from '../repositories/orders.repository';
 import { CartServiceClient } from '../common/cart-service.client';
 import { RestaurantServiceClient } from '../common/restaurant-service.client';
+import { UserProfileDto, UserServiceClient } from '../common/user-service.client';
 import {
   BadRequestError,
   DeliveryEventType,
@@ -21,6 +22,7 @@ describe('OrdersService', () => {
   let orders: jest.Mocked<OrdersRepository>;
   let cartClient: jest.Mocked<CartServiceClient>;
   let restaurantClient: jest.Mocked<RestaurantServiceClient>;
+  let userClient: jest.Mocked<UserServiceClient>;
   let kafkaProducer: { publish: jest.Mock };
   let kafkaConsumer: { subscribe: jest.Mock; start: jest.Mock };
 
@@ -30,6 +32,10 @@ describe('OrdersService', () => {
     restaurantId: 'rest-1',
     status: OrderStatus.CREATED,
     totalAmount: '19.98',
+    deliveryAddress: '1 Profile Street',
+    deliveryNotes: null,
+    deliveryLatitude: null,
+    deliveryLongitude: null,
     items: [],
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -55,6 +61,10 @@ describe('OrdersService', () => {
       assertOwnership: jest.fn(),
     } as unknown as jest.Mocked<RestaurantServiceClient>;
 
+    userClient = {
+      getOwnProfile: jest.fn().mockResolvedValue({ id: 'customer-1', address: '1 Profile Street' }),
+    } as unknown as jest.Mocked<UserServiceClient>;
+
     kafkaProducer = { publish: jest.fn() };
     kafkaConsumer = { subscribe: jest.fn(), start: jest.fn() };
     service = new OrdersService(
@@ -63,6 +73,7 @@ describe('OrdersService', () => {
       restaurantClient,
       kafkaProducer as any,
       kafkaConsumer as any,
+      userClient,
     );
   });
 
@@ -142,6 +153,92 @@ describe('OrdersService', () => {
 
       expect(result.id).toBe('order-existing');
       expect(cartClient.clearCart).not.toHaveBeenCalled();
+    });
+
+    describe('delivery address snapshot', () => {
+      beforeEach(() => {
+        cartClient.getCart.mockResolvedValue({
+          userId: 'c1',
+          restaurantId: 'rest-1',
+          items: [{ menuItemId: 'i1', name: 'Burger', price: 9.99, quantity: 1 }],
+          total: 9.99,
+        });
+        restaurantClient.getRestaurant.mockResolvedValue({ id: 'rest-1', ownerId: 'owner-1', name: 'X', status: RestaurantStatus.OPEN });
+        orders.create.mockResolvedValue(baseOrder);
+      });
+
+      /** The DeliveryAddress handed to the repository (last argument of create). */
+      const persistedDelivery = () => orders.create.mock.calls[0][5];
+
+      it('stores the address, notes and coordinates sent at checkout without reading the profile', async () => {
+        await service.createFromCart('customer-1', 'Bearer x', undefined, {
+          deliveryAddress: '9 Nile Corniche',
+          deliveryNotes: 'Gate code 42',
+          deliveryLatitude: 30.0444,
+          deliveryLongitude: 31.2357,
+        });
+
+        expect(persistedDelivery()).toEqual({
+          address: '9 Nile Corniche',
+          notes: 'Gate code 42',
+          latitude: 30.0444,
+          longitude: 31.2357,
+        });
+        expect(userClient.getOwnProfile).not.toHaveBeenCalled();
+      });
+
+      it("falls back to the customer's profile address, read with the customer's own token", async () => {
+        userClient.getOwnProfile.mockResolvedValue({ id: 'customer-1', address: '  742 Evergreen Terrace  ' });
+
+        await service.createFromCart('customer-1', 'Bearer x', undefined, { deliveryNotes: 'Ring twice' });
+
+        expect(userClient.getOwnProfile).toHaveBeenCalledWith('Bearer x');
+        expect(persistedDelivery()).toEqual({ address: '742 Evergreen Terrace', notes: 'Ring twice', latitude: null, longitude: null });
+      });
+
+      it('falls back to the profile when no body is sent at all (existing clients)', async () => {
+        await service.createFromCart('customer-1', 'Bearer x');
+        expect(persistedDelivery().address).toBe('1 Profile Street');
+      });
+
+      it.each([
+        ['no address field', { id: 'customer-1' }],
+        ['null address', { id: 'customer-1', address: null }],
+        ['blank address', { id: 'customer-1', address: '   ' }],
+      ])('rejects checkout with no address anywhere (%s): 400, nothing created, cart kept', async (_label, profile) => {
+        userClient.getOwnProfile.mockResolvedValue(profile as UserProfileDto);
+
+        await expect(service.createFromCart('customer-1', 'Bearer x')).rejects.toThrow(
+          'A delivery address is required',
+        );
+        expect(orders.create).not.toHaveBeenCalled();
+        expect(cartClient.clearCart).not.toHaveBeenCalled();
+        expect(kafkaProducer.publish).not.toHaveBeenCalled();
+      });
+
+      it('rejects coordinates without an address instead of pairing them with the profile address', async () => {
+        await expect(
+          service.createFromCart('customer-1', 'Bearer x', undefined, { deliveryLatitude: 30, deliveryLongitude: 31 }),
+        ).rejects.toThrow(BadRequestError);
+        expect(orders.create).not.toHaveBeenCalled();
+      });
+
+      it('reports an empty cart before looking up any address', async () => {
+        cartClient.getCart.mockResolvedValue({ userId: 'c1', restaurantId: null, items: [], total: 0 });
+
+        await expect(service.createFromCart('customer-1', 'Bearer x')).rejects.toThrow('Cart is empty');
+        expect(userClient.getOwnProfile).not.toHaveBeenCalled();
+      });
+
+      it('does not re-read the address for an idempotent retry (the original snapshot stands)', async () => {
+        orders.findByCustomerAndIdempotencyKey.mockResolvedValue({ ...baseOrder, deliveryAddress: 'original' });
+
+        const result = await service.createFromCart('customer-1', 'Bearer x', 'key-1', { deliveryAddress: 'changed' });
+
+        expect(result.deliveryAddress).toBe('original');
+        expect(userClient.getOwnProfile).not.toHaveBeenCalled();
+        expect(orders.create).not.toHaveBeenCalled();
+      });
     });
   });
 

@@ -142,6 +142,15 @@ async function runE2E() {
     const orderId = orderRes.data.id;
     console.log(`Order created: ${orderId} (status ${orderRes.data.status})`);
 
+    // No address in the body, so the order must carry a copy of the profile address.
+    const profile = await axios.get(`${API_URL}/api/users/me`, customerAuth);
+    if (!profile.data.address || orderRes.data.deliveryAddress !== profile.data.address) {
+      throw new Error(
+        `Order delivery address ${JSON.stringify(orderRes.data.deliveryAddress)} does not match the profile address ${JSON.stringify(profile.data.address)}`,
+      );
+    }
+    console.log(`Order delivery address: ${orderRes.data.deliveryAddress}`);
+
     const getOrder = async () => (await axios.get(`${API_URL}/api/orders/${orderId}`, customerAuth)).data;
 
     // 5. Create the payment. createPayment's own completeSideEffects call

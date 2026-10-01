@@ -10,12 +10,11 @@ graph TD
   Services --> Redis[(Redis)]
   Order[Order service] -->|order.events| Kafka[(Kafka)]
   Payment[Payment service] -->|payment.events| Kafka
-  Delivery[Delivery service] -. delivery.events, not published yet .-> Kafka
-  Kafka --> Driver[Driver service]
+  Delivery[Delivery service] -->|delivery.events| Kafka
   Kafka --> Notification[Notification service]
   Kafka --> Order
   Services -->|user, restaurant, menu media| S3[(S3-compatible storage)]
-  Client -. presigned POST upload .-> S3
+  Client -.->|presigned POST upload| S3
 ```
 
 Every service image is built from the root `Dockerfile` on `node:22-alpine`. For a status snapshot of what is implemented, partial, and missing, see [project context: current state](../.project-context/16-current-state.md).

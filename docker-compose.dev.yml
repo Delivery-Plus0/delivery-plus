@@ -409,6 +409,7 @@ services:
       NODE_ENV: development
       DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/notification_service
       JWT_SECRET: ${JWT_SECRET:-local-development-only}
+      REDIS_URL: redis://redis:6379
       KAFKA_BROKER: kafka:29092
     healthcheck:
       test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3011/health']
@@ -417,6 +418,8 @@ services:
       retries: 10
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       kafka:
         condition: service_healthy

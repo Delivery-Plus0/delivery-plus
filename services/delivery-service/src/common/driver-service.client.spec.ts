@@ -53,4 +53,60 @@ describe('DeliveryServiceClient.DriverServiceClient', () => {
       headers: { Authorization: 'Bearer system' },
     });
   });
+
+  describe('releaseDriver (idempotent)', () => {
+    const client = () =>
+      new DriverServiceClient({ driverServiceUrl: 'http://driver-service:3009' } as any, {
+        mint: async () => 'Bearer system',
+      } as any);
+    const response = (status: number, body?: unknown) => ({ ok: status < 300, status, json: async () => body });
+
+    it('sets a BUSY driver AVAILABLE', async () => {
+      const fetchMock = jest.fn().mockResolvedValue(response(200, {}));
+      global.fetch = fetchMock as any;
+
+      await expect(client().releaseDriver(validDriverId)).resolves.toBeUndefined();
+      expect(fetchMock).toHaveBeenCalledWith(`http://driver-service:3009/drivers/${validDriverId}/status`, {
+        method: 'PATCH',
+        headers: { Authorization: 'Bearer system', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'AVAILABLE' }),
+      });
+    });
+
+    it('treats an already-released driver as done (a retry after a later step failed)', async () => {
+      const fetchMock = jest
+        .fn()
+        .mockResolvedValueOnce(response(409))
+        .mockResolvedValueOnce(response(200, { id: validDriverId, status: 'AVAILABLE' }));
+      global.fetch = fetchMock as any;
+
+      await expect(client().releaseDriver(validDriverId)).resolves.toBeUndefined();
+    });
+
+    it('treats an OFFLINE or SUSPENDED driver as nothing to release', async () => {
+      global.fetch = jest
+        .fn()
+        .mockResolvedValueOnce(response(409))
+        .mockResolvedValueOnce(response(200, { id: validDriverId, status: 'SUSPENDED' })) as any;
+
+      await expect(client().releaseDriver(validDriverId)).resolves.toBeUndefined();
+    });
+
+    it('still fails when the driver is BUSY and driver-service refuses', async () => {
+      global.fetch = jest
+        .fn()
+        .mockResolvedValueOnce(response(409))
+        .mockResolvedValueOnce(response(200, { id: validDriverId, status: 'BUSY' })) as any;
+
+      await expect(client().releaseDriver(validDriverId)).rejects.toThrow('cannot move to AVAILABLE');
+    });
+
+    it('fails (so the caller errors and can be retried) when driver-service is down', async () => {
+      const fetchMock = jest.fn().mockResolvedValue(response(503));
+      global.fetch = fetchMock as any;
+
+      await expect(client().releaseDriver(validDriverId)).rejects.toThrow('status 503');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+  });
 });

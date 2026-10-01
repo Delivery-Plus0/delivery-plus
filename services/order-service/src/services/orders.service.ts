@@ -19,6 +19,7 @@ import {
   DeliveryEvent,
   TOPICS,
   generateCorrelationId,
+  lifecycleEventId,
 } from '@food-delivery/shared';
 import { OrdersRepository } from '../repositories/orders.repository';
 import { CartServiceClient } from '../common/cart-service.client';
@@ -26,7 +27,6 @@ import { RestaurantServiceClient } from '../common/restaurant-service.client';
 import { isRoleAllowedForTransition } from '../common/order-transition-rules';
 import { UpdateOrderStatusDto } from '../dto/update-order-status.dto';
 import { Order } from '../entities/order.entity';
-import { v4 as uuidv4 } from 'uuid';
 
 @Injectable()
 export class OrdersService implements OnModuleInit {
@@ -45,7 +45,7 @@ export class OrdersService implements OnModuleInit {
       TOPICS.PAYMENT_EVENTS,
       PaymentEventType.CREATED,
       async (event) => {
-        await this.syncFromPaymentEvent(event.payload.orderId, OrderStatus.PAYMENT_PENDING);
+        await this.syncStatusFromEvent(event.payload.orderId, OrderStatus.PAYMENT_PENDING);
       },
     );
 
@@ -53,7 +53,7 @@ export class OrdersService implements OnModuleInit {
       TOPICS.PAYMENT_EVENTS,
       PaymentEventType.COMPLETED,
       async (event) => {
-        await this.syncFromPaymentEvent(event.payload.orderId, OrderStatus.CONFIRMED);
+        await this.syncStatusFromEvent(event.payload.orderId, OrderStatus.CONFIRMED);
       },
     );
 
@@ -63,7 +63,7 @@ export class OrdersService implements OnModuleInit {
       async (event) => {
         // A declined payment is FAILED, not CANCELLED: payment-service syncs the same status over
         // HTTP, so both paths must agree or the second writer hits an invalid transition.
-        await this.syncFromPaymentEvent(event.payload.orderId, OrderStatus.FAILED);
+        await this.syncStatusFromEvent(event.payload.orderId, OrderStatus.FAILED);
       },
     );
 
@@ -71,7 +71,7 @@ export class OrdersService implements OnModuleInit {
       TOPICS.DELIVERY_EVENTS,
       DeliveryEventType.DRIVER_ASSIGNED,
       async (event) => {
-        await this.updateStatus(event.payload.orderId, 'system', UserRole.ADMIN, { status: OrderStatus.DRIVER_ASSIGNED });
+        await this.syncStatusFromEvent(event.payload.orderId, OrderStatus.DRIVER_ASSIGNED);
       },
     );
 
@@ -79,7 +79,7 @@ export class OrdersService implements OnModuleInit {
       TOPICS.DELIVERY_EVENTS,
       DeliveryEventType.PICKED_UP,
       async (event) => {
-        await this.updateStatus(event.payload.orderId, 'system', UserRole.ADMIN, { status: OrderStatus.PICKED_UP });
+        await this.syncStatusFromEvent(event.payload.orderId, OrderStatus.PICKED_UP);
       },
     );
 
@@ -87,7 +87,7 @@ export class OrdersService implements OnModuleInit {
       TOPICS.DELIVERY_EVENTS,
       DeliveryEventType.COMPLETED,
       async (event) => {
-        await this.updateStatus(event.payload.orderId, 'system', UserRole.ADMIN, { status: OrderStatus.DELIVERED });
+        await this.syncStatusFromEvent(event.payload.orderId, OrderStatus.DELIVERED);
       },
     );
 
@@ -130,7 +130,7 @@ export class OrdersService implements OnModuleInit {
       await this.cartClient.clearCart(authHeader);
 
       await this.kafkaProducer.publish(TOPICS.ORDER_EVENTS, {
-        eventId: uuidv4(),
+        eventId: lifecycleEventId(order.id, OrderEventType.CREATED),
         eventType: OrderEventType.CREATED,
         timestamp: new Date().toISOString(),
         correlationId: generateCorrelationId(),
@@ -240,7 +240,7 @@ export class OrdersService implements OnModuleInit {
     }
 
     await this.kafkaProducer.publish(TOPICS.ORDER_EVENTS, {
-      eventId: uuidv4(),
+      eventId: lifecycleEventId(updated!.id, eventType),
       eventType,
       timestamp: new Date().toISOString(),
       correlationId: generateCorrelationId(),
@@ -257,20 +257,22 @@ export class OrdersService implements OnModuleInit {
   }
 
   /**
-   * Applies the order status implied by a payment event. payment-service owns this transition and
-   * also syncs it over HTTP, so the event is a convergence path: it must tolerate arriving after the
-   * HTTP sync (same status → no-op), being redelivered, or arriving after the order has moved on
-   * (e.g. the customer cancelled while payment was pending) without failing the consumer.
+   * Applies the order status implied by a payment or delivery event. payment-service and
+   * delivery-service own these transitions and also sync them over HTTP, so the event is a
+   * convergence path: it must tolerate arriving after the HTTP sync (same status → no-op), being
+   * redelivered, or arriving after the order has moved on (e.g. a late driver_assigned once the
+   * order is picked up, or the customer cancelled while payment was pending) without failing the
+   * consumer and ending up in the dead-letter topic.
    */
-  async syncFromPaymentEvent(orderId: string, target: OrderStatus): Promise<void> {
+  async syncStatusFromEvent(orderId: string, target: OrderStatus): Promise<void> {
     const order = await this.orders.findById(orderId);
     if (!order) {
-      this.logger.warn(`Ignoring payment event for unknown order ${orderId}`);
+      this.logger.warn(`Ignoring event for unknown order ${orderId}`);
       return;
     }
     if (order.status === target) return;
     if (!isTransitionAllowed(ORDER_TRANSITIONS, order.status, target)) {
-      this.logger.warn(`Ignoring stale payment event: order ${orderId} is ${order.status}, not moving to ${target}`);
+      this.logger.warn(`Ignoring stale event: order ${orderId} is ${order.status}, not moving to ${target}`);
       return;
     }
     await this.updateStatus(orderId, 'system', UserRole.ADMIN, { status: target });

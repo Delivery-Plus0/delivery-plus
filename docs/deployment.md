@@ -47,6 +47,13 @@ Listener summary:
 - Host development tools → `localhost:9092`
 - Kafka UI → `localhost:8085`
 
+### Kafka topics, dead letters and retention
+
+- Topics: `order.events`, `payment.events`, `delivery.events`, plus one dead-letter topic each (`<topic>.dlq`). Consumers create them on startup with broker defaults (1 partition locally); production should create them up front with explicit partition counts and replication. Events are keyed by `orderId`, so partitions can be added without breaking per-order ordering.
+- A handler gets `maxHandlerAttempts` tries (default 3). After that the message goes to `<topic>.dlq` with `dlq-*` headers (original topic/partition/offset, consumer group, reason, error, time) and the source offset is committed. If the dead-letter send itself fails, the offset is not committed and the message is redelivered.
+- Inspect: `npm run kafka:dlq -- order.events` (uses `KAFKA_BROKER`, default `localhost:9092`). Replay after fixing the cause: add `--replay`. Replays go back to the original topic; consumer groups that already handled an event skip it via their Redis idempotency markers.
+- Retention: keep `.dlq` topics at least as long as the source topics (Kafka default 7 days), and longer if replays may happen later. Processed-event markers in Redis expire after 7 days, matching the default source retention; Redis must persist (Compose uses AOF on the `redis_data` volume).
+
 ## Database migrations
 
 This repository uses a migration-first database workflow for every PostgreSQL-backed service.

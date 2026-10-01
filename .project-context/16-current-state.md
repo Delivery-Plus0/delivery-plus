@@ -37,11 +37,11 @@ Snapshot of `dev` at `1e6ec61` (2026-09-30). When code and this file disagree, t
 | Order creation and lifecycle | Implemented | Idempotency-Key support on creation; state machine in `shared/src/types/enums.ts` |
 | Payments | Implemented (simulated) | No real payment provider; durable idempotency, compare-and-set state machine, deterministic event IDs |
 | Delivery and driver lifecycle | Implemented over HTTP | Delivery updates order and driver state through HTTP clients. Reads (`GET /deliveries/:id`, `GET /deliveries/by-order/:orderId`) follow JWT → order ownership (checked by order-service with the requester's token) or assigned driver or admin. No auto-dispatch: deliveries are created/assigned by explicit owner/admin calls. Create/assign/cancel are limited to admins and the owner of the order's restaurant (checked by order-service with the owner's token). Driver profiles (`GET /drivers/available`, `GET /drivers/:id`) require a JWT: admin/service system token, or the driver themself |
-| Delivery Kafka events | Partial | Publisher code exists but lifecycle methods never call it, so consumers of `delivery.events` receive nothing |
+| Delivery Kafka events | Implemented | Every delivery transition publishes to `delivery.events` after the HTTP syncs succeed; order-service converges from them (tolerant of duplicates/stale events). driver-service no longer consumes them (availability is set synchronously) |
 | Tracking | Implemented | Last-known driver location in Redis with a TTL. `GET /tracking/driver/:userId` requires JWT (the driver themself or admin); customers go through `GET /tracking/delivery/:id`, which inherits delivery ownership |
 | Notifications | Partial | Order-confirmed notifications are stored (one per order: order status writes are compare-and-set, so racing writers publish once); payment and delivery handlers are no-ops. Mark-as-read is scoped to the owner (404 otherwise) |
 | Media uploads (S3) | Implemented | Presigned POST, byte verification, content-addressed keys; see [15-media-and-storage.md](./15-media-and-storage.md) |
-| Kafka consumer reliability | Partial | Consumer still dedups with an in-memory `Set` and has no real DLQ. A durable Redis-backed `DurableEventIdempotencyService` exists in `shared` but is **not yet wired into** `KafkaConsumerService`. Consumers now create their topics before subscribing (a fresh cluster used to crash driver-service on boot). Events are keyed by a random per-event `correlationId`, so there is no per-order ordering guarantee once topics have more than one partition |
+| Kafka consumer reliability | Implemented (no outbox) | Durable Redis idempotency per consumer group (order-service, notification-service); 3 attempts, then `<topic>.dlq` with failure headers; `npm run kafka:dlq` lists/replays. Events keyed by `orderId`; order/delivery event ids are deterministic. Redis runs with AOF persistence. Still missing: transactional outbox, `customerId` in payment/delivery payloads. See [05-event-driven-design.md](./05-event-driven-design.md) |
 | Gateway health | Implemented | `GET /health` and `GET /health/live` (liveness only, no dependency checks) |
 | Public API contract | Implemented | Generated OpenAPI at `docs/openapi/delivery-plus-public.json`, checked in CI |
 | Push/email delivery, real payment provider, observability stack | Not implemented | Roadmap |
@@ -65,21 +65,25 @@ No workflow collects test coverage.
 
 | PR | Change |
 | --- | --- |
+| _unmerged_ | Kafka reliability: durable idempotency wired into `KafkaConsumerService`, per-topic dead-letter topics + `npm run kafka:dlq` replay tool, `orderId` partition key, deterministic order/delivery event ids, delivery lifecycle events published, driver-service delivery consumer removed, Redis AOF persistence, notification-service on Redis |
 | _unmerged_ | Hardening + E2E: delivery dispatch limited to the order's restaurant owner or admin; driver profile routes require JWT (self/admin/system); mark-notification-read scoped to the owner; cart's class-level `@RateLimit` now enforced (`RateLimitGuard` reads handler then class); refunds are admin/support-only; order status updates are compare-and-set (no duplicate `order.confirmed`); Kafka consumers ensure topics exist; isolated E2E environment (`docker-compose.e2e.yml`, `npm run e2e:env:up`, `npm run seed:e2e`, see `docs/e2e.md`); shared seed helpers in `scripts/lib/gateway-seed.ts` |
 | _unmerged_ | Phase 0: a declined payment now ends the order `FAILED` in both writers (the order-service `payment.failed` consumer used to write `CANCELLED`, which made the HTTP sync 409 and `/payments/:id/process` return 500). Payment-event consumers skip same-status, stale, and late events. Added `order.payment_pending` / `order.failed` event types (previously mislabeled `order.created`). Ownership checks on delivery reads; the driver-location route is no longer public; new `GET /deliveries/by-order/:orderId` |
-| #90 | `DurableEventIdempotencyService` in `shared/src/kafka`: Redis-backed, consumer-group-scoped, lease-based event deduplication with atomic Lua scripts. Library only; not integrated yet |
+| #90 | `DurableEventIdempotencyService` in `shared/src/kafka`: Redis-backed, consumer-group-scoped, lease-based event deduplication with atomic Lua scripts |
 | #91 | Node 20 → 22 in all workflows and the Dockerfile; api-gateway spec stubs the ESM-only `http-proxy-middleware` 4 so Jest can run |
 | #78, #80, #82, #83 | Dependabot: `http-proxy-middleware` 4.2.0, `actions/setup-node` v7 (in `ci.yml`), `@types/bcrypt` 6, `@types/node` 26 |
 | #89 | S3-compatible media uploads for avatars, restaurant images and menu item images; SeaweedFS replaces MinIO in dev/test Compose |
 | #87 | Email verification and failed-login lockout in auth-service |
 
-## Planned next (Kafka reliability track)
+## Planned next
 
-Planned, not implemented. Each step is intended as its own PR:
+Tracked as GitHub milestones (Phase 1–9). Next sprint, Phase 3 · Automatic dispatch + driver contracts:
 
-1. Wire `DurableEventIdempotencyService` into `KafkaConsumerService`: gate processing on `tryAcquire`, bound handler time below the Kafka session timeout and the lease TTL, and add Redis to the Kafka-consuming services that lack it (driver-service, notification-service).
-2. A real dead-letter topic for messages that exhaust their retries.
-3. Publish delivery lifecycle events from delivery-service.
+1. #33: drivers cannot leave BUSY themselves (today `POST /drivers/me/online` / `me/status` can free a busy driver).
+2. #95: snapshot the delivery address on the order at checkout.
+3. #96: `GET /api/deliveries/me/current` for drivers.
+4. #97: delivery-service dispatches automatically on `order.ready_for_pickup`.
+
+Kafka follow-ups: #98 transactional outbox, #5 `customerId` in payloads + notification handlers, #7 graceful shutdown.
 
 Open gaps and technical debt are listed in [13-known-issues-and-gotchas.md](./13-known-issues-and-gotchas.md).
 

@@ -1,7 +1,7 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtModule } from '@nestjs/jwt';
-import { CorrelationIdMiddleware, KafkaModule } from '@food-delivery/shared';
+import { CorrelationIdMiddleware, KafkaModule, RedisModule } from '@food-delivery/shared';
 import { ConfigModule } from './config/config.module';
 import { APP_CONFIG, AppConfig } from './config/app-config';
 import { HealthController } from './controllers/health.controller';
@@ -24,10 +24,12 @@ import { buildTypeOrmConfig } from './database/typeorm.config';
         signOptions: { expiresIn: '1h' },
       }),
     }),
+    RedisModule.register({ url: process.env.REDIS_URL || 'redis://localhost:6379' }),
     KafkaModule.register({
       clientId: 'notification-service',
       brokers: [process.env.KAFKA_BROKER || 'localhost:9092'],
       groupId: 'notification-service-group',
+      durableIdempotency: true,
     }),
     NotificationsModule,
   ],

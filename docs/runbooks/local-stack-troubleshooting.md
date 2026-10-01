@@ -75,9 +75,9 @@ Kafka clients inside Compose use `kafka:29092`; host tools use the published `lo
 
 Redis-backed cart and tracking state is ephemeral. A Redis restart can remove current cart/location state unless the configured volume or recovery process preserves it.
 
-Redis in Compose has no persistence volume, so recreating the container also clears caches, rate-limit counters, and internal-auth nonces.
+Redis in Compose persists to the `redis_data` volume (AOF), so recreating the container keeps its data; `docker compose down -v` clears it, including caches, rate-limit counters, internal-auth nonces and Kafka idempotency markers.
 
-The shared Kafka consumer retries a handler three times with exponential backoff. It keeps processed event IDs only in memory. After retries are exhausted it commits the offset and logs a DLQ message, but no actual dead-letter topic is implemented. The shared `DurableEventIdempotencyService` (Redis keys `kafka:idempotency:{group}:{eventId}`) is not wired into the consumer yet, so those keys will not appear in Redis.
+The shared Kafka consumer records handled events in Redis (`kafka:idempotency:{group}:{eventId}`) and skips redeliveries. It retries a failing handler three times with exponential backoff, then sends the message to `<topic>.dlq` with `dlq-*` headers (group, reason, error) and commits. `npm run kafka:dlq -- order.events` lists pending dead-lettered messages; add `--replay` to republish them to the original topic once the cause is fixed. Consumers log `Topic creation errors` from kafkajs on startup when their topics already exist; that is expected. To reset a consumer group's offsets, stop the service and wait about 30 s for the group to become `Empty` (services have no graceful shutdown hook).
 
 ## Escalation notes
 

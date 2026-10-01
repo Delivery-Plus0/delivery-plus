@@ -27,6 +27,11 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    # AOF persistence: carts, and the processed-event markers that stop Kafka redeliveries
+    # from being handled twice, survive a Redis restart.
+    command: ['redis-server', '--appendonly', 'yes']
+    volumes:
+      - redis_data:/data
     ports:
       - '6379:6379'
     healthcheck:
@@ -384,6 +389,7 @@ services:
       - NODE_ENV=production
       - DATABASE_URL=postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/notification_service
       - JWT_SECRET=${JWT_SECRET:-local-development-only}
+      - REDIS_URL=redis://redis:6379
       - KAFKA_BROKER=kafka:29092
     healthcheck:
       test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3011/health']
@@ -393,9 +399,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
       kafka:
         condition: service_healthy
 
 volumes:
   postgres_data:
   kafka_data:
+  redis_data:

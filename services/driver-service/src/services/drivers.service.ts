@@ -9,49 +9,21 @@ import {
   PaginatedResult,
   UserRole,
   isTransitionAllowed,
-  KafkaConsumerService,
-  TOPICS,
-  DeliveryEventType,
-  DeliveryEvent,
-  DriverStatus,
-  BaseEvent,
 } from '@food-delivery/shared';
 import { DriversRepository } from '../repositories/drivers.repository';
 import { RegisterDriverDto } from '../dto/register-driver.dto';
 import { UpdateDriverStatusDto } from '../dto/update-driver-status.dto';
 import { isRoleAllowedForTransition } from '../common/driver-transition-rules';
 import { Driver } from '../entities/driver.entity';
-import { OnModuleInit } from '@nestjs/common';
 
+/**
+ * Driver availability is changed synchronously by delivery-service (BUSY on assignment, AVAILABLE on
+ * completion or cancellation). There is deliberately no delivery.* consumer releasing drivers too:
+ * a late delivery.completed could free a driver who is already on their next delivery.
+ */
 @Injectable()
-export class DriversService implements OnModuleInit {
-  constructor(
-    private readonly drivers: DriversRepository,
-    private readonly kafkaConsumer: KafkaConsumerService,
-  ) {}
-
-  async onModuleInit() {
-    const handleReleaseDriver = async (event: BaseEvent<DeliveryEvent['payload']>) => {
-      const driverId = event.payload.driverId;
-      if (driverId) {
-        await this.updateStatusById(driverId, UserRole.ADMIN, { status: DriverStatus.AVAILABLE });
-      }
-    };
-
-    await this.kafkaConsumer.subscribe<DeliveryEvent['payload']>(
-      TOPICS.DELIVERY_EVENTS,
-      DeliveryEventType.COMPLETED,
-      handleReleaseDriver,
-    );
-
-    await this.kafkaConsumer.subscribe<DeliveryEvent['payload']>(
-      TOPICS.DELIVERY_EVENTS,
-      DeliveryEventType.CANCELLED,
-      handleReleaseDriver,
-    );
-
-    await this.kafkaConsumer.start();
-  }
+export class DriversService {
+  constructor(private readonly drivers: DriversRepository) {}
 
   async register(userId: string, dto: RegisterDriverDto): Promise<Driver> {
     const existing = await this.drivers.findByUserId(userId);

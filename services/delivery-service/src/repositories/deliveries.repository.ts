@@ -33,8 +33,12 @@ export class DeliveriesRepository {
     return this.repo.save(this.repo.create({ orderId, status: DeliveryStatus.CREATED }));
   }
 
-  async update(id: string, data: Partial<Delivery>): Promise<Delivery | null> {
-    await this.repo.update({ id }, data);
-    return this.findById(id);
+  /**
+   * Compare-and-set: applies the change only while the delivery is still in `from`. Returns null when
+   * another request moved it first, so two concurrent writers (e.g. cancel and complete) cannot both win.
+   */
+  async transition(id: string, from: DeliveryStatus, data: Partial<Delivery>): Promise<Delivery | null> {
+    const result = await this.repo.update({ id, status: from }, data);
+    return result.affected ? this.findById(id) : null;
   }
 }

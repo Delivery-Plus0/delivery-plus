@@ -17,6 +17,9 @@ import {
   lifecycleEventId,
 } from '@food-delivery/shared';
 
+/** order-service's view of order-1 at a given status. */
+const orderAt = (status: OrderStatus) => ({ id: 'order-1', customerId: 'c1', restaurantId: 'r1', status });
+
 /** A requester as the controller builds it from the JWT and Authorization header. */
 const actor = (role: UserRole, userId = 'user-1') => ({ userId, role, authHeader: 'Bearer user' });
 
@@ -40,13 +43,13 @@ describe('DeliveriesService', () => {
     deliveries = {
       findById: jest.fn(),
       findByOrderId: jest.fn(),
-      findActiveByDriverId: jest.fn(),
+      findActiveByDriverId: jest.fn().mockResolvedValue([]),
       create: jest.fn(),
-      update: jest.fn(),
+      transition: jest.fn(),
     } as unknown as jest.Mocked<DeliveriesRepository>;
 
     orderClient = {
-      getOrder: jest.fn(),
+      getOrder: jest.fn().mockResolvedValue(orderAt(OrderStatus.READY_FOR_PICKUP)),
       assertReadableBy: jest.fn(),
       updateOrderStatus: jest.fn(),
     } as unknown as jest.Mocked<OrderServiceClient>;
@@ -55,6 +58,7 @@ describe('DeliveriesService', () => {
       getDriver: jest.fn(),
       findAvailableDriver: jest.fn(),
       updateDriverStatus: jest.fn(),
+      releaseDriver: jest.fn(),
     } as unknown as jest.Mocked<DriverServiceClient>;
 
     kafkaProducer = { publish: jest.fn() };
@@ -121,7 +125,7 @@ describe('DeliveriesService', () => {
         userId: 'user-1',
         status: DriverStatus.AVAILABLE,
       });
-      deliveries.update.mockResolvedValue({
+      deliveries.transition.mockResolvedValue({
         ...baseDelivery,
         driverId: 'driver-1',
         status: DeliveryStatus.DRIVER_ASSIGNED,
@@ -156,7 +160,7 @@ describe('DeliveriesService', () => {
         status: DeliveryStatus.DRIVER_ASSIGNED,
       });
       driverClient.getDriver.mockResolvedValue({ id: 'driver-1', userId: 'user-1', status: DriverStatus.BUSY });
-      deliveries.update.mockResolvedValue({
+      deliveries.transition.mockResolvedValue({
         ...baseDelivery,
         driverId: 'driver-1',
         status: DeliveryStatus.PICKED_UP,
@@ -184,7 +188,7 @@ describe('DeliveriesService', () => {
         status: DeliveryStatus.IN_TRANSIT,
       });
       driverClient.getDriver.mockResolvedValue({ id: 'driver-1', userId: 'user-1', status: DriverStatus.BUSY });
-      deliveries.update.mockResolvedValue({
+      deliveries.transition.mockResolvedValue({
         ...baseDelivery,
         driverId: 'driver-1',
         status: DeliveryStatus.DELIVERED,
@@ -192,7 +196,7 @@ describe('DeliveriesService', () => {
 
       const result = await service.complete('delivery-1', 'user-1', UserRole.DRIVER);
 
-      expect(driverClient.updateDriverStatus).toHaveBeenCalledWith('driver-1', DriverStatus.AVAILABLE);
+      expect(driverClient.releaseDriver).toHaveBeenCalledWith('driver-1');
       expect(orderClient.updateOrderStatus).toHaveBeenCalledWith('order-1', OrderStatus.DELIVERED);
       expect(result.status).toBe(DeliveryStatus.DELIVERED);
     });
@@ -209,7 +213,7 @@ describe('DeliveriesService', () => {
         driverId: 'driver-1',
         status: DeliveryStatus.DRIVER_ASSIGNED,
       });
-      deliveries.update.mockResolvedValue({
+      deliveries.transition.mockResolvedValue({
         ...baseDelivery,
         driverId: 'driver-1',
         status: DeliveryStatus.CANCELLED,
@@ -217,7 +221,7 @@ describe('DeliveriesService', () => {
 
       const result = await service.cancel('delivery-1', actor(UserRole.ADMIN));
 
-      expect(driverClient.updateDriverStatus).toHaveBeenCalledWith('driver-1', DriverStatus.AVAILABLE);
+      expect(driverClient.releaseDriver).toHaveBeenCalledWith('driver-1');
       expect(orderClient.updateOrderStatus).toHaveBeenCalledWith('order-1', OrderStatus.CANCELLED);
       expect(result.status).toBe(DeliveryStatus.CANCELLED);
     });
@@ -243,7 +247,7 @@ describe('DeliveriesService', () => {
 
     it.each(transitions)('%s publishes %s → %s as its delivery event', async (_name, from, to, eventType, run) => {
       deliveries.findById.mockResolvedValue(at(from));
-      deliveries.update.mockResolvedValue(at(to));
+      deliveries.transition.mockResolvedValue(at(to));
       driverClient.getDriver.mockResolvedValue(assignedDriver);
       driverClient.findAvailableDriver.mockResolvedValue({ ...assignedDriver, status: DriverStatus.AVAILABLE });
 
@@ -279,14 +283,14 @@ describe('DeliveriesService', () => {
 
     it('publishes only after order-service and driver-service were synced', async () => {
       deliveries.findById.mockResolvedValue(at(DeliveryStatus.IN_TRANSIT));
-      deliveries.update.mockResolvedValue(at(DeliveryStatus.DELIVERED));
+      deliveries.transition.mockResolvedValue(at(DeliveryStatus.DELIVERED));
       driverClient.getDriver.mockResolvedValue(assignedDriver);
 
       await service.complete('delivery-1', 'user-1', UserRole.DRIVER);
 
       const published = kafkaProducer.publish.mock.invocationCallOrder[0];
       expect(orderClient.updateOrderStatus.mock.invocationCallOrder[0]).toBeLessThan(published);
-      expect(driverClient.updateDriverStatus.mock.invocationCallOrder[0]).toBeLessThan(published);
+      expect(driverClient.releaseDriver.mock.invocationCallOrder[0]).toBeLessThan(published);
     });
 
     it('publishes nothing when the transition is rejected', async () => {
@@ -298,6 +302,132 @@ describe('DeliveriesService', () => {
         InvalidStateTransitionError,
       );
       expect(kafkaProducer.publish).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('retry safety: the driver is always released', () => {
+    const assignedDriver = { id: 'driver-1', userId: 'user-1', status: DriverStatus.BUSY };
+    const at = (status: DeliveryStatus) => ({ ...baseDelivery, driverId: 'driver-1', status });
+    const completeAsDriver = () => service.complete('delivery-1', 'user-1', UserRole.DRIVER);
+
+    beforeEach(() => {
+      driverClient.getDriver.mockResolvedValue(assignedDriver);
+      orderClient.getOrder.mockResolvedValue(orderAt(OrderStatus.PICKED_UP));
+    });
+
+    it('driver-service down during completion: the request fails, and the retry releases the driver', async () => {
+      deliveries.findById.mockResolvedValueOnce(at(DeliveryStatus.IN_TRANSIT));
+      deliveries.transition.mockResolvedValueOnce(at(DeliveryStatus.DELIVERED));
+      driverClient.releaseDriver.mockRejectedValueOnce(new Error('driver-service unavailable'));
+
+      await expect(completeAsDriver()).rejects.toThrow('driver-service unavailable');
+      expect(kafkaProducer.publish).not.toHaveBeenCalled();
+
+      // Retry: the delivery is already DELIVERED. Before the fix this was a 409 and the driver stayed BUSY.
+      deliveries.findById.mockResolvedValueOnce(at(DeliveryStatus.DELIVERED));
+      const result = await completeAsDriver();
+
+      expect(result.status).toBe(DeliveryStatus.DELIVERED);
+      expect(deliveries.transition).toHaveBeenCalledTimes(1); // not written twice
+      expect(driverClient.releaseDriver).toHaveBeenCalledTimes(2);
+      expect(orderClient.updateOrderStatus).toHaveBeenCalledWith('order-1', OrderStatus.DELIVERED);
+      expect(kafkaProducer.publish.mock.calls[0][1].eventType).toBe(DeliveryEventType.COMPLETED);
+    });
+
+    it('order-service down during completion: the driver is still released first', async () => {
+      deliveries.findById.mockResolvedValue(at(DeliveryStatus.IN_TRANSIT));
+      deliveries.transition.mockResolvedValue(at(DeliveryStatus.DELIVERED));
+      orderClient.getOrder.mockRejectedValue(new Error('order-service unavailable'));
+
+      await expect(completeAsDriver()).rejects.toThrow('order-service unavailable');
+      expect(driverClient.releaseDriver).toHaveBeenCalledWith('driver-1');
+    });
+
+    it('a retried completion never frees a driver who is already on another delivery', async () => {
+      deliveries.findById.mockResolvedValue(at(DeliveryStatus.DELIVERED));
+      deliveries.findActiveByDriverId.mockResolvedValue([
+        { ...baseDelivery, id: 'delivery-2', driverId: 'driver-1', status: DeliveryStatus.DRIVER_ASSIGNED },
+      ]);
+
+      await completeAsDriver();
+
+      expect(driverClient.releaseDriver).not.toHaveBeenCalled();
+      expect(kafkaProducer.publish).toHaveBeenCalledTimes(1);
+    });
+
+    it('releases the driver even when the order was cancelled meanwhile (the order is not forced back)', async () => {
+      deliveries.findById.mockResolvedValue(at(DeliveryStatus.IN_TRANSIT));
+      deliveries.transition.mockResolvedValue(at(DeliveryStatus.DELIVERED));
+      orderClient.getOrder.mockResolvedValue(orderAt(OrderStatus.CANCELLED));
+
+      await completeAsDriver();
+
+      expect(driverClient.releaseDriver).toHaveBeenCalledWith('driver-1');
+      expect(orderClient.updateOrderStatus).not.toHaveBeenCalled();
+    });
+
+    it('catches up an order left behind by a failed pickup sync, step by step', async () => {
+      deliveries.findById.mockResolvedValue(at(DeliveryStatus.IN_TRANSIT));
+      deliveries.transition.mockResolvedValue(at(DeliveryStatus.DELIVERED));
+      orderClient.getOrder.mockResolvedValue(orderAt(OrderStatus.DRIVER_ASSIGNED));
+
+      await completeAsDriver();
+
+      expect(orderClient.updateOrderStatus.mock.calls).toEqual([
+        ['order-1', OrderStatus.PICKED_UP],
+        ['order-1', OrderStatus.DELIVERED],
+      ]);
+    });
+
+    it('start repairs the order status when the pickup sync had failed', async () => {
+      deliveries.findById.mockResolvedValue(at(DeliveryStatus.PICKED_UP));
+      deliveries.transition.mockResolvedValue(at(DeliveryStatus.IN_TRANSIT));
+      orderClient.getOrder.mockResolvedValue(orderAt(OrderStatus.DRIVER_ASSIGNED));
+
+      await service.start('delivery-1', 'user-1', UserRole.DRIVER);
+
+      expect(orderClient.updateOrderStatus).toHaveBeenCalledWith('order-1', OrderStatus.PICKED_UP);
+    });
+
+    it('complete losing a race to cancel neither releases nor publishes from the losing request', async () => {
+      deliveries.findById
+        .mockResolvedValueOnce(at(DeliveryStatus.IN_TRANSIT))
+        .mockResolvedValueOnce(at(DeliveryStatus.CANCELLED));
+      deliveries.transition.mockResolvedValue(null); // compare-and-set lost
+
+      await expect(completeAsDriver()).rejects.toThrow(InvalidStateTransitionError);
+      expect(driverClient.releaseDriver).not.toHaveBeenCalled();
+      expect(kafkaProducer.publish).not.toHaveBeenCalled();
+    });
+
+    it('a retried cancel re-runs the release and the order sync', async () => {
+      deliveries.findById.mockResolvedValue(at(DeliveryStatus.CANCELLED));
+
+      await service.cancel('delivery-1', actor(UserRole.ADMIN));
+
+      expect(deliveries.transition).not.toHaveBeenCalled();
+      expect(driverClient.releaseDriver).toHaveBeenCalledWith('driver-1');
+      expect(orderClient.updateOrderStatus).toHaveBeenCalledWith('order-1', OrderStatus.CANCELLED);
+    });
+
+    it('assignDriver gives the claimed driver back when recording the assignment fails', async () => {
+      deliveries.findById.mockResolvedValue(baseDelivery);
+      driverClient.findAvailableDriver.mockResolvedValue({ ...assignedDriver, status: DriverStatus.AVAILABLE });
+      deliveries.transition.mockRejectedValue(new Error('db down'));
+
+      await expect(service.assignDriver('delivery-1', actor(UserRole.ADMIN))).rejects.toThrow('db down');
+      expect(driverClient.updateDriverStatus).toHaveBeenCalledWith('driver-1', DriverStatus.BUSY);
+      expect(driverClient.releaseDriver).toHaveBeenCalledWith('driver-1');
+    });
+
+    it('a retried assignDriver does not claim a second driver', async () => {
+      deliveries.findById.mockResolvedValue(at(DeliveryStatus.DRIVER_ASSIGNED));
+      orderClient.getOrder.mockResolvedValue(orderAt(OrderStatus.READY_FOR_PICKUP));
+
+      await service.assignDriver('delivery-1', actor(UserRole.ADMIN));
+
+      expect(driverClient.findAvailableDriver).not.toHaveBeenCalled();
+      expect(orderClient.updateOrderStatus).toHaveBeenCalledWith('order-1', OrderStatus.DRIVER_ASSIGNED);
     });
   });
 
@@ -339,12 +469,12 @@ describe('DeliveriesService', () => {
       orderClient.assertReadableBy.mockRejectedValue(new ForbiddenError('nope'));
 
       await expect(service.cancel('delivery-1', actor(UserRole.RESTAURANT_OWNER, 'other-owner'))).rejects.toThrow(ForbiddenError);
-      expect(deliveries.update).not.toHaveBeenCalled();
+      expect(deliveries.transition).not.toHaveBeenCalled();
     });
 
     it('does not ask order-service for admins (they may dispatch anything)', async () => {
       deliveries.findById.mockResolvedValue(baseDelivery as any);
-      deliveries.update.mockResolvedValue({ ...baseDelivery, status: DeliveryStatus.CANCELLED } as any);
+      deliveries.transition.mockResolvedValue({ ...baseDelivery, status: DeliveryStatus.CANCELLED } as any);
 
       await service.cancel('delivery-1', actor(UserRole.ADMIN));
       expect(orderClient.assertReadableBy).not.toHaveBeenCalled();

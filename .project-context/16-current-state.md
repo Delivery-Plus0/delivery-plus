@@ -76,12 +76,14 @@ No workflow collects test coverage.
 
 ## Planned next
 
-Planned, not implemented:
+Tracked as GitHub milestones (Phase 1–9). Next sprint, Phase 3 · Automatic dispatch + driver contracts:
 
-1. Transactional outbox for order-service and delivery-service (today an event is lost if the service crashes between its database write and the publish).
-2. `customerId` in payment and delivery event payloads, then notification handlers for payment and delivery events.
-3. Auto-dispatch: a `order.ready_for_pickup` consumer in delivery-service that creates and assigns the delivery; `GET /drivers/me/delivery` for drivers.
-4. Graceful shutdown hooks so consumers leave their group on stop.
+1. #33: drivers cannot leave BUSY themselves (today `POST /drivers/me/online` / `me/status` can free a busy driver).
+2. #95: snapshot the delivery address on the order at checkout.
+3. #96: `GET /api/deliveries/me/current` for drivers.
+4. #97: delivery-service dispatches automatically on `order.ready_for_pickup`.
+
+Kafka follow-ups: #98 transactional outbox, #5 `customerId` in payloads + notification handlers, #7 graceful shutdown.
 
 Open gaps and technical debt are listed in [13-known-issues-and-gotchas.md](./13-known-issues-and-gotchas.md).
 

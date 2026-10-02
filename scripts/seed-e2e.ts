@@ -192,7 +192,8 @@ async function seedE2e() {
   }
 
   await del('/api/cart', customer);
-  const notifications = await waitForNotifications(customer, 2);
+  // One "Order confirmed" notification, from S1 (S2's declined payment sends none).
+  const notifications = await waitForNotifications(customer, 1);
   const { status: driverStatus } = await get<{ status: string }>('/api/drivers/me', driver);
 
   const manifest = {

@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM node:22-alpine AS builder
+FROM node:26-alpine AS builder
 
 WORKDIR /app
 
@@ -31,7 +31,7 @@ ARG SERVICE_NAME
 # Build target service
 RUN npm run build --workspace=@food-delivery/${SERVICE_NAME}
 
-FROM node:22-alpine AS production
+FROM node:26-alpine AS production
 
 WORKDIR /app
 ARG SERVICE_NAME

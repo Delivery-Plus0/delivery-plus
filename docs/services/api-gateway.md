@@ -23,8 +23,9 @@ The service listens on port `3000` by default and is configured via environment 
 The gateway restores the downstream service prefix for services whose controllers retain one. The menu controller is registered at the downstream root, so the gateway deliberately strips `/api/menus` completely. For example, `POST /api/auth/register` becomes `POST /auth/register`, while `GET /api/menus/restaurants/:id/menu` becomes `GET /restaurants/:id/menu`.
 
 ## Browser CORS
-By default, browser requests are allowed from localhost ports 8081-8083 and
-their `127.0.0.1` equivalents. Set `CORS_ORIGINS` to a comma-separated list to
+By default, browser requests are allowed from localhost ports 8081-8084 and
+their `127.0.0.1` equivalents (Expo web dev servers, plus the customer app's
+E2E web build on 8083 and the driver app's on 8084). Set `CORS_ORIGINS` to a comma-separated list to
 override those origins. Allowed request headers include `Content-Type`,
 `Authorization`, `X-Correlation-Id`, and `Idempotency-Key`; order and payment
 checkout clients use the idempotency header for retry-safe creation.

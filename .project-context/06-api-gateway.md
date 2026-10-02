@@ -97,8 +97,9 @@ The gateway should not be treated as the only enforcement layer; actual permissi
 
 ## Browser CORS
 
-The gateway's default browser origins are localhost ports 8081-8083 and their
-127.0.0.1 equivalents. `CORS_ORIGINS` can replace that list. Allowed request
+The gateway's default browser origins are localhost ports 8081-8084 and their
+127.0.0.1 equivalents (8083 = customer app E2E web build, 8084 = driver app E2E
+web build). `CORS_ORIGINS` can replace that list. Allowed request
 headers include `Authorization`, `X-Correlation-Id`, and `Idempotency-Key`;
 the latter is required for browser checkout requests that use retry-safe order
 and payment creation.

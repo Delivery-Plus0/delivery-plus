@@ -2,7 +2,7 @@
 
 A one-page snapshot of what the platform does today, what is partial, and what is missing. Read it right after [01-project-overview.md](./01-project-overview.md) so later files are read with the right expectations.
 
-Snapshot of `dev` at `1e6ec61` (2026-09-30). When code and this file disagree, the code wins; update this file in the same PR that changes the behavior.
+Snapshot of `dev` after PR #110 (2026-10-02): Phase 1 and 2 cores and all of Phase 3 (automatic dispatch + driver contracts) are merged. When code and this file disagree, the code wins; update this file in the same PR that changes the behavior.
 
 ## Platform at a glance
 
@@ -20,7 +20,7 @@ Snapshot of `dev` at `1e6ec61` (2026-09-30). When code and this file disagree, t
 | Language / framework | TypeScript 5.9, NestJS 10 |
 | Tests | Jest 29 with ts-jest, one config per workspace |
 | PostgreSQL | `postgres:16-alpine` |
-| Redis | `redis:7-alpine` (no persistence volume in Compose) |
+| Redis | `redis:7-alpine`, AOF persistence on the `redis_data` volume |
 | Kafka | Confluent `cp-kafka` / `cp-zookeeper` 7.6.1, single broker |
 | Object storage | Any S3-compatible store; SeaweedFS S3 gateway (`chrislusf/seaweedfs:4.47`) in dev/test Compose; real S3/CDN in production |
 
@@ -30,18 +30,18 @@ Snapshot of `dev` at `1e6ec61` (2026-09-30). When code and this file disagree, t
 
 | Capability | Status | Notes |
 | --- | --- | --- |
-| Registration, login, JWT, roles | Implemented | auth-service issues JWTs; shared guards enforce roles in each service |
+| Registration, login, JWT, roles | Implemented | auth-service issues JWTs; shared guards enforce roles in each service. Public registration accepts only self-service roles (CUSTOMER default, RESTAURANT_OWNER, DRIVER; checked in the DTO and again in the service); ADMIN cannot be self-assigned (#105) |
 | Email verification and failed-login lockout | Implemented | auth-service; Redis-backed rate limiting on auth routes |
 | Service-to-service auth for internal routes | Implemented | HMAC-signed requests with one-time Redis nonces ([ADR 001](../docs/adr/001-internal-service-authentication.md)) |
 | Restaurants, menus, carts | Implemented | Menu ownership is checked against restaurant-service; cart items are validated against menu-service |
-| Order creation and lifecycle | Implemented | Idempotency-Key support on creation; state machine in `shared/src/types/enums.ts` |
+| Order creation and lifecycle | Implemented | Idempotency-Key support on creation; state machine in `shared/src/types/enums.ts`; status writes are compare-and-set. Every new order copies a drop-off address at checkout (body `deliveryAddress`, or the customer's profile address; 400 if neither) (#95) |
 | Payments | Implemented (simulated) | No real payment provider; durable idempotency, compare-and-set state machine, deterministic event IDs |
-| Delivery and driver lifecycle | Implemented over HTTP | Delivery updates order and driver state through HTTP clients. Reads (`GET /deliveries/:id`, `GET /deliveries/by-order/:orderId`) follow JWT → order ownership (checked by order-service with the requester's token) or assigned driver or admin. No auto-dispatch: deliveries are created/assigned by explicit owner/admin calls. Create/assign/cancel are limited to admins and the owner of the order's restaurant (checked by order-service with the owner's token). Driver profiles (`GET /drivers/available`, `GET /drivers/:id`) require a JWT: admin/service system token, or the driver themself |
-| Delivery Kafka events | Implemented | Every delivery transition publishes to `delivery.events` after the HTTP syncs succeed; order-service converges from them (tolerant of duplicates/stale events). driver-service no longer consumes them (availability is set synchronously) |
+| Delivery and driver lifecycle | Implemented | **Automatic dispatch** (#97): delivery-service consumes `order.ready_for_pickup`, creates the delivery and assigns a driver; with no driver free the delivery waits and a sweep (`AUTO_DISPATCH_SWEEP_MS`, default 15 s) retries. Manual create/assign remain for admins and the order's restaurant owner. Driver claims are exclusive and compare-and-set; drivers only go online/offline themselves and cannot leave BUSY (#33). Drivers find their job with `GET /deliveries/me/current` (#96). Delivery reads follow JWT → order ownership (checked by order-service with the requester's token) or assigned driver or admin. Delivery actions are retry-safe. Driver profiles require a JWT: admin/service system token, or the driver themself |
+| Delivery Kafka events | Implemented | Every delivery transition publishes to `delivery.events` after the HTTP syncs succeed; order-service converges from them (tolerant of duplicates/stale events). driver-service consumes none (availability is set synchronously); delivery-service consumes `order.ready_for_pickup` |
 | Tracking | Implemented | Last-known driver location in Redis with a TTL. `GET /tracking/driver/:userId` requires JWT (the driver themself or admin); customers go through `GET /tracking/delivery/:id`, which inherits delivery ownership |
 | Notifications | Partial | Order-confirmed notifications are stored (one per order: order status writes are compare-and-set, so racing writers publish once); payment and delivery handlers are no-ops. Mark-as-read is scoped to the owner (404 otherwise) |
 | Media uploads (S3) | Implemented | Presigned POST, byte verification, content-addressed keys; see [15-media-and-storage.md](./15-media-and-storage.md) |
-| Kafka consumer reliability | Implemented (no outbox) | Durable Redis idempotency per consumer group (order-service, notification-service); 3 attempts, then `<topic>.dlq` with failure headers; `npm run kafka:dlq` lists/replays. Events keyed by `orderId`; order/delivery event ids are deterministic. Redis runs with AOF persistence. Still missing: transactional outbox, `customerId` in payment/delivery payloads. See [05-event-driven-design.md](./05-event-driven-design.md) |
+| Kafka consumer reliability | Implemented (no outbox) | Durable Redis idempotency per consumer group (order-service, notification-service, delivery-service); 3 attempts, then `<topic>.dlq` with failure headers; `npm run kafka:dlq` lists/replays. Events keyed by `orderId`; order/delivery event ids are deterministic. Redis runs with AOF persistence. Still missing: transactional outbox, `customerId` in payment/delivery payloads. See [05-event-driven-design.md](./05-event-driven-design.md) |
 | Gateway health | Implemented | `GET /health` and `GET /health/live` (liveness only, no dependency checks) |
 | Public API contract | Implemented | Generated OpenAPI at `docs/openapi/delivery-plus-public.json`, checked in CI |
 | Push/email delivery, real payment provider, observability stack | Not implemented | Roadmap |
@@ -65,9 +65,16 @@ No workflow collects test coverage.
 
 | PR | Change |
 | --- | --- |
-| _unmerged_ | Kafka reliability: durable idempotency wired into `KafkaConsumerService`, per-topic dead-letter topics + `npm run kafka:dlq` replay tool, `orderId` partition key, deterministic order/delivery event ids, delivery lifecycle events published, driver-service delivery consumer removed, Redis AOF persistence, notification-service on Redis |
-| _unmerged_ | Hardening + E2E: delivery dispatch limited to the order's restaurant owner or admin; driver profile routes require JWT (self/admin/system); mark-notification-read scoped to the owner; cart's class-level `@RateLimit` now enforced (`RateLimitGuard` reads handler then class); refunds are admin/support-only; order status updates are compare-and-set (no duplicate `order.confirmed`); Kafka consumers ensure topics exist; isolated E2E environment (`docker-compose.e2e.yml`, `npm run e2e:env:up`, `npm run seed:e2e`, see `docs/e2e.md`); shared seed helpers in `scripts/lib/gateway-seed.ts` |
-| _unmerged_ | Phase 0: a declined payment now ends the order `FAILED` in both writers (the order-service `payment.failed` consumer used to write `CANCELLED`, which made the HTTP sync 409 and `/payments/:id/process` return 500). Payment-event consumers skip same-status, stale, and late events. Added `order.payment_pending` / `order.failed` event types (previously mislabeled `order.created`). Ownership checks on delivery reads; the driver-location route is no longer public; new `GET /deliveries/by-order/:orderId` |
+| #110 | Automatic dispatch on `order.ready_for_pickup` with a waiting-delivery sweep; Redis + durable idempotency in delivery-service; concurrent create maps to 409; seeds and `npm run e2e` no longer dispatch by hand; seed-e2e drops scenario S3 (closes #97) |
+| #109 | `GET /deliveries/me/current`: the calling driver's active delivery with pickup, drop-off, order summary and next actions; 204 when none (closes #96) |
+| #108 | Orders snapshot the delivery address at checkout (`CreateOrderDto`, profile fallback, migration `003-order-delivery-address`) (closes #95) |
+| #107 | Deterministic driver availability: (from → to) role rules, compare-and-set claims, retry-safe no-ops, delivery-service tries the next driver on a lost claim (closes #33) |
+| #106 | Engineering learning library in `docs/books` |
+| #105 | Public registration can no longer self-assign ADMIN (critical) |
+| #104 | README and architecture Mermaid diagrams render on GitHub |
+| #103 | Kafka reliability: durable idempotency wired into `KafkaConsumerService`, per-topic dead-letter topics + `npm run kafka:dlq` replay tool, `orderId` partition key, deterministic order/delivery event ids, delivery lifecycle events published, driver-service delivery consumer removed, Redis AOF persistence, notification-service on Redis |
+| #102 | Hardening + E2E: delivery dispatch limited to the order's restaurant owner or admin; driver profile routes require JWT (self/admin/system); mark-notification-read scoped to the owner; cart's class-level `@RateLimit` now enforced (`RateLimitGuard` reads handler then class); refunds are admin/support-only; order status updates are compare-and-set (no duplicate `order.confirmed`); Kafka consumers ensure topics exist; isolated E2E environment (`docker-compose.e2e.yml`, `npm run e2e:env:up`, `npm run seed:e2e`, see `docs/e2e.md`); shared seed helpers in `scripts/lib/gateway-seed.ts` |
+| #102 | Phase 0: a declined payment now ends the order `FAILED` in both writers (the order-service `payment.failed` consumer used to write `CANCELLED`, which made the HTTP sync 409 and `/payments/:id/process` return 500). Payment-event consumers skip same-status, stale, and late events. Added `order.payment_pending` / `order.failed` event types (previously mislabeled `order.created`). Ownership checks on delivery reads; the driver-location route is no longer public; new `GET /deliveries/by-order/:orderId` |
 | #90 | `DurableEventIdempotencyService` in `shared/src/kafka`: Redis-backed, consumer-group-scoped, lease-based event deduplication with atomic Lua scripts |
 | #91 | Node 20 → 22 in all workflows and the Dockerfile; api-gateway spec stubs the ESM-only `http-proxy-middleware` 4 so Jest can run |
 | #78, #80, #82, #83 | Dependabot: `http-proxy-middleware` 4.2.0, `actions/setup-node` v7 (in `ci.yml`), `@types/bcrypt` 6, `@types/node` 26 |
@@ -76,14 +83,12 @@ No workflow collects test coverage.
 
 ## Planned next
 
-Tracked as GitHub milestones (Phase 1–9). Next sprint, Phase 3 · Automatic dispatch + driver contracts:
+Tracked as GitHub milestones (Phase 1–9). Phase 3 (automatic dispatch + driver contracts) is complete.
 
-1. #33: drivers cannot leave BUSY themselves (today `POST /drivers/me/online` / `me/status` can free a busy driver).
-2. #95: snapshot the delivery address on the order at checkout.
-3. #96: `GET /api/deliveries/me/current` for drivers.
-4. #97: delivery-service dispatches automatically on `order.ready_for_pickup`.
-
-Kafka follow-ups: #98 transactional outbox, #5 `customerId` in payloads + notification handlers, #7 graceful shutdown.
+1. **Phase 4 · Driver + restaurant clients**: #99 driver app MVP (its backend contracts exist: online/offline, `me/current`, pickup/start/complete, location), then #100 restaurant dashboard. Each client ships with `testID`s, a Maestro suite and CI from its first commit.
+2. **Sprint 0b**: the customer app has no GitHub remote yet, so its CI and Maestro suites run only locally.
+3. **Kafka follow-ups**: #98 transactional outbox (now more important: a lost `order.ready_for_pickup` means no automatic delivery), #5 `customerId` in payloads + notification handlers, #7 graceful shutdown.
+4. **Open findings from the 2026-10-01 code review** (most unfiled): see [13-known-issues-and-gotchas.md](./13-known-issues-and-gotchas.md).
 
 Open gaps and technical debt are listed in [13-known-issues-and-gotchas.md](./13-known-issues-and-gotchas.md).
 

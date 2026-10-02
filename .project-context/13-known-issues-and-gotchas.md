@@ -58,6 +58,19 @@ The workspace root defines commands, but actual validation is still service-spec
 - The payment service contains a manual SQL idempotency upgrade outside the normal TypeORM migration runner.
 - Health routes (gateway included) are liveness checks; they do not verify Kafka, Redis, or downstream services.
 - No CI workflow collects coverage.
+- Automatic dispatch depends on `order.ready_for_pickup` being published; without an outbox a lost event leaves a ready order with no delivery (a restaurant owner or admin can still dispatch it manually). Driver choice is "most recently updated AVAILABLE driver": no location, distance or fairness. The waiting-delivery sweep runs in every delivery-service replica (safe, because claims and transitions are compare-and-set, but redundant).
+- A driver left BUSY with no active delivery (e.g. a crash between claim and assignment) is not reconciled automatically.
+- Self-registered `DRIVER` and `RESTAURANT_OWNER` accounts need no approval.
+
+Open findings from the 2026-10-01 code review (mostly not filed as issues yet; the critical one, self-registered ADMIN, is fixed in #105, and the driver claim race in #107):
+
+- The global error filter returns a raw `Error.message` for unexpected (non-`AppError`) 500s, which can leak driver/SQL details.
+- Every service connects to PostgreSQL as the `postgres` superuser, and the runtime image has no `USER` (runs as root).
+- System tokens are signed with the shared `JWT_SECRET` and carry `role: ADMIN`: any service (or a leaked `.env`) can mint any identity, and logs cannot tell a service from an admin.
+- cart-service updates the cart with read-modify-write on one Redis JSON value, so two concurrent adds can lose one.
+- The rate limiter runs `INCR` then `EXPIRE` (not atomic), so a crash in between leaves a key with no TTL. It fails closed (5xx) when Redis is down.
+- TypeORM 0.3 ignores `undefined` values in `find` where-clauses by default (`findOne({ where: { id: undefined } })` returns an arbitrary row). There is no current bug, but setting `invalidWhereValuesBehavior: { undefined: 'throw' }` would remove the trap.
+- Correlation ids propagate only from auth-service to user-service, not across other HTTP calls or Kafka.
 - Media: a verified S3 object can be orphaned if the owning service's database write fails after the copy (see [15-media-and-storage.md](./15-media-and-storage.md)).
 - `.gitignore` has no entry for local agent settings such as `.claude/`, so they show as untracked; stage files explicitly rather than with `git add -A`.
 

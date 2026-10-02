@@ -12,6 +12,9 @@ This folder is the main human-readable documentation hub for the repository.
 - [Services index](./services.md) – links to all service-level docs
 - [ADR index](./adr/README.md) – architecture decision records
 - [Runbooks](./runbooks/README.md) – operational playbooks and incident guides
+- [E2E environment](./e2e.md) – the isolated E2E stack, `seed:e2e` and how UI tests use it
+- [API testing](./api-testing.md) – exercising the public API by hand
+- [Engineering library](./books/README.md) – a curriculum (books, labs, case studies, teaching ADRs) built on this codebase
 
 ## Service docs
 

@@ -6,7 +6,7 @@ Handles registration, authentication, and JWT-based identity for users and roles
 ## Main REST endpoints
 From `services/auth-service/src/controllers/auth.controller.ts`:
 
-- `POST /auth/register` – register a new user and create a profile
+- `POST /auth/register` – register a new user and create a profile. `role` is optional and limited to `CUSTOMER` (default), `RESTAURANT_OWNER` or `DRIVER`; `ADMIN` is rejected (400 in validation, 403 in the service), so the role is server-controlled
 - `POST /auth/login` – sign in and receive a JWT token
 - `GET /auth/me` – return the current user payload from the bearer token
 

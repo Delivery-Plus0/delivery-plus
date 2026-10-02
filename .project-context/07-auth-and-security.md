@@ -74,6 +74,9 @@ This means the platform often relies on consistent user identifiers while still 
 - Registration, login, and `GET /auth/me` are implemented in `auth-service`.
 - JWT validation and role guards are shared by the domain services.
 - Roles are `CUSTOMER`, `RESTAURANT_OWNER`, `DRIVER`, and `ADMIN`.
+- **Public registration picks the role on the server.** `RegisterDto.role` accepts only `SELF_SERVICE_ROLES` (`CUSTOMER`, `RESTAURANT_OWNER`, `DRIVER`; omitted or null → `CUSTOMER`). `AuthService.register` re-checks the same allow-list before touching the database (403), so `ADMIN` can never be self-assigned (#105, found in the 2026-10-01 review). There is no admin-provisioning endpoint: admins are created out of band. The only ADMIN principals in normal operation are service system tokens.
+- Email verification (off by default: `EMAIL_VERIFICATION_REQUIRED=false`) and failed-login lockout (5 attempts → 15 minutes, generic "Invalid email or password") are implemented.
+- Ownership is enforced per object in each service (orders, payments, deliveries, tracking, notifications). Drivers may only move themselves between OFFLINE and AVAILABLE; claim and release are system-token (ADMIN) operations (#33).
 
 ## Current auth backlog and planned hardening
 
@@ -82,9 +85,9 @@ The current auth implementation is intentionally minimal and is tracked as a man
 - refresh-token lifecycle and rotation
 - logout and token revocation
 - password change and reset flows
-- verification workflows for email and account state
-- failed-login tracking and lockout behavior
 - MFA / 2FA enhancement after the base security model is in place
+- approval before a self-registered `DRIVER` or `RESTAURANT_OWNER` can operate (today these business roles are self-service)
+- service identity: system tokens are signed with the shared `JWT_SECRET` and carry `role: ADMIN`, so any service holding the secret can act as any user and audit logs cannot tell a service from an admin
 
 These gaps are tracked in GitHub and local issue metadata, especially:
 

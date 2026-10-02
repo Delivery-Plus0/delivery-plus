@@ -85,6 +85,7 @@ The `Order` entity includes:
 - `status` with `OrderStatus` enum
 - `totalAmount` as decimal
 - `idempotencyKey` for customer-scoped order creation deduplication
+- `deliveryAddress`, `deliveryNotes`, `deliveryLatitude`, `deliveryLongitude`: the drop-off snapshot copied at checkout and never updated (migration `003-order-delivery-address`; nullable only for orders created before it)
 - nested `OrderItem[]` via TypeORM cascade
 
 The order table uses a partial unique index `UQ_orders_customer_idempotency_key` on `("customerId", "idempotencyKey") WHERE "idempotencyKey" IS NOT NULL`, so a client key cannot create two different orders for the same customer. This protects the cart-to-order transition from duplicate retries and concurrent duplicate submissions.
@@ -107,7 +108,7 @@ Design notes:
 - `publishedEventStatus` / `orderSyncedStatus` record which status's Kafka event and order update have been applied, so retries only redo missing side effects; `sideEffectsLeaseUntil` is a short lease so concurrent retries don't both perform them
 - status changes use compare-and-set updates (`UPDATE ... WHERE id = ? AND status = ?`) instead of read-then-write, so concurrent requests cannot both move a payment out of the same state
 - production schema changes are applied with `services/payment-service/migrations/*.sql` (production runs with `synchronize: false`); see [docs/services/payment-service.md](../docs/services/payment-service.md#database-migration-production)
-- `deliveries.orderId` is unique, ensuring one active delivery per order
+- `deliveries.orderId` is unique, ensuring one delivery per order; a concurrent second create (e.g. auto-dispatch racing a manual dispatch) is answered with 409
 - `deliveries.driverId` is nullable and points to the driver service’s driver record
 - drivers track separate lifecycle state such as `AVAILABLE`, `BUSY`, `OFFLINE`, and `SUSPENDED`
 

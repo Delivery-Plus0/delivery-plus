@@ -118,6 +118,21 @@ describe('DeliveriesService', () => {
       const result = await service.create(actor(UserRole.ADMIN), { orderId: 'order-1' });
       expect(result.id).toBe('delivery-1');
     });
+
+    it('answers 409 (not 500) when a concurrent create wins the unique orderId index', async () => {
+      deliveries.findByOrderId.mockResolvedValue(null);
+      deliveries.create.mockRejectedValue(Object.assign(new Error('duplicate key'), { driverError: { code: '23505' } }));
+
+      await expect(service.create(actor(UserRole.ADMIN), { orderId: 'order-1' })).rejects.toThrow(ConflictError);
+      expect(kafkaProducer.publish).not.toHaveBeenCalled();
+    });
+
+    it('does not mask other database errors', async () => {
+      deliveries.findByOrderId.mockResolvedValue(null);
+      deliveries.create.mockRejectedValue(new Error('connection lost'));
+
+      await expect(service.create(actor(UserRole.ADMIN), { orderId: 'order-1' })).rejects.toThrow('connection lost');
+    });
   });
 
   describe('assignDriver', () => {

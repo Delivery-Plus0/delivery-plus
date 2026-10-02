@@ -29,6 +29,21 @@ async function waitForOrder(orderId: string, auth: Auth, status: string) {
   throw new Error(`Timed out waiting for order ${orderId} to reach ${status}`);
 }
 
+/** delivery-service creates and assigns the delivery by itself once the order is ready (auto-dispatch). */
+async function waitForAssignment(orderId: string, auth: Auth) {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    try {
+      const response = await axios.get(`${API_URL}/api/deliveries/by-order/${orderId}`, auth);
+      if (response.data.status !== 'CREATED') return response.data;
+    } catch (error) {
+      if (!(error instanceof AxiosError) || error.response?.status !== 404) throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new Error(`Timed out waiting for a driver to be assigned to order ${orderId}`);
+}
+
 async function seed() {
   console.log('Starting seed process...');
 
@@ -118,11 +133,14 @@ async function seed() {
     await axios.post(`${API_URL}/api/payments/${payment.id}/process`, { simulateFailure: false }, customerAuth);
     await waitForOrder(order.id, customerAuth, 'CONFIRMED');
     await axios.patch(`${API_URL}/api/orders/${order.id}/status`, { status: 'PREPARING' }, ownerAuth);
+    // Auto-dispatch picks the most recently updated AVAILABLE driver: cycle ours just before "ready".
+    await axios.post(`${API_URL}/api/drivers/me/offline`, {}, driverAuth).catch(() => undefined);
+    await axios.post(`${API_URL}/api/drivers/me/online`, {}, driverAuth);
     await axios.patch(`${API_URL}/api/orders/${order.id}/status`, { status: 'READY_FOR_PICKUP' }, ownerAuth);
 
-    console.log('Seeding delivery and tracking...');
-    const delivery = (await axios.post(`${API_URL}/api/deliveries`, { orderId: order.id }, ownerAuth)).data;
-    const assigned = (await axios.post(`${API_URL}/api/deliveries/${delivery.id}/assign`, {}, ownerAuth)).data;
+    console.log('Waiting for auto-dispatch to assign the driver...');
+    const assigned = await waitForAssignment(order.id, ownerAuth);
+    const delivery = assigned;
     await axios.post(`${API_URL}/api/tracking/location`, { latitude: 36.1627, longitude: -86.7816 }, driverAuth);
     await axios.post(`${API_URL}/api/deliveries/${delivery.id}/pickup`, {}, driverAuth);
     await axios.post(`${API_URL}/api/deliveries/${delivery.id}/start`, {}, driverAuth);

@@ -190,18 +190,36 @@ async function runE2E() {
     // CONFIRMED -> PREPARING -> READY_FOR_PICKUP (ORDER_TRANSITIONS does not
     // allow skipping PREPARING).
     await axios.patch(`${API_URL}/api/orders/${orderId}/status`, { status: 'PREPARING' }, ownerAuth);
+    // Auto-dispatch picks the most recently updated AVAILABLE driver: cycle the seeded driver
+    // (scripts/seed.ts) just before the order becomes ready so it is the one picked.
+    const driverProfile = (await axios.get(`${API_URL}/api/drivers/me`, driverAuth)).data;
+    if (driverProfile.status === 'AVAILABLE') await axios.post(`${API_URL}/api/drivers/me/offline`, {}, driverAuth);
+    await axios.post(`${API_URL}/api/drivers/me/online`, {}, driverAuth);
     await axios.patch(`${API_URL}/api/orders/${orderId}/status`, { status: 'READY_FOR_PICKUP' }, ownerAuth);
     console.log('Order marked READY_FOR_PICKUP');
 
-    // 8. Dispatch a delivery for the order (restaurant owner / dispatch role).
-    const deliveryRes = await axios.post(`${API_URL}/api/deliveries`, { orderId }, ownerAuth);
-    const deliveryId = deliveryRes.data.id;
-    console.log(`Delivery created: ${deliveryId} (status ${deliveryRes.data.status})`);
+    // 8. No dispatch call: delivery-service creates the delivery and assigns a driver on
+    // order.ready_for_pickup (auto-dispatch).
+    const assignedDelivery = await waitFor(
+      'auto-dispatch to create the delivery and assign a driver',
+      async () => {
+        const status = await statusOf(axios.get(`${API_URL}/api/deliveries/by-order/${orderId}`, ownerAuth));
+        return status === 200 ? (await axios.get(`${API_URL}/api/deliveries/by-order/${orderId}`, ownerAuth)).data : null;
+      },
+      (delivery) => delivery?.status === 'DRIVER_ASSIGNED',
+      { timeoutMs: 30_000 },
+    );
+    const deliveryId = assignedDelivery.id;
+    if (assignedDelivery.driverId !== driverProfile.id) {
+      throw new Error(`Auto-dispatch assigned driver ${assignedDelivery.driverId}, expected the seeded driver ${driverProfile.id}`);
+    }
+    console.log(`Delivery auto-dispatched: ${deliveryId}, driver ${assignedDelivery.driverId}`);
 
-    // 9. Auto-assign the next available driver (seeded and brought online by
-    // scripts/seed.ts) and drive the delivery to completion.
-    const assigned = await axios.post(`${API_URL}/api/deliveries/${deliveryId}/assign`, {}, ownerAuth);
-    console.log(`Driver assigned: ${assigned.data.driverId}`);
+    // A manual dispatch for the same order can't create a second delivery.
+    const manualCreate = await statusOf(axios.post(`${API_URL}/api/deliveries`, { orderId }, ownerAuth));
+    if (manualCreate !== 409) {
+      throw new Error(`A manual dispatch after auto-dispatch returned ${manualCreate}, expected 409`);
+    }
 
     // The driver discovers the job from their own token alone, with pickup and drop-off details.
     const current = await axios.get(`${API_URL}/api/deliveries/me/current`, driverAuth);

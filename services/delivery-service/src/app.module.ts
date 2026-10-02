@@ -1,6 +1,6 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { CorrelationIdMiddleware, KafkaModule } from '@food-delivery/shared';
+import { CorrelationIdMiddleware, KafkaModule, RedisModule } from '@food-delivery/shared';
 import { DeliveriesModule } from './modules/deliveries/deliveries.module';
 import { HealthController } from './controllers/health.controller';
 import { ConfigModule } from './config/config.module';
@@ -14,9 +14,12 @@ const config = loadConfig();
   imports: [
     ConfigModule,
     TypeOrmModule.forRoot(buildTypeOrmConfig(config.databaseUrl, [Delivery])),
+    RedisModule.register({ url: process.env.REDIS_URL || 'redis://localhost:6379' }),
     KafkaModule.register({
       clientId: 'delivery-service',
       brokers: [process.env.KAFKA_BROKER || 'localhost:9092'],
+      groupId: 'delivery-service-group',
+      durableIdempotency: true,
     }),
     DeliveriesModule,
   ],

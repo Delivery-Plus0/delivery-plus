@@ -110,7 +110,7 @@ Large changes must be made in small, reversible, deployable steps while the syst
 | Change | Pattern |
 | --- | --- |
 | Order status sync: HTTP-only → HTTP + events (CAS makes the second path a no-op) | parallel paths — **CURRENT** |
-| Manual dispatch → automatic dispatch (#97), manual endpoints kept | strangler — **PLANNED** |
+| Manual dispatch → automatic dispatch (#97), manual endpoints kept | strangler — **CURRENT** |
 | Direct publish → outbox (#98) | switch one event type at a time behind a flag: write it to the outbox instead of publishing directly, let the relay publish it — **PLANNED** |
 | Polling → WebSocket tracking, polling kept as fallback | strangler — **FUTURE** |
 | Simulated payments → real gateway via adapter | strangler behind the provider port — **FUTURE** |

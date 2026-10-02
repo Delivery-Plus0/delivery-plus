@@ -28,5 +28,7 @@ npm run e2e:env:reset   # down → up → seed (reproduce from scratch)
 manifest (git-ignored) carries the generated ids that UI flows need.
 
 Seeded data: see `scripts/seed-e2e.ts` (`QA` accounts, `QA Kitchen` / `QA Night Cafe`, scenarios
-S1 delivered, S2 payment declined, S3 ready for pickup without a delivery, S4 another customer's
-confirmed order).
+S1 delivered, S2 payment declined, S4 another customer's confirmed order). There is no seeded
+"waiting for a driver" order (formerly S3): with auto-dispatch a ready order is assigned as soon as a driver
+is free, so UI tests create that state at runtime (driver offline → order ready → driver online). The E2E
+stack retries waiting deliveries every 2 s (`AUTO_DISPATCH_SWEEP_MS`).

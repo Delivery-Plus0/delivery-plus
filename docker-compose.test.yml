@@ -334,6 +334,7 @@ services:
       NODE_ENV: test
       DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/delivery_service
       JWT_SECRET: ${JWT_SECRET:-local-development-only}
+      REDIS_URL: redis://redis:6379
       KAFKA_BROKER: kafka:29092
       ORDER_SERVICE_URL: http://order-service:3006
       DRIVER_SERVICE_URL: http://driver-service:3009
@@ -345,6 +346,8 @@ services:
       retries: 10
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       kafka:
         condition: service_healthy

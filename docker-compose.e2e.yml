@@ -53,3 +53,9 @@ services:
   payment-service:
     environment:
       PAYMENT_SUCCESS_RATE: '1'
+
+  # Auto-dispatch retries deliveries still waiting for a driver every AUTO_DISPATCH_SWEEP_MS
+  # (default 15000). UI tests wait for "driver comes online -> assigned", so retry faster here.
+  delivery-service:
+    environment:
+      AUTO_DISPATCH_SWEEP_MS: '2000'

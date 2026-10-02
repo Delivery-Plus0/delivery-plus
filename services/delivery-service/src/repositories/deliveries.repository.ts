@@ -29,6 +29,15 @@ export class DeliveriesRepository {
       .getMany();
   }
 
+  /** Deliveries still waiting for a driver, oldest first (what auto-dispatch retries). */
+  findWaitingForDriver(limit: number): Promise<Delivery[]> {
+    return this.repo.find({
+      where: { status: DeliveryStatus.CREATED },
+      order: { createdAt: 'ASC' },
+      take: limit,
+    });
+  }
+
   create(orderId: string): Promise<Delivery> {
     return this.repo.save(this.repo.create({ orderId, status: DeliveryStatus.CREATED }));
   }

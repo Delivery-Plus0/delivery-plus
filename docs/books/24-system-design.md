@@ -68,7 +68,7 @@ Senior question: *Where must checkout be strongly consistent, and where is event
 
 ## Chapter 3 — Exercise 2: Driver dispatch
 
-**Current design (CURRENT):** a restaurant owner/admin calls `POST /api/deliveries` then `/assign`; delivery-service picks the most recently updated AVAILABLE driver, sets them BUSY, writes the assignment (CAS), syncs the order, publishes `delivery.driver_assigned`. **PLANNED:** automatic dispatch on `order.ready_for_pickup` (#97), driver current-delivery endpoint (#96), driver availability rules (#33).
+**Current design (CURRENT):** when the restaurant marks an order ready, delivery-service consumes `order.ready_for_pickup` and creates and assigns the delivery itself (#97; manual `POST /api/deliveries` + `/assign` remain for owners and admins). Assignment picks the most recently updated AVAILABLE driver, sets them BUSY, writes the assignment (CAS), syncs the order, publishes `delivery.driver_assigned`. Deliveries with no free driver wait and are retried by a periodic sweep. Also CURRENT: the driver current-delivery endpoint (#96) and exclusive driver claims (#33).
 
 | Aspect | Notes |
 | --- | --- |

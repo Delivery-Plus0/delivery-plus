@@ -32,9 +32,9 @@ Every service image is built from the root `Dockerfile` on `node:22-alpine`. For
 1. A customer adds a menu item to the Redis cart.
 2. Order Service validates the cart and restaurant, persists an order, clears the cart, and publishes order events.
 3. Payment Service creates and processes a simulated payment, then publishes success or failure. Order Service consumes the result and changes order state.
-4. A restaurant owner advances the order to preparation and pickup readiness. Delivery Service creates a delivery, assigns an available driver, and updates the order through HTTP clients.
+4. A restaurant owner advances the order to preparation and pickup readiness. Delivery Service consumes `order.ready_for_pickup`, creates the delivery and assigns an available driver by itself (automatic dispatch; a delivery with no free driver waits and is retried), and updates the order through HTTP clients. The driver finds the job with `GET /deliveries/me/current`, including the drop-off address the order copied at checkout.
 5. Drivers report locations to Tracking Service, which stores the latest location in Redis. Tracking combines delivery data with the driver location.
-6. Delivery completion updates delivery, order, and driver state through the implemented service calls. Delivery event publication is currently partial, so downstream event propagation should not be assumed for every lifecycle transition.
+6. Delivery completion updates delivery, order, and driver state through the implemented service calls, and every delivery transition is published to `delivery.events` (order-service converges from them).
 
 The current implementation does not provide a real payment provider, push/email delivery, or a transactional outbox for Kafka events. Those are roadmap items.
 

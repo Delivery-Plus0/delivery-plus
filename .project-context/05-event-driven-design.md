@@ -105,6 +105,7 @@ Services react to incoming events by updating their own internal state or creati
 
 - `notification-service` subscribes to order/payment/delivery topics and persists order notifications; payment and delivery handlers currently contain no-op behavior because the required lookup/contract work is not implemented
 - `order-service` converges its status from payment and delivery events (tolerant of duplicates and stale events)
+- `delivery-service` consumes `order.ready_for_pickup` and dispatches automatically: it creates the delivery if none exists and assigns a driver. With no driver free, the delivery waits and a periodic sweep retries; the event is not dead-lettered. Durable idempotency is used, and races with manual dispatch end in one delivery and one driver (see [docs/services/delivery-service.md](../docs/services/delivery-service.md#automatic-dispatch))
 - `driver-service` consumes nothing; availability is set synchronously by delivery-service (compare-and-set claim and release; a BUSY driver cannot make themselves AVAILABLE)
 
 ## Why this matters for maintainers
@@ -145,7 +146,7 @@ Dead-lettered messages keep their key, value and headers, plus `dlq-original-top
 
 **Replay:** `npm run kafka:dlq -- <topic>` lists what is pending; `--replay` republishes each message to its original topic (dead-letter headers stripped). Every group sees it again; groups that already handled it skip it through durable idempotency. Progress is tracked by the `delivery-plus-dlq-replay` consumer group, so each message is replayed once. Unparseable messages are listed and skipped. `KAFKA_BROKER` defaults to `localhost:9092`.
 
-**Durable idempotency** (`DurableEventIdempotencyService`): Redis keys `kafka:idempotency:{consumerGroup}:{eventId}` holding `lease:<token>` while a consumer handles the event (60 s TTL) or `processed` (7 days, matching Kafka's default retention). Every operation is one Lua script. order-service and notification-service use it (`KafkaModule.register({ durableIdempotency: true })` plus `RedisModule`). A consumer registered without it falls back to an in-process set and logs a warning at startup.
+**Durable idempotency** (`DurableEventIdempotencyService`): Redis keys `kafka:idempotency:{consumerGroup}:{eventId}` holding `lease:<token>` while a consumer handles the event (60 s TTL) or `processed` (7 days, matching Kafka's default retention). Every operation is one Lua script. order-service, notification-service and delivery-service use it (`KafkaModule.register({ durableIdempotency: true })` plus `RedisModule`). A consumer registered without it falls back to an in-process set and logs a warning at startup.
 
 **Redis persistence:** the Compose Redis runs with AOF (`--appendonly yes`) on the `redis_data` volume, so processed markers (and carts) survive a Redis restart.
 

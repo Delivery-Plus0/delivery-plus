@@ -638,7 +638,7 @@ Each source topic has <topic>.dlq.
 | `payment.events` | `payment.created`, `payment.completed`, `payment.failed` | payment-service (status markers, deterministic `paymentEventId`) | `{ paymentId, orderId, amount, status }` | order-service (all three), notification-service (`completed`, no-op) |
 | `delivery.events` | `delivery.created`, `driver_assigned`, `picked_up`, `in_transit`, `completed`, `cancelled` | delivery-service (after HTTP syncs) | `{ deliveryId, orderId, driverId?, status }` | order-service (`driver_assigned`, `picked_up`, `completed`), notification-service (`driver_assigned`, no-op) |
 
-Note: `order.ready_for_pickup` has **no consumer** yet; automatic dispatch (issue #97) will be its first.
+Note: `order.ready_for_pickup` is consumed by delivery-service's automatic dispatch (issue #97, consumer group `delivery-service-group`, durable idempotency). The handler never dead-letters just because no driver is free; the delivery waits and a sweep retries it.
 
 ### 11.3 Event IDs — **CURRENT**
 - Order and delivery events: `lifecycleEventId(entityId, eventType)` (UUID v5, `shared/src/events/event-identity.ts`).

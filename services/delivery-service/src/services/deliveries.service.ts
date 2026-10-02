@@ -27,6 +27,12 @@ import { Delivery } from '../entities/delivery.entity';
 
 const DISPATCH_ROLES = [UserRole.RESTAURANT_OWNER, UserRole.ADMIN];
 
+/** PostgreSQL unique_violation, as surfaced by TypeORM's QueryFailedError. */
+function isUniqueViolation(error: unknown): boolean {
+  const e = error as { code?: string; driverError?: { code?: string } };
+  return e?.code === '23505' || e?.driverError?.code === '23505';
+}
+
 /** How many drivers one assignment tries when it keeps losing claims to concurrent assignments. */
 const MAX_DRIVER_CLAIM_ATTEMPTS = 3;
 
@@ -72,7 +78,17 @@ export class DeliveriesService {
       );
     }
 
-    const delivery = await this.deliveries.create(dto.orderId);
+    let delivery: Delivery;
+    try {
+      delivery = await this.deliveries.create(dto.orderId);
+    } catch (error) {
+      // Two creates (e.g. auto-dispatch and a manual dispatch) passed the check above at the same
+      // time; the unique index on orderId let only one insert through.
+      if (isUniqueViolation(error)) {
+        throw new ConflictError(`A delivery already exists for order ${dto.orderId}`);
+      }
+      throw error;
+    }
     await this.publishEvent(DeliveryEventType.CREATED, delivery);
     return delivery;
   }

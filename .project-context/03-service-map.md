@@ -12,7 +12,7 @@ This file is the high-level dependency map. For deeper service-by-service detail
 | cart-service | 3005 | Redis, menu-service | gateway, order-service | user cart state | none | none |
 | order-service | 3006 | PostgreSQL, Redis (rate limits), cart-service, restaurant-service, Kafka | gateway, payment-service, delivery-service, user-service | orders | order.events | payment.events, delivery.events |
 | payment-service | 3007 | PostgreSQL, order-service, Kafka | gateway | payment records | payment.events | none |
-| delivery-service | 3008 | PostgreSQL, order-service, driver-service, Kafka | gateway | delivery records | delivery.events (one per lifecycle transition) | none |
+| delivery-service | 3008 | PostgreSQL, Redis (Kafka idempotency), order-service, driver-service, restaurant-service, Kafka | gateway | delivery records | delivery.events (one per lifecycle transition) | order.ready_for_pickup (auto-dispatch) |
 | driver-service | 3009 | PostgreSQL | delivery-service, tracking-service | drivers (availability: compare-and-set; drivers only go online/offline, delivery-service claims and releases) | none | none |
 | tracking-service | 3010 | Redis, delivery-service, driver-service | gateway | last-known locations | none | none |
 | notification-service | 3011 | PostgreSQL, Kafka | gateway | notification records | none | order.events, payment.events, delivery.events |
@@ -31,7 +31,7 @@ This file is the high-level dependency map. For deeper service-by-service detail
 - `cart-service` validates menu items from `menu-service`
 - `order-service` orchestrates state changes using cart and restaurant checks
 - `payment-service` updates order status based on payment outcome
-- `delivery-service` assigns drivers (claim AVAILABLE → BUSY, moving to the next driver if a concurrent assignment wins), updates order status and publishes `delivery.events`
+- `delivery-service` dispatches automatically on `order.ready_for_pickup` (create + assign; deliveries waiting for a driver are retried every `AUTO_DISPATCH_SWEEP_MS`), assigns drivers (claim AVAILABLE → BUSY, moving to the next driver if a concurrent assignment wins), updates order status and publishes `delivery.events`
 - `tracking-service` enriches delivery progress using delivery and driver service data
 - `notification-service` listens for asynchronous events, but payment and delivery handlers currently contain no-op behavior pending the required lookup/contract work
 

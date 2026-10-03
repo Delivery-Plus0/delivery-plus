@@ -92,7 +92,6 @@ describe('OrdersService', () => {
       });
       restaurantClient.getRestaurant.mockResolvedValue({
         id: 'rest-1',
-        ownerId: 'owner-1',
         name: 'X',
         status: RestaurantStatus.CLOSED,
       });
@@ -109,7 +108,6 @@ describe('OrdersService', () => {
       });
       restaurantClient.getRestaurant.mockResolvedValue({
         id: 'rest-1',
-        ownerId: 'owner-1',
         name: 'X',
         status: RestaurantStatus.OPEN,
       });
@@ -142,7 +140,6 @@ describe('OrdersService', () => {
       });
       restaurantClient.getRestaurant.mockResolvedValue({
         id: 'rest-1',
-        ownerId: 'owner-1',
         name: 'X',
         status: RestaurantStatus.OPEN,
       });
@@ -163,7 +160,7 @@ describe('OrdersService', () => {
           items: [{ menuItemId: 'i1', name: 'Burger', price: 9.99, quantity: 1 }],
           total: 9.99,
         });
-        restaurantClient.getRestaurant.mockResolvedValue({ id: 'rest-1', ownerId: 'owner-1', name: 'X', status: RestaurantStatus.OPEN });
+        restaurantClient.getRestaurant.mockResolvedValue({ id: 'rest-1', name: 'X', status: RestaurantStatus.OPEN });
         orders.create.mockResolvedValue(baseOrder);
       });
 
@@ -268,6 +265,17 @@ describe('OrdersService', () => {
       expect(result.id).toBe('order-1');
       expect(restaurantClient.assertOwnership).toHaveBeenCalledWith('rest-1', 'owner-1');
     });
+
+    it('rejects a foreign restaurant owner before returning the order', async () => {
+      orders.findById.mockResolvedValue(baseOrder);
+      restaurantClient.assertOwnership.mockRejectedValue(
+        new ForbiddenError('You do not own this restaurant'),
+      );
+
+      await expect(service.getById('order-1', 'owner-2', UserRole.RESTAURANT_OWNER)).rejects.toThrow(
+        ForbiddenError,
+      );
+    });
   });
 
   describe('updateStatus', () => {
@@ -339,6 +347,20 @@ describe('OrdersService', () => {
 
       expect(restaurantClient.assertOwnership).toHaveBeenCalledWith('rest-1', 'owner-1');
       expect(result.status).toBe(OrderStatus.PREPARING);
+    });
+
+    it('rejects a foreign restaurant owner before mutating status', async () => {
+      orders.findById.mockResolvedValue({ ...baseOrder, status: OrderStatus.CONFIRMED });
+      restaurantClient.assertOwnership.mockRejectedValue(
+        new ForbiddenError('You do not own this restaurant'),
+      );
+
+      await expect(
+        service.updateStatus('order-1', 'owner-2', UserRole.RESTAURANT_OWNER, {
+          status: OrderStatus.PREPARING,
+        }),
+      ).rejects.toThrow(ForbiddenError);
+      expect(orders.updateStatus).not.toHaveBeenCalled();
     });
   });
 
@@ -504,6 +526,17 @@ describe('OrdersService', () => {
       const result = await service.listByRestaurant('rest-1', 'owner-1', 1, 20);
       expect(result.total).toBe(1);
       expect(restaurantClient.assertOwnership).toHaveBeenCalledWith('rest-1', 'owner-1');
+    });
+
+    it('rejects a foreign restaurant owner before listing orders', async () => {
+      restaurantClient.assertOwnership.mockRejectedValue(
+        new ForbiddenError('You do not own this restaurant'),
+      );
+
+      await expect(service.listByRestaurant('rest-1', 'owner-2', 1, 20)).rejects.toThrow(
+        ForbiddenError,
+      );
+      expect(orders.findByRestaurant).not.toHaveBeenCalled();
     });
   });
 });

@@ -142,6 +142,18 @@ describe('MenuService', () => {
       expect(restaurantClient.assertOwnership).toHaveBeenCalledWith('r1', 'owner-1');
       expect(result.available).toBe(false);
     });
+
+    it('rejects a foreign owner before changing availability', async () => {
+      menuItems.findById.mockResolvedValue(item);
+      restaurantClient.assertOwnership.mockRejectedValue(
+        new ForbiddenError('You do not own this restaurant'),
+      );
+
+      await expect(
+        service.updateAvailability('item-1', 'owner-2', { available: false }),
+      ).rejects.toThrow(ForbiddenError);
+      expect(menuItems.update).not.toHaveBeenCalled();
+    });
   });
 
   describe('deleteItem', () => {

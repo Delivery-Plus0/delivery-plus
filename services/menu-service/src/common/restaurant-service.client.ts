@@ -1,5 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { ForbiddenError, NotFoundError, assertValidUuidV4 } from '@food-delivery/shared';
+import { randomUUID } from 'node:crypto';
+import {
+  ForbiddenError,
+  INTERNAL_AUTH_HEADERS,
+  NotFoundError,
+  assertValidUuidV4,
+  signInternalRequest,
+} from '@food-delivery/shared';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 
 /**
@@ -16,9 +23,28 @@ export class RestaurantServiceClient {
   async assertOwnership(restaurantId: string, requesterId: string): Promise<void> {
     const safeRestaurantId = assertValidUuidV4(restaurantId, 'restaurantId');
     const safeRequesterId = assertValidUuidV4(requesterId, 'requesterId');
-    const response = await fetch(
-      `${this.config.restaurantServiceUrl}/restaurants/${safeRestaurantId}/ownership/${safeRequesterId}`,
-    );
+    const url = `${this.config.restaurantServiceUrl}/restaurants/${safeRestaurantId}/ownership/${safeRequesterId}`;
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const nonce = randomUUID();
+    const signature = signInternalRequest({
+      method: 'GET',
+      path: `/restaurants/${safeRestaurantId}/ownership/${safeRequesterId}`,
+      timestamp,
+      nonce,
+      body: {},
+      service: this.config.internalAuthService,
+      secret: this.config.internalAuthSecret,
+    });
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        [INTERNAL_AUTH_HEADERS.service]: this.config.internalAuthService,
+        [INTERNAL_AUTH_HEADERS.timestamp]: timestamp,
+        [INTERNAL_AUTH_HEADERS.nonce]: nonce,
+        [INTERNAL_AUTH_HEADERS.signature]: signature,
+      },
+    });
 
     if (response.status === 404) {
       throw new NotFoundError(`Restaurant ${safeRestaurantId} not found`);

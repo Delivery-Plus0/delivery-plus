@@ -94,6 +94,20 @@ describe('gateway internal route exposure', () => {
     expect(isBlockedInternalRoute('/api/users')).toBe(false);
   });
 
+  it('blocks public ownership-verification probes through the gateway', () => {
+    expect(
+      isBlockedInternalRoute('/api/restaurants/550e8400-e29b-41d4-a716-446655440000/ownership/11111111-1111-41d4-a716-446655440000'),
+    ).toBe(true);
+    expect(isBlockedInternalRoute('/api/restaurants/me')).toBe(false);
+    expect(isBlockedInternalRoute('/api/restaurants')).toBe(false);
+  });
+
+  it('exposes owner restaurant selection and hides the internal ownership oracle', () => {
+    const document = generatePublicOpenApiDocument();
+    expect(document.paths['/api/restaurants/me'].get.security).toEqual([{ bearerAuth: [] }]);
+    expect(document.paths['/api/restaurants/{id}/ownership/{userId}']).toBeUndefined();
+  });
+
   it('rewrites public auth routes to the downstream service route', () => {
     expect(rewriteProxyPath('/api/auth', '/register')).toBe('/auth/register');
     expect(rewriteProxyPath('/api/auth', '/login')).toBe('/auth/login');

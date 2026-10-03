@@ -16,6 +16,10 @@ export class RestaurantsRepository {
     return this.repo.findOne({ where: { id } });
   }
 
+  findByOwner(ownerId: string): Promise<Restaurant[]> {
+    return this.repo.find({ where: { ownerId }, order: { createdAt: 'DESC' } });
+  }
+
   create(data: Pick<Restaurant, 'ownerId' | 'name' | 'description' | 'address'>): Promise<Restaurant> {
     return this.repo.save(this.repo.create(data));
   }

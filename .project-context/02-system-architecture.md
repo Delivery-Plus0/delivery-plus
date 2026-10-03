@@ -43,6 +43,7 @@ flowchart LR
     AUTH -.->|rate limits| REDIS
     ORD -.->|rate limits| REDIS
     USER -.->|internal-auth nonces| REDIS
+    REST -.->|internal-auth nonces| REDIS
     REST -.->|cache| REDIS
     MENU -.->|cache| REDIS
 

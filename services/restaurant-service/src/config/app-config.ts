@@ -6,6 +6,8 @@ export interface AppConfig {
   nodeEnv: string;
   databaseUrl: string;
   jwtSecret: string;
+  internalAuthSecret: string;
+  internalAuthAllowedServices: string[];
 }
 
 export function loadConfig(): AppConfig {
@@ -21,5 +23,24 @@ export function loadConfig(): AppConfig {
     nodeEnv: process.env.NODE_ENV || 'development',
     databaseUrl: process.env.DATABASE_URL as string,
     jwtSecret: process.env.JWT_SECRET as string,
+    internalAuthSecret: requireInternalAuthSecret(),
+    internalAuthAllowedServices: parseAllowedServices(
+      process.env.INTERNAL_AUTH_ALLOWED_SERVICES || process.env.INTERNAL_AUTH_ALLOWED_SERVICE || 'menu-service,order-service',
+    ),
   };
+}
+
+function parseAllowedServices(raw: string): string[] {
+  return raw
+    .split(',')
+    .map((service) => service.trim())
+    .filter(Boolean);
+}
+
+function requireInternalAuthSecret(): string {
+  const secret = process.env.INTERNAL_AUTH_SECRET;
+  if (!secret && process.env.NODE_ENV === 'production') {
+    throw new Error('Missing required environment variables: INTERNAL_AUTH_SECRET');
+  }
+  return secret || 'local-internal-auth-development-only';
 }

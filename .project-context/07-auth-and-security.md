@@ -104,10 +104,11 @@ This project is structured for a backend learning/demo environment, not a produc
 - services trust the authenticated identity provided through the token and associated guards
 - cross-service trust is relatively lightweight and assumes the internal network is controlled
 - `POST /internal/users` requires the HMAC internal service-auth contract and a one-time Redis nonce
+- `GET /restaurants/:id/ownership/:userId` uses the same HMAC contract before asserting ownership for trusted internal callers such as menu-service and order-service
 - `GET /users/:id` requires a JWT and allows only the owning user or an admin
 - user-service rejects auth/profile mismatches when the JWT subject or email does not match the stored profile mapping
 
-The accepted design and current implementation are documented in [ADR 001](../docs/adr/001-internal-service-authentication.md): HMAC-signed internal requests with an explicit service identity, timestamp, nonce, and body-bound signature. `auth-service` signs the profile-creation call, `user-service` verifies it, Redis rejects nonce replay, and production requires `INTERNAL_AUTH_SECRET`. Profile ownership and credential mapping are enforced in user-service.
+The accepted design and current implementation are documented in [ADR 001](../docs/adr/001-internal-service-authentication.md): HMAC-signed internal requests with an explicit service identity, timestamp, nonce, and body-bound signature. `auth-service` signs profile creation for `user-service`; `menu-service` and `order-service` sign ownership checks for `restaurant-service`. The receiving guards use Redis nonce replay protection, and production requires `INTERNAL_AUTH_SECRET`. Profile ownership and credential mapping are enforced in user-service.
 
 The repo is therefore secure enough for a local development stack, but not designed as a finished production auth architecture out of the box.
 

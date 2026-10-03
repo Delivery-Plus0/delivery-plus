@@ -10,6 +10,7 @@ import { CartServiceClient } from '../../common/cart-service.client';
 import { RestaurantServiceClient } from '../../common/restaurant-service.client';
 import { UserServiceClient } from '../../common/user-service.client';
 import { APP_CONFIG, AppConfig } from '../../config/app-config';
+import { RolesGuard } from '@food-delivery/shared';
 
 @Module({
   imports: [
@@ -20,6 +21,6 @@ import { APP_CONFIG, AppConfig } from '../../config/app-config';
     }),
   ],
   controllers: [OrdersController],
-  providers: [OrdersService, OrdersRepository, CartServiceClient, RestaurantServiceClient, UserServiceClient],
+  providers: [OrdersService, OrdersRepository, CartServiceClient, RestaurantServiceClient, UserServiceClient, RolesGuard],
 })
 export class OrdersModule {}

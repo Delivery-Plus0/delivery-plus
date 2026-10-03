@@ -603,6 +603,41 @@
         "security": []
       }
     },
+    "/api/restaurants/me": {
+      "get": {
+        "summary": "List restaurants owned by the current restaurant owner",
+        "tags": [
+          "restaurants"
+        ],
+        "operationId": "restaurants_get_api_restaurants_me",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/restaurants/{id}": {
       "get": {
         "summary": "Get a restaurant by id",
@@ -730,55 +765,6 @@
             "bearerAuth": []
           }
         ]
-      }
-    },
-    "/api/restaurants/{id}/ownership/{userId}": {
-      "get": {
-        "summary": "Check restaurant ownership",
-        "tags": [
-          "restaurants"
-        ],
-        "operationId": "restaurants_get_api_restaurants_id_ownership_userId",
-        "responses": {
-          "200": {
-            "description": "Successful response"
-          },
-          "400": {
-            "description": "Bad request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized"
-          },
-          "403": {
-            "description": "Forbidden"
-          }
-        },
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "userId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "security": []
       }
     },
     "/api/restaurants/{id}/image-upload-url": {

@@ -1,4 +1,4 @@
-import { BadRequestError, NotFoundError } from '@food-delivery/shared';
+import { BadRequestError } from '@food-delivery/shared';
 import { RestaurantServiceClient } from './restaurant-service.client';
 
 describe('OrderService.RestaurantServiceClient', () => {
@@ -17,17 +17,50 @@ describe('OrderService.RestaurantServiceClient', () => {
     });
     global.fetch = fetchMock as any;
 
-    const client = new RestaurantServiceClient({ restaurantServiceUrl: 'http://restaurant-service:3003' } as any);
+    const client = new RestaurantServiceClient({
+      restaurantServiceUrl: 'http://restaurant-service:3003',
+      internalAuthService: 'order-service',
+      internalAuthSecret: 'test-secret',
+    } as any);
 
     await expect(client.getRestaurant(validRestaurantId)).resolves.toMatchObject({ id: validRestaurantId });
     expect(fetchMock).toHaveBeenCalledWith(`http://restaurant-service:3003/restaurants/${validRestaurantId}`);
+  });
+
+  it('signs ownership checks with internal auth', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({ ok: true, status: 200 });
+    global.fetch = fetchMock as any;
+
+    const client = new RestaurantServiceClient({
+      restaurantServiceUrl: 'http://restaurant-service:3003',
+      internalAuthService: 'order-service',
+      internalAuthSecret: 'test-secret',
+    } as any);
+
+    await expect(client.assertOwnership(validRestaurantId, validRequesterId)).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith(
+      `http://restaurant-service:3003/restaurants/${validRestaurantId}/ownership/${validRequesterId}`,
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          'x-internal-service': 'order-service',
+          'x-internal-timestamp': expect.any(String),
+          'x-internal-nonce': expect.any(String),
+          'x-internal-signature': expect.any(String),
+        }),
+      }),
+    );
   });
 
   it('rejects malformed ids before making the request', async () => {
     const fetchMock = jest.fn();
     global.fetch = fetchMock as any;
 
-    const client = new RestaurantServiceClient({ restaurantServiceUrl: 'http://restaurant-service:3003' } as any);
+    const client = new RestaurantServiceClient({
+      restaurantServiceUrl: 'http://restaurant-service:3003',
+      internalAuthService: 'order-service',
+      internalAuthSecret: 'test-secret',
+    } as any);
     const promise = client.getRestaurant('http://evil.example');
 
     await expect(promise).rejects.toThrow(BadRequestError);

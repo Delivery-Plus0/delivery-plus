@@ -8,17 +8,18 @@ From `services/restaurant-service/src/controllers/restaurants.controller.ts`:
 
 - `POST /restaurants` – create a restaurant (owner only)
 - `GET /restaurants` – list restaurants (public, paginated/filterable)
+- `GET /restaurants/me` – list the currently authenticated owner’s restaurants (owner only)
 - `GET /restaurants/:id` – fetch a restaurant by ID
 - `PATCH /restaurants/:id` – update restaurant details (owner only)
 - `PATCH /restaurants/:id/status` – update status (owner or admin)
-- `GET /restaurants/:id/ownership/:userId` – internal ownership verification used by menu-service
+- `GET /restaurants/:id/ownership/:userId` – internal ownership verification used by menu-service and order-service; requires the shared HMAC internal-auth guard and Redis nonce replay protection
 - `POST /restaurants/:id/image-upload-url` – create a presigned cover/logo POST policy (owner only)
 - `POST /restaurants/:id/image-confirm` – verify the uploaded cover/logo and save its public URL (owner only)
 
 ## Dependencies
 - Uses PostgreSQL for restaurant data
 - Uses the shared S3 storage service for restaurant cover and logo objects
-- `menu-service` checks ownership via this service
+- `menu-service` and `order-service` check ownership via this service using signed HMAC internal-auth requests
 - No Kafka usage is implemented here
 
 ## Events published/consumed
@@ -31,9 +32,13 @@ From `services/restaurant-service/src/config/app-config.ts`:
 - `JWT_SECRET`
 - `PORT` (default: `3003`)
 - `NODE_ENV` (default: `development`)
+- `INTERNAL_AUTH_SECRET` (required in production; local Compose provides a default)
+- `INTERNAL_AUTH_ALLOWED_SERVICES` or legacy `INTERNAL_AUTH_ALLOWED_SERVICE` (comma-delimited trusted internal callers; default: `menu-service,order-service`)
 - `AWS_REGION`, `AWS_S3_BUCKET`, and `AWS_PUBLIC_BASE_URL`; S3 endpoint and credentials are configurable for the local media-storage service (SeaweedFS's S3 gateway) or a cloud provider
 
 ## Notes
 The service enforces restaurant ownership rules and is a central dependency for menu and order flows.
 
 Only the restaurant owner can request or confirm an image upload. The five-minute presigned POST policy enforces a 10 MiB limit and exact content type. Confirmation validates the staging key under `pending/restaurants/{restaurantId}/{cover|logo}/`, checks the image bytes, and copies it to a separate permanent key before persisting `coverImageUrl` or `logoUrl`; both nullable columns are added by a forward TypeORM migration. Staging objects expire after one day.
+
+Public restaurant reads are intentionally DTO-stripped to prevent leaking `ownerId` or other management metadata. `GET /restaurants/me` returns only the currently authenticated owner’s restaurants. The `GET /restaurants/:id/ownership/:userId` route is internal-only: the API Gateway blocks public probes, and restaurant-service still rejects unauthenticated, untrusted, expired, or replayed HMAC-signed requests before asserting ownership.

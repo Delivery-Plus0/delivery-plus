@@ -7,6 +7,8 @@ export interface AppConfig {
   databaseUrl: string;
   jwtSecret: string;
   restaurantServiceUrl: string;
+  internalAuthService: string;
+  internalAuthSecret: string;
 }
 
 export function loadConfig(): AppConfig {
@@ -23,5 +25,15 @@ export function loadConfig(): AppConfig {
     databaseUrl: process.env.DATABASE_URL as string,
     jwtSecret: process.env.JWT_SECRET as string,
     restaurantServiceUrl: process.env.RESTAURANT_SERVICE_URL || 'http://localhost:3003',
+    internalAuthService: process.env.INTERNAL_AUTH_SERVICE || 'menu-service',
+    internalAuthSecret: requireInternalAuthSecret(),
   };
+}
+
+function requireInternalAuthSecret(): string {
+  const secret = process.env.INTERNAL_AUTH_SECRET;
+  if (!secret && process.env.NODE_ENV === 'production') {
+    throw new Error('Missing required environment variables: INTERNAL_AUTH_SECRET');
+  }
+  return secret || 'local-internal-auth-development-only';
 }

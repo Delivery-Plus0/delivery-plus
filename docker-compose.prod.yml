@@ -129,6 +129,8 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER_URLENCODED:?POSTGRES_USER_URLENCODED must be set}:${POSTGRES_PASSWORD_URLENCODED:?POSTGRES_PASSWORD_URLENCODED must be set}@postgres:5432/restaurant_service
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+      INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:?INTERNAL_AUTH_SECRET must be set}
+      INTERNAL_AUTH_ALLOWED_SERVICES: ${INTERNAL_AUTH_ALLOWED_SERVICES:-menu-service,order-service}
       AWS_REGION: ${AWS_REGION:-us-east-1}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:?AWS_ACCESS_KEY_ID must be set}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:?AWS_SECRET_ACCESS_KEY must be set}
@@ -158,6 +160,8 @@ services:
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
       RESTAURANT_SERVICE_URL: http://restaurant-service:3003
+      INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:?INTERNAL_AUTH_SECRET must be set}
+      INTERNAL_AUTH_SERVICE: menu-service
       AWS_REGION: ${AWS_REGION:-us-east-1}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:?AWS_ACCESS_KEY_ID must be set}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:?AWS_SECRET_ACCESS_KEY must be set}
@@ -214,6 +218,8 @@ services:
       CART_SERVICE_URL: http://cart-service:3005
       RESTAURANT_SERVICE_URL: http://restaurant-service:3003
       USER_SERVICE_URL: http://user-service:3002
+      INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:?INTERNAL_AUTH_SECRET must be set}
+      INTERNAL_AUTH_SERVICE: order-service
     healthcheck:
       test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3006/health']
       interval: 5s

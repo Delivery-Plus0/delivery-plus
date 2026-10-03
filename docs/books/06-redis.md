@@ -19,7 +19,7 @@ dc exec redis redis-cli
 | `ratelimit:{routePath}:{userId or IP}` | integer counter, TTL = window | every rate-limited service | `shared/src/redis/rate-limit.guard.ts`, `shared/src/redis/rate-limiter.service.ts` |
 | `restaurant:{id}`, `menu:{restaurantId}`, `menuitem:{id}` | string (JSON), cache | restaurant-, menu-service | `shared/src/redis/cache.service.ts` |
 | `driver:location:{userId}` | string (JSON), `LOCATION_TTL_SECONDS` = 300 | tracking-service | `services/tracking-service/src/repositories/location.repository.ts` |
-| `internal-auth:nonce:{service}:{nonce}` | string, 600 s, `SET NX` | user-service | `services/user-service/src/guards/internal-auth.guard.ts` |
+| `internal-auth:nonce:{service}:{nonce}` | string, 600 s, `SET NX` | user-service, restaurant-service | `services/user-service/src/guards/internal-auth.guard.ts`, `services/restaurant-service/src/guards/internal-auth.guard.ts` |
 | `kafka:idempotency:{group}:{eventId}` | `lease:<token>` (60 s) or `processed` (7 days) | order-, notification-service consumers | `shared/src/kafka/durable-event-idempotency.service.ts` |
 
 Persistence: `redis-server --appendonly yes` with the `redis_data` volume (`docker-compose.base.yml`). **All services share one Redis instance** (database 0).

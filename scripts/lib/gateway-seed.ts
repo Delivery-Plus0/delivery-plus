@@ -29,7 +29,6 @@ export type RestaurantSeed = {
 };
 export type Restaurant = {
   id: string;
-  ownerId: string;
   name: string;
   status: string;
   coverImageUrl?: string | null;
@@ -167,12 +166,8 @@ export async function seedRestaurant(
   owner: Auth,
 ): Promise<{ restaurant: Restaurant; items: Map<string, MenuItem> }> {
   log(`• ${seed.name}`);
-  const existing = await get<{ items: Restaurant[] }>(
-    `/api/restaurants?search=${encodeURIComponent(seed.name)}&limit=50`,
-  );
-  let restaurant = existing.items.find(
-    (item) => item.name === seed.name && item.ownerId === owner.userId,
-  );
+  const owned = await get<Restaurant[]>('/api/restaurants/me', owner);
+  let restaurant = owned.find((item) => item.name === seed.name);
 
   if (!restaurant) {
     restaurant = await post<Restaurant>(

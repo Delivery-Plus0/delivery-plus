@@ -29,6 +29,7 @@ describe('RestaurantsService', () => {
   beforeEach(() => {
     repo = {
       findById: jest.fn(),
+      findByOwner: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
       list: jest.fn(),
@@ -48,6 +49,16 @@ describe('RestaurantsService', () => {
   it('getById throws NotFoundError when missing', async () => {
     repo.findById.mockResolvedValue(null);
     await expect(service.getById('missing')).rejects.toThrow(NotFoundError);
+  });
+
+  it('returns only customer-facing fields from a public restaurant read', async () => {
+    repo.findById.mockResolvedValue(baseRestaurant);
+
+    const result = await service.getById('r1');
+
+    expect(result).toMatchObject({ id: 'r1', name: 'Pizza Place', address: '123 Main St' });
+    expect(result).not.toHaveProperty('ownerId');
+    expect(result).not.toHaveProperty('createdAt');
   });
 
   it('update throws ForbiddenError when requester is not the owner', async () => {
@@ -100,6 +111,17 @@ describe('RestaurantsService', () => {
     expect(result.total).toBe(1);
     expect(result.items).toHaveLength(1);
     expect(result.totalPages).toBe(1);
+    expect(result.items[0]).not.toHaveProperty('ownerId');
+  });
+
+  it('selects owned restaurants using the authenticated owner id', async () => {
+    repo.findByOwner.mockResolvedValue([baseRestaurant]);
+
+    const result = await service.listMine('owner-1');
+
+    expect(repo.findByOwner).toHaveBeenCalledWith('owner-1');
+    expect(result).toHaveLength(1);
+    expect(result[0]).not.toHaveProperty('ownerId');
   });
 
   it('rejects a mismatched image key before persisting a restaurant image URL', async () => {

@@ -1,6 +1,15 @@
 import { Body, Controller, Get, Headers, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiHeader } from '@nestjs/swagger';
-import { JwtAuthGuard, CurrentUser, JwtPayload, RateLimit, RateLimitGuard } from '@food-delivery/shared';
+import {
+  JwtAuthGuard,
+  CurrentUser,
+  JwtPayload,
+  RateLimit,
+  RateLimitGuard,
+  Roles,
+  RolesGuard,
+  UserRole,
+} from '@food-delivery/shared';
 import { OrdersService } from '../services/orders.service';
 import { UpdateOrderStatusDto } from '../dto/update-order-status.dto';
 import { ListOrdersQueryDto } from '../dto/list-orders-query.dto';
@@ -43,6 +52,8 @@ export class OrdersController {
   }
 
   @Get('restaurant/:restaurantId')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.RESTAURANT_OWNER)
   @ApiOperation({ summary: 'List orders for a restaurant (owner only)' })
   listForRestaurant(
     @Param('restaurantId') restaurantId: string,

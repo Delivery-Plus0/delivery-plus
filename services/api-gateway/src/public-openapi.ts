@@ -42,10 +42,10 @@ export const SERVICE_DEFINITIONS = [
     routes: [
       { method: 'post', path: '', summary: 'Create a restaurant', auth: true, statusCode: 201 },
       { method: 'get', path: '', summary: 'List restaurants', auth: false, statusCode: 200 },
+      { method: 'get', path: '/me', summary: 'List restaurants owned by the current restaurant owner', auth: true, statusCode: 200 },
       { method: 'get', path: '/:id', summary: 'Get a restaurant by id', auth: false, statusCode: 200 },
       { method: 'patch', path: '/:id', summary: 'Update restaurant details', auth: true, statusCode: 200 },
       { method: 'patch', path: '/:id/status', summary: 'Update restaurant status', auth: true, statusCode: 200 },
-      { method: 'get', path: '/:id/ownership/:userId', summary: 'Check restaurant ownership', auth: false, statusCode: 200 },
       { method: 'post', path: '/:id/image-upload-url', summary: 'Create a presigned restaurant image upload URL', auth: true, statusCode: 201 },
       { method: 'post', path: '/:id/image-confirm', summary: 'Confirm and save a restaurant image', auth: true, statusCode: 201 },
     ],

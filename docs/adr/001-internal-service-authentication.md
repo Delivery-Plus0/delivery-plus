@@ -5,7 +5,7 @@
 
 ## Context
 
-The platform uses JWTs for end-user authentication, but service-to-service HTTP calls currently rely on Docker network reachability and route conventions. The clearest example is `auth-service` calling `POST /internal/users` on `user-service` without a verifiable service identity.
+The platform uses JWTs for end-user authentication. Cross-service HTTP calls need a separate verifiable service identity; this contract was first applied to profile creation and is also used for restaurant ownership verification.
 
 The repository runs services in Docker Compose and does not currently depend on a service mesh, cloud IAM, or certificate-management platform. The internal trust model therefore needs to be explicit, implementable with environment configuration, and separate from end-user JWT claims.
 
@@ -24,12 +24,12 @@ The implementation contract is:
   - `X-Internal-Signature`: HMAC-SHA256 signature
 - The signed canonical input includes the HTTP method, normalized request path, timestamp, nonce, and a SHA-256 hash of the request body.
 - The receiver validates the caller identity, timestamp skew, signature, and nonce replay status before executing the internal operation.
-- Internal routes are not exposed through the public API Gateway. Gateway routing must not be treated as the authentication mechanism.
+- Prefer not routing internal-only endpoints through the public API Gateway. If an internal route is proxied, HMAC validation remains mandatory; gateway routing must not be treated as authentication.
 - Invalid, missing, expired, or replayed internal credentials return `401` or `403` without executing the operation.
 - User JWTs remain required for user-facing routes. A valid user JWT does not authorize an internal service route by itself.
 - Correlation IDs remain observability metadata and are not authentication credentials.
 
-The first application target is `auth-service` -> `user-service` for `POST /internal/users`. DP-010 applies this contract to that endpoint. User-service also enforces profile ownership and auth/profile identity mapping on user-facing profile reads and updates.
+The initial application target is `auth-service` -> `user-service` for `POST /internal/users` (DP-010). The contract also protects `GET /restaurants/:id/ownership/:userId`: restaurant-service accepts only the configured `menu-service` and `order-service` callers. Both callers sign the method and path with the shared secret, timestamp, nonce, and empty-body hash. User-service enforces profile ownership and auth/profile identity mapping on user-facing profile reads and updates.
 
 ## Consequences
 
@@ -37,9 +37,9 @@ The first application target is `auth-service` -> `user-service` for `POST /inte
 - Request tampering, stale signatures, and basic replay attempts can be rejected.
 - The design works with the current Docker Compose environment and does not require a mesh or cloud provider.
 - Secrets must be provisioned and rotated per service relationship.
-- A replay store is required for nonce enforcement; Redis is the current repository-compatible candidate, but the implementation must define TTL and failure behavior before rollout.
+- Redis enforces nonce replay protection with `SET NX` and a 600-second TTL; the guards reject timestamps more than 300 seconds from the current clock.
 - Signing and verification must be shared carefully to avoid differences in path normalization, body serialization, or clock handling.
-- The first implementation protects `POST /internal/users`; broader endpoint classification and additional callers are follow-up work.
+- The contract is implemented for profile creation and restaurant ownership verification. Other cross-service boundaries still need to be classified and protected individually.
 
 ## Alternatives considered
 

@@ -25,7 +25,7 @@ OWNER_JSON=$(login owner@example.com); OWNER=$(echo "$OWNER_JSON" | j accessToke
 DRIVER=$(login driver@example.com | j accessToken)
 
 # the seeded restaurant owned by owner@example.com, and an available menu item
-RID=$(curl -s "$API/api/restaurants?page=1&limit=50" | j "items.find(r => r.ownerId === '$OWNER_ID' && r.status === 'OPEN').id")
+RID=$(curl -s "$API/api/restaurants/me" -H "Authorization: Bearer $OWNER" | j "find(r => r.status === 'OPEN').id")
 ITEM=$(curl -s "$API/api/menus/restaurants/$RID/menu" | j "items.find(i => i.available).id")
 
 # reset rate-limit counters (local stacks only)

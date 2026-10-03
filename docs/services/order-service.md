@@ -35,7 +35,7 @@ Every new order carries a drop-off address, **copied at checkout and never updat
 
 ## Dependencies
 - Reads the current cart from `cart-service`
-- Validates restaurant ownership and status from `restaurant-service`
+- Validates restaurant ownership through signed HMAC internal-auth requests and reads restaurant status from `restaurant-service`
 - Reads the customer's profile address from `user-service` when checkout sends none
 - Responds to payment and delivery events via Kafka consumers
 - Persists order data in PostgreSQL
@@ -60,6 +60,8 @@ From `services/order-service/src/config/app-config.ts`:
 - `JWT_SECRET`
 - `CART_SERVICE_URL` (default: `http://localhost:3005`)
 - `RESTAURANT_SERVICE_URL` (default: `http://localhost:3003`)
+- `INTERNAL_AUTH_SECRET` (required in production; shared with restaurant-service)
+- `INTERNAL_AUTH_SERVICE` (default: `order-service`)
 - `USER_SERVICE_URL` (default: `http://localhost:3002`), used to read the customer's profile address at checkout
 - `KAFKA_BROKER` (used in Docker Compose as `kafka:29092`)
 - `PORT` (default: `3006`)

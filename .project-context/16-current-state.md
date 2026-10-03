@@ -32,8 +32,8 @@ Snapshot of `dev` after PR #110 (2026-10-02): Phase 1 and 2 cores and all of Pha
 | --- | --- | --- |
 | Registration, login, JWT, roles | Implemented | auth-service issues JWTs; shared guards enforce roles in each service. Public registration accepts only self-service roles (CUSTOMER default, RESTAURANT_OWNER, DRIVER; checked in the DTO and again in the service); ADMIN cannot be self-assigned (#105) |
 | Email verification and failed-login lockout | Implemented | auth-service; Redis-backed rate limiting on auth routes |
-| Service-to-service auth for internal routes | Implemented | HMAC-signed requests with one-time Redis nonces ([ADR 001](../docs/adr/001-internal-service-authentication.md)) |
-| Restaurants, menus, carts | Implemented | Menu ownership is checked against restaurant-service; cart items are validated against menu-service |
+| Service-to-service auth for internal routes | Implemented | HMAC-signed requests with one-time Redis nonces ([ADR 001](../docs/adr/001-internal-service-authentication.md)); trusted internal callers such as menu-service and order-service must present a valid signed identity before they can query the restaurant ownership boundary. |
+| Restaurants, menus, carts | Implemented | Restaurant owners can list only their own restaurants via `GET /restaurants/me`; public read DTOs strip owner-only fields; the `GET /restaurants/:id/ownership/:userId` route is guarded by `InternalAuthGuard` before asserting ownership; and menu/order clients now sign the internal ownership check with the shared HMAC contract. |
 | Order creation and lifecycle | Implemented | Idempotency-Key support on creation; state machine in `shared/src/types/enums.ts`; status writes are compare-and-set. Every new order copies a drop-off address at checkout (body `deliveryAddress`, or the customer's profile address; 400 if neither) (#95) |
 | Payments | Implemented (simulated) | No real payment provider; durable idempotency, compare-and-set state machine, deterministic event IDs |
 | Delivery and driver lifecycle | Implemented | **Automatic dispatch** (#97): delivery-service consumes `order.ready_for_pickup`, creates the delivery and assigns a driver; with no driver free the delivery waits and a sweep (`AUTO_DISPATCH_SWEEP_MS`, default 15 s) retries. Manual create/assign remain for admins and the order's restaurant owner. Driver claims are exclusive and compare-and-set; drivers only go online/offline themselves and cannot leave BUSY (#33). Drivers find their job with `GET /deliveries/me/current` (#96). Delivery reads follow JWT → order ownership (checked by order-service with the requester's token) or assigned driver or admin. Delivery actions are retry-safe. Driver profiles require a JWT: admin/service system token, or the driver themself |
@@ -65,6 +65,7 @@ No workflow collects test coverage.
 
 | PR | Change |
 | --- | --- |
+| branch `feat/restaurant-ownership-boundaries` | Restaurant ownership boundary hardening (#59, not merged yet): `GET /restaurants/me`, public restaurant DTOs, HMAC-protected ownership verification, signed menu/order internal clients, restaurant-order role guard, and gateway blocking of public ownership probes. |
 | #110 | Automatic dispatch on `order.ready_for_pickup` with a waiting-delivery sweep; Redis + durable idempotency in delivery-service; concurrent create maps to 409; seeds and `npm run e2e` no longer dispatch by hand; seed-e2e drops scenario S3 (closes #97) |
 | #109 | `GET /deliveries/me/current`: the calling driver's active delivery with pickup, drop-off, order summary and next actions; 204 when none (closes #96) |
 | #108 | Orders snapshot the delivery address at checkout (`CreateOrderDto`, profile fallback, migration `003-order-delivery-address`) (closes #95) |

@@ -17,7 +17,7 @@ From `services/menu-service/src/controllers/menu.controller.ts`:
 - `POST /menu-items/:id/image-confirm` – verify the uploaded image and save its public URL (restaurant owner only)
 
 ## Dependencies
-- Calls `restaurant-service` to validate ownership via `src/common/restaurant-service.client.ts`
+- Calls `restaurant-service` to validate ownership via `src/common/restaurant-service.client.ts`; these checks use the shared HMAC internal-auth contract
 - Uses the shared S3 storage service for menu item image objects
 - Stores menu data in PostgreSQL
 - Used by `cart-service` during cart item validation through `menu-service.client.ts`
@@ -31,6 +31,8 @@ From `services/menu-service/src/config/app-config.ts`:
 - `DATABASE_URL`
 - `JWT_SECRET`
 - `RESTAURANT_SERVICE_URL` (default: `http://localhost:3003`)
+- `INTERNAL_AUTH_SECRET` (required in production; shared with restaurant-service)
+- `INTERNAL_AUTH_SERVICE` (default: `menu-service`)
 - `PORT` (default: `3004`)
 - `NODE_ENV` (default: `development`)
 - `AWS_REGION`, `AWS_S3_BUCKET`, and `AWS_PUBLIC_BASE_URL`; S3 endpoint and credentials are configurable for the local media-storage service (SeaweedFS's S3 gateway) or a cloud provider

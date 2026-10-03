@@ -82,7 +82,7 @@ For every route, answer two questions: "which roles?" and "whose objects?". If y
 | Driver location | `GET /tracking/driver/:userId` public | the driver themself or admin; customers go through delivery ownership | [03](case-studies/03-public-driver-endpoint.md) |
 | Notifications | any user could mark any notification read | owner only, 404 otherwise | [04](case-studies/04-notification-ownership.md) |
 | Refunds | a customer could refund their own completed payment, even after delivery | admin only | [Book 25](25-payment-systems.md) |
-| **Still open** | restaurant `ownerId` returned in public restaurant payloads; `GET /restaurants/:id/ownership/:userId` is unauthenticated (an ownership oracle) | — | issue #59 |
+| **Fixed (#59, pending PR merge)** | restaurant `ownerId` returned in public restaurant payloads; `GET /restaurants/:id/ownership/:userId` was an unauthenticated ownership oracle | public restaurant DTOs omit management fields; owner selection is `GET /restaurants/me`; ownership verification requires HMAC internal-auth and is blocked at the gateway | issue #59 |
 | **Fixed (#33)** | a BUSY driver could set themselves AVAILABLE and take a second delivery; drivers may now only go online/offline (403 while BUSY) | `driver-transition-rules.ts` | issue #33 |
 | **Fixed (PR #105)**; one part still open | public registration accepted `role: "ADMIN"`. Fixed with an allow-list plus a service re-check. **Still open:** DRIVER/RESTAURANT_OWNER are self-assigned without any approval | — | [case study 21](case-studies/21-self-registered-admin.md) |
 
@@ -128,7 +128,7 @@ The blast radius of a secret = everything that trusts it.
 | Secret | Used by | Blast radius |
 | --- | --- | --- |
 | `JWT_SECRET` (HS256) | every service verifies; auth-service, payment-, delivery-, tracking-service sign | anyone holding it can mint any user's token, including ADMIN — [case study 18](case-studies/18-system-token.md) |
-| `INTERNAL_AUTH_SECRET` (HMAC) | auth-service signs, user-service verifies (`docs/adr/001-internal-service-authentication.md`) | can create user profiles |
+| `INTERNAL_AUTH_SECRET` (HMAC) | auth-service -> user-service; menu-service and order-service -> restaurant-service (`docs/adr/001-internal-service-authentication.md`) | can create user profiles and assert restaurant ownership |
 | `POSTGRES_PASSWORD` (superuser) | all DB-backed services | all nine databases |
 | S3 access keys | user-, restaurant-, menu-service | the media bucket |
 - Local defaults live in `.env.example` and Compose files; the prod overlay requires real values (`${VAR:?…}`) and fails fast without them.

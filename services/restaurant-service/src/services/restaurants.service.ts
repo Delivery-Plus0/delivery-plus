@@ -12,6 +12,7 @@ import { CreateRestaurantDto } from '../dto/create-restaurant.dto';
 import { UpdateRestaurantDto } from '../dto/update-restaurant.dto';
 import { UpdateRestaurantStatusDto } from '../dto/update-restaurant-status.dto';
 import { ListRestaurantsQueryDto } from '../dto/list-restaurants-query.dto';
+import { PublicRestaurantDto } from '../dto/public-restaurant.dto';
 import { Restaurant } from '../entities/restaurant.entity';
 
 @Injectable()
@@ -28,7 +29,16 @@ export class RestaurantsService {
     return this.restaurants.create({ ownerId, ...dto });
   }
 
-  async getById(id: string): Promise<Restaurant> {
+  async getById(id: string): Promise<PublicRestaurantDto> {
+    return this.toPublicRestaurant(await this.getEntityById(id));
+  }
+
+  async listMine(ownerId: string): Promise<PublicRestaurantDto[]> {
+    const restaurants = await this.restaurants.findByOwner(ownerId);
+    return restaurants.map((restaurant) => this.toPublicRestaurant(restaurant));
+  }
+
+  private async getEntityById(id: string): Promise<Restaurant> {
     const key = `restaurant:${id}`;
     return this.cache.getOrSet(key, async () => {
       const restaurant = await this.restaurants.findById(id);
@@ -39,10 +49,10 @@ export class RestaurantsService {
     }, 30);
   }
 
-  async list(query: ListRestaurantsQueryDto): Promise<PaginatedResult<Restaurant>> {
+  async list(query: ListRestaurantsQueryDto): Promise<PaginatedResult<PublicRestaurantDto>> {
     const [items, total] = await this.restaurants.list(query);
     return {
-      items,
+      items: items.map((restaurant) => this.toPublicRestaurant(restaurant)),
       page: query.page,
       limit: query.limit,
       total,
@@ -68,7 +78,7 @@ export class RestaurantsService {
     if (requesterRole !== UserRole.ADMIN) {
       await this.assertOwnership(id, requesterId);
     } else {
-      await this.getById(id);
+      await this.getEntityById(id);
     }
     const updated = await this.restaurants.update(id, { status: dto.status });
     await this.cache.del(`restaurant:${id}`);
@@ -111,10 +121,22 @@ export class RestaurantsService {
 
   /** Used by menu-service (via HTTP) to confirm the caller owns the restaurant. */
   async assertOwnership(id: string, requesterId: string): Promise<Restaurant> {
-    const restaurant = await this.getById(id);
+    const restaurant = await this.getEntityById(id);
     if (restaurant.ownerId !== requesterId) {
       throw new ForbiddenError('You do not own this restaurant');
     }
     return restaurant;
+  }
+
+  private toPublicRestaurant(restaurant: Restaurant): PublicRestaurantDto {
+    return {
+      id: restaurant.id,
+      name: restaurant.name,
+      description: restaurant.description,
+      coverImageUrl: restaurant.coverImageUrl,
+      logoUrl: restaurant.logoUrl,
+      address: restaurant.address,
+      status: restaurant.status,
+    };
   }
 }

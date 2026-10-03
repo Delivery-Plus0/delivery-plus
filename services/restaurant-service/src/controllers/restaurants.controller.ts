@@ -8,8 +8,9 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiOkResponse } from '@nestjs/swagger';
 import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, UserRole } from '@food-delivery/shared';
+import { InternalAuthGuard } from '../guards/internal-auth.guard';
 import { RestaurantsService } from '../services/restaurants.service';
 import { CreateRestaurantDto } from '../dto/create-restaurant.dto';
 import { UpdateRestaurantDto } from '../dto/update-restaurant.dto';
@@ -17,6 +18,7 @@ import { UpdateRestaurantStatusDto } from '../dto/update-restaurant-status.dto';
 import { ListRestaurantsQueryDto } from '../dto/list-restaurants-query.dto';
 import { CreateRestaurantImageUploadUrlDto } from '../dto/create-restaurant-image-upload-url.dto';
 import { ConfirmRestaurantImageUploadDto } from '../dto/confirm-restaurant-image-upload.dto';
+import { PublicRestaurantDto, PublicRestaurantListResponseDto } from '../dto/public-restaurant.dto';
 
 @ApiTags('restaurants')
 @Controller('restaurants')
@@ -34,12 +36,24 @@ export class RestaurantsController {
 
   @Get()
   @ApiOperation({ summary: 'List restaurants (public, paginated/filterable/sortable)' })
+  @ApiOkResponse({ type: PublicRestaurantListResponseDto })
   list(@Query() query: ListRestaurantsQueryDto) {
     return this.restaurantsService.list(query);
   }
 
+  @Get('me')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.RESTAURANT_OWNER)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'List restaurants owned by the current restaurant owner' })
+  @ApiOkResponse({ type: PublicRestaurantDto, isArray: true })
+  listMine(@CurrentUser() user: JwtPayload) {
+    return this.restaurantsService.listMine(user.sub);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get a restaurant by id (public)' })
+  @ApiOkResponse({ type: PublicRestaurantDto })
   getById(@Param('id') id: string) {
     return this.restaurantsService.getById(id);
   }
@@ -97,8 +111,9 @@ export class RestaurantsController {
   }
 
   @Get(':id/ownership/:userId')
+  @UseGuards(InternalAuthGuard)
   @ApiOperation({
-    summary: 'Internal: check whether userId owns restaurant id (used by menu-service)',
+    summary: 'Internal: check whether userId owns restaurant id (used by menu-service and order-service)',
   })
   async checkOwnership(@Param('id') id: string, @Param('userId') userId: string) {
     await this.restaurantsService.assertOwnership(id, userId);

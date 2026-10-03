@@ -7,6 +7,7 @@ import { RestaurantsService } from '../../services/restaurants.service';
 import { RestaurantsController } from '../../controllers/restaurants.controller';
 import { APP_CONFIG, AppConfig } from '../../config/app-config';
 import { S3StorageService } from '@food-delivery/shared';
+import { InternalAuthGuard } from '../../guards/internal-auth.guard';
 
 @Module({
   imports: [
@@ -17,6 +18,6 @@ import { S3StorageService } from '@food-delivery/shared';
     }),
   ],
   controllers: [RestaurantsController],
-  providers: [RestaurantsService, RestaurantsRepository, S3StorageService],
+  providers: [RestaurantsService, RestaurantsRepository, S3StorageService, InternalAuthGuard],
 })
 export class RestaurantsModule {}

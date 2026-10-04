@@ -2,7 +2,7 @@
 
 A one-page snapshot of what the platform does today, what is partial, and what is missing. Read it right after [01-project-overview.md](./01-project-overview.md) so later files are read with the right expectations.
 
-Snapshot of `dev` after PR #110 (2026-10-02): Phase 1 and 2 cores and all of Phase 3 (automatic dispatch + driver contracts) are merged. When code and this file disagree, the code wins; update this file in the same PR that changes the behavior.
+Snapshot of `dev` with the transactional outbox (#98, 2026-10-04): Phase 1 and 2 cores, all of Phase 3 (automatic dispatch + driver contracts) and Phase 4 (driver and restaurant clients, in their own private repos) are merged. When code and this file disagree, the code wins; update this file in the same PR that changes the behavior.
 
 ## Platform at a glance
 
@@ -37,11 +37,11 @@ Snapshot of `dev` after PR #110 (2026-10-02): Phase 1 and 2 cores and all of Pha
 | Order creation and lifecycle | Implemented | Idempotency-Key support on creation; state machine in `shared/src/types/enums.ts`; status writes are compare-and-set. Every new order copies a drop-off address at checkout (body `deliveryAddress`, or the customer's profile address; 400 if neither) (#95) |
 | Payments | Implemented (simulated) | No real payment provider; durable idempotency, compare-and-set state machine, deterministic event IDs |
 | Delivery and driver lifecycle | Implemented | **Automatic dispatch** (#97): delivery-service consumes `order.ready_for_pickup`, creates the delivery and assigns a driver; with no driver free the delivery waits and a sweep (`AUTO_DISPATCH_SWEEP_MS`, default 15 s) retries. Manual create/assign remain for admins and the order's restaurant owner. Driver claims are exclusive and compare-and-set; drivers only go online/offline themselves and cannot leave BUSY (#33). Drivers find their job with `GET /deliveries/me/current` (#96). Delivery reads follow JWT → order ownership (checked by order-service with the requester's token) or assigned driver or admin. Delivery actions are retry-safe. Driver profiles require a JWT: admin/service system token, or the driver themself |
-| Delivery Kafka events | Implemented | Every delivery transition publishes to `delivery.events` after the HTTP syncs succeed; order-service converges from them (tolerant of duplicates/stale events). driver-service consumes none (availability is set synchronously); delivery-service consumes `order.ready_for_pickup` |
+| Delivery Kafka events | Implemented | Every delivery transition stages its `delivery.events` event in the outbox with the delivery write (the HTTP syncs run after the commit); order-service converges from them (tolerant of duplicates/stale events). driver-service consumes none (availability is set synchronously); delivery-service consumes `order.ready_for_pickup` |
 | Tracking | Implemented | Last-known driver location in Redis with a TTL. `GET /tracking/driver/:userId` requires JWT (the driver themself or admin); customers go through `GET /tracking/delivery/:id`, which inherits delivery ownership |
 | Notifications | Partial | Order-confirmed notifications are stored (one per order: order status writes are compare-and-set, so racing writers publish once); payment and delivery handlers are no-ops. Mark-as-read is scoped to the owner (404 otherwise) |
 | Media uploads (S3) | Implemented | Presigned POST, byte verification, content-addressed keys; see [15-media-and-storage.md](./15-media-and-storage.md) |
-| Kafka consumer reliability | Implemented (no outbox) | Durable Redis idempotency per consumer group (order-service, notification-service, delivery-service); 3 attempts, then `<topic>.dlq` with failure headers; `npm run kafka:dlq` lists/replays. Events keyed by `orderId`; order/delivery event ids are deterministic. Redis runs with AOF persistence. Still missing: transactional outbox, `customerId` in payment/delivery payloads. See [05-event-driven-design.md](./05-event-driven-design.md) |
+| Kafka reliability | Implemented (transactional outbox for order and delivery events, #98) | Durable Redis idempotency per consumer group (order-service, notification-service, delivery-service); 3 attempts, then `<topic>.dlq` with failure headers; `npm run kafka:dlq` lists/replays. Events keyed by `orderId`; order/delivery event ids are deterministic. Redis runs with AOF persistence. Still missing: transactional outbox, `customerId` in payment/delivery payloads. See [05-event-driven-design.md](./05-event-driven-design.md) |
 | Gateway health | Implemented | `GET /health` and `GET /health/live` (liveness only, no dependency checks) |
 | Public API contract | Implemented | Generated OpenAPI at `docs/openapi/delivery-plus-public.json`, checked in CI |
 | Push/email delivery, real payment provider, observability stack | Not implemented | Roadmap |
@@ -86,9 +86,9 @@ No workflow collects test coverage.
 
 Tracked as GitHub milestones (Phase 1–9). Phase 3 (automatic dispatch + driver contracts) is complete.
 
-1. **Phase 4 · Driver + restaurant clients**: #99 driver app MVP (its backend contracts exist: online/offline, `me/current`, pickup/start/complete, location), then #100 restaurant dashboard. Each client ships with `testID`s, a Maestro suite and CI from its first commit.
-2. **Sprint 0b**: the customer app has no GitHub remote yet, so its CI and Maestro suites run only locally.
-3. **Kafka follow-ups**: #98 transactional outbox (now more important: a lost `order.ready_for_pickup` means no automatic delivery), #5 `customerId` in payloads + notification handlers, #7 graceful shutdown.
+1. **Phase 4 is complete.** Three private client repos, each with CI, Security and E2E workflows: `delivery-plus-customer-app`, `delivery-plus-driver-app` (#99, closed) and `delivery-plus-restaurant-app` (#100, closed). The business flow runs through all three UIs with no API stand-ins (customer-app #20).
+2. **#98 transactional outbox**: order and delivery events are published if and only if their change committed. Left in #98: reconciling a driver release that failed and was never retried.
+3. **Next**: Phase 6 notifications (#5 `customerId` in payloads + handlers), #125 (owners must not set or lift `SUSPENDED`), #7 graceful shutdown.
 4. **Open findings from the 2026-10-01 code review** (most unfiled): see [13-known-issues-and-gotchas.md](./13-known-issues-and-gotchas.md).
 
 Open gaps and technical debt are listed in [13-known-issues-and-gotchas.md](./13-known-issues-and-gotchas.md).

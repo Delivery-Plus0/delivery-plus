@@ -1,8 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { DeliveryStatus } from '@food-delivery/shared';
+import { BaseEvent, DeliveryStatus, TOPICS, stageEvent } from '@food-delivery/shared';
 import { Delivery } from '../entities/delivery.entity';
+
+/** Builds the event describing the change from the delivery as written (staged in the same transaction). */
+export type DeliveryEventBuilder = (delivery: Delivery) => BaseEvent<unknown>;
 
 @Injectable()
 export class DeliveriesRepository {
@@ -38,16 +41,30 @@ export class DeliveriesRepository {
     });
   }
 
-  create(orderId: string): Promise<Delivery> {
-    return this.repo.save(this.repo.create({ orderId, status: DeliveryStatus.CREATED }));
+  /** Creates the delivery and stages its delivery.created event in one transaction (outbox, #98). */
+  create(orderId: string, event: DeliveryEventBuilder): Promise<Delivery> {
+    return this.repo.manager.transaction(async (manager) => {
+      const deliveries = manager.getRepository(Delivery);
+      const delivery = await deliveries.save(deliveries.create({ orderId, status: DeliveryStatus.CREATED }));
+      await stageEvent(manager, TOPICS.DELIVERY_EVENTS, event(delivery));
+      return delivery;
+    });
   }
 
   /**
    * Compare-and-set: applies the change only while the delivery is still in `from`. Returns null when
    * another request moved it first, so two concurrent writers (e.g. cancel and complete) cannot both win.
+   * Only the winner stages the event for the change, in the same transaction (outbox, #98).
    */
-  async transition(id: string, from: DeliveryStatus, data: Partial<Delivery>): Promise<Delivery | null> {
-    const result = await this.repo.update({ id, status: from }, data);
-    return result.affected ? this.findById(id) : null;
+  async transition(id: string, from: DeliveryStatus, data: Partial<Delivery>, event: DeliveryEventBuilder): Promise<Delivery | null> {
+    return this.repo.manager.transaction(async (manager) => {
+      const deliveries = manager.getRepository(Delivery);
+      const result = await deliveries.update({ id, status: from }, data);
+      if (!result.affected) return null;
+      const updated = await deliveries.findOne({ where: { id } });
+      if (!updated) return null;
+      await stageEvent(manager, TOPICS.DELIVERY_EVENTS, event(updated));
+      return updated;
+    });
   }
 }

@@ -36,7 +36,7 @@ Every service image is built from the root `Dockerfile` on `node:22-alpine`. For
 5. Drivers report locations to Tracking Service, which stores the latest location in Redis. Tracking combines delivery data with the driver location.
 6. Delivery completion updates delivery, order, and driver state through the implemented service calls, and every delivery transition is published to `delivery.events` (order-service converges from them).
 
-The current implementation does not provide a real payment provider, push/email delivery, or a transactional outbox for Kafka events. Those are roadmap items.
+Order and delivery events go through a transactional outbox (#98): written in the same transaction as the state change and published by a relay. The current implementation does not provide a real payment provider or push/email delivery. Those are roadmap items.
 
 ## Media storage
 

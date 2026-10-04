@@ -10,7 +10,6 @@ import {
   RestaurantStatus,
   UserRole,
   isTransitionAllowed,
-  KafkaProducerService,
   KafkaConsumerService,
   OrderEventType,
   PaymentEventType,
@@ -18,6 +17,7 @@ import {
   DeliveryEventType,
   DeliveryEvent,
   TOPICS,
+  OrderEvent,
   generateCorrelationId,
   lifecycleEventId,
 } from '@food-delivery/shared';
@@ -25,10 +25,41 @@ import { DeliveryAddress, OrdersRepository } from '../repositories/orders.reposi
 import { CartServiceClient } from '../common/cart-service.client';
 import { RestaurantServiceClient } from '../common/restaurant-service.client';
 import { UserServiceClient } from '../common/user-service.client';
+import { OutboxRelayService } from '../common/outbox-relay.service';
 import { isRoleAllowedForTransition } from '../common/order-transition-rules';
 import { UpdateOrderStatusDto } from '../dto/update-order-status.dto';
 import { CreateOrderDto } from '../dto/create-order.dto';
 import { Order } from '../entities/order.entity';
+
+/** The order event for each status an order can be moved to. */
+const ORDER_STATUS_EVENTS: Partial<Record<OrderStatus, OrderEventType>> = {
+  [OrderStatus.PAYMENT_PENDING]: OrderEventType.PAYMENT_PENDING,
+  [OrderStatus.CONFIRMED]: OrderEventType.CONFIRMED,
+  [OrderStatus.FAILED]: OrderEventType.FAILED,
+  [OrderStatus.CANCELLED]: OrderEventType.CANCELLED,
+  [OrderStatus.PREPARING]: OrderEventType.PREPARING,
+  [OrderStatus.READY_FOR_PICKUP]: OrderEventType.READY_FOR_PICKUP,
+  [OrderStatus.DRIVER_ASSIGNED]: OrderEventType.DRIVER_ASSIGNED,
+  [OrderStatus.PICKED_UP]: OrderEventType.PICKED_UP,
+  [OrderStatus.DELIVERED]: OrderEventType.DELIVERED,
+};
+
+/** The lifecycle event for an order as written; the eventId is stable per (order, event type). */
+function orderEvent(order: Order, eventType: OrderEventType): OrderEvent {
+  return {
+    eventId: lifecycleEventId(order.id, eventType),
+    eventType,
+    timestamp: new Date().toISOString(),
+    correlationId: generateCorrelationId(),
+    payload: {
+      orderId: order.id,
+      customerId: order.customerId,
+      restaurantId: order.restaurantId,
+      total: parseFloat(order.totalAmount),
+      status: order.status,
+    },
+  };
+}
 
 @Injectable()
 export class OrdersService implements OnModuleInit {
@@ -38,7 +69,7 @@ export class OrdersService implements OnModuleInit {
     private readonly orders: OrdersRepository,
     private readonly cartClient: CartServiceClient,
     private readonly restaurantClient: RestaurantServiceClient,
-    private readonly kafkaProducer: KafkaProducerService,
+    private readonly outbox: OutboxRelayService,
     private readonly kafkaConsumer: KafkaConsumerService,
     private readonly userClient: UserServiceClient,
   ) {}
@@ -136,23 +167,11 @@ export class OrdersService implements OnModuleInit {
         cart.total,
         idempotencyKey,
         delivery,
+        (created) => orderEvent(created, OrderEventType.CREATED),
       );
+      this.outbox.kick();
 
       await this.cartClient.clearCart(authHeader);
-
-      await this.kafkaProducer.publish(TOPICS.ORDER_EVENTS, {
-        eventId: lifecycleEventId(order.id, OrderEventType.CREATED),
-        eventType: OrderEventType.CREATED,
-        timestamp: new Date().toISOString(),
-        correlationId: generateCorrelationId(),
-        payload: {
-          orderId: order.id,
-          customerId: order.customerId,
-          restaurantId: order.restaurantId,
-          total: parseFloat(order.totalAmount),
-          status: order.status,
-        },
-      });
 
       return order;
     } catch (error) {
@@ -253,9 +272,12 @@ export class OrdersService implements OnModuleInit {
       throw new InvalidStateTransitionError('Order', order.status, dto.status);
     }
 
+    const eventType = ORDER_STATUS_EVENTS[dto.status] ?? OrderEventType.CREATED;
+
     // Compare-and-set so two writers racing to the same status (e.g. payment-service's HTTP sync and
-    // the payment.completed consumer) cannot both "win" and publish the event twice.
-    const updated = await this.orders.updateStatus(id, order.status, dto.status);
+    // the payment.completed consumer) cannot both "win"; only the winner stages the event, in the same
+    // transaction as the change (transactional outbox, #98).
+    const updated = await this.orders.updateStatus(id, order.status, dto.status, (changed) => orderEvent(changed, eventType));
     if (!updated) {
       const current = await this.findOrThrow(id);
       if (current.status === dto.status) {
@@ -263,34 +285,7 @@ export class OrdersService implements OnModuleInit {
       }
       throw new InvalidStateTransitionError('Order', current.status, dto.status);
     }
-
-    let eventType: OrderEventType;
-    switch (dto.status) {
-      case OrderStatus.PAYMENT_PENDING: eventType = OrderEventType.PAYMENT_PENDING; break;
-      case OrderStatus.CONFIRMED: eventType = OrderEventType.CONFIRMED; break;
-      case OrderStatus.FAILED: eventType = OrderEventType.FAILED; break;
-      case OrderStatus.CANCELLED: eventType = OrderEventType.CANCELLED; break;
-      case OrderStatus.PREPARING: eventType = OrderEventType.PREPARING; break;
-      case OrderStatus.READY_FOR_PICKUP: eventType = OrderEventType.READY_FOR_PICKUP; break;
-      case OrderStatus.DRIVER_ASSIGNED: eventType = OrderEventType.DRIVER_ASSIGNED; break;
-      case OrderStatus.PICKED_UP: eventType = OrderEventType.PICKED_UP; break;
-      case OrderStatus.DELIVERED: eventType = OrderEventType.DELIVERED; break;
-      default: eventType = OrderEventType.CREATED; break;
-    }
-
-    await this.kafkaProducer.publish(TOPICS.ORDER_EVENTS, {
-      eventId: lifecycleEventId(updated!.id, eventType),
-      eventType,
-      timestamp: new Date().toISOString(),
-      correlationId: generateCorrelationId(),
-      payload: {
-        orderId: updated!.id,
-        customerId: updated!.customerId,
-        restaurantId: updated!.restaurantId,
-        total: parseFloat(updated!.totalAmount),
-        status: updated!.status,
-      },
-    });
+    this.outbox.kick();
 
     return updated as Order;
   }

@@ -75,7 +75,7 @@ Delivery semantics (payment-service):
 
 delivery-service publishes one event per lifecycle transition: `delivery.created`, `delivery.driver_assigned`, `delivery.picked_up`, `delivery.in_transit`, `delivery.completed`, `delivery.cancelled`, with `{ deliveryId, orderId, driverId?, status }`.
 
-- Published after the HTTP syncs to order-service (order status) and driver-service (availability) succeed; those HTTP calls remain the authoritative path. Delivery actions are retry-safe: repeating an action on a delivery already in the target status re-runs the syncs and the publish (same `eventId`), so a failed driver release or order sync is repaired by the client's retry (see [docs/services/delivery-service.md](../docs/services/delivery-service.md#retry-safety)). Verified live: with order-service down, `complete` failed after releasing the driver; the retry delivered the order and re-published `delivery.completed` with the same id.
+- Staged in the transactional outbox together with the delivery write (#98) and published by the relay; the HTTP syncs to order-service (order status) and driver-service (availability) run after the commit. Because the event is committed with the write, order-service converges from it even when the HTTP order sync fails. Delivery actions are retry-safe: repeating an action on a delivery already in the target status re-runs the syncs (its event was already staged with the original write, same `eventId`), so a failed driver release is repaired by the client's retry (see [docs/services/delivery-service.md](../docs/services/delivery-service.md#retry-safety)). Verified live: with order-service down, `complete` failed after releasing the driver; the retry delivered the order and re-published `delivery.completed` with the same id.
 - order-service applies `driver_assigned`, `picked_up` and `completed` through `syncStatusFromEvent` (same status → no-op; stale → logged and skipped), so a late or redelivered event never fails the consumer.
 - driver-service does **not** consume delivery events. Its old release-on-completion consumer was removed: a late `delivery.completed` could free a driver already on the next delivery, and AVAILABLE → AVAILABLE is not a valid transition.
 - notification-service subscribes to `delivery.driver_assigned` but does nothing yet (no `customerId` in the payload).
@@ -155,9 +155,23 @@ Verified live (2026-10-01, dev stack):
 - Rewinding notification-service's offsets and restarting it redelivered 6 events; all 6 were skipped as processed, with no duplicate notifications.
 - A handler failure (notifications table renamed) and a poison message both reached `order.events.dlq`. After restoring the table, `--replay` created the notification exactly once and skipped the poison message; a second replay found nothing pending.
 
+### Transactional outbox (#98)
+
+order-service and delivery-service no longer publish from the request path. Each state change and the event describing it are written in **one database transaction**: the order insert or status compare-and-set, or the delivery insert or transition, plus a row in that service's `outbox_events` table (`stageEvent`). `OutboxRelay` (shared, one per service) publishes unpublished rows in insertion order and marks them published.
+
+- **Guarantee:** an event is published if and only if its state change committed, even if the service crashes right after the commit or Kafka is down. The write path kicks the relay after the commit, so latency stays as before; otherwise it polls every `OUTBOX_RELAY_INTERVAL_MS` (500 ms).
+- **At-least-once:** a crash after Kafka accepted a message but before the row was marked re-sends it. This is safe because event ids are deterministic and consumers deduplicate them. Staging the same event again (e.g. a retried action) is a no-op (`ON CONFLICT (event_id) DO NOTHING`).
+- **Order and concurrency:** a batch stops at the first failed publish (recorded as `attempts`/`last_error`) and is retried, so a later event for an order never overtakes an earlier one. A Postgres advisory lock (`pg_try_advisory_xact_lock`) lets one relay per database work at a time, so several instances neither double-publish nor reorder.
+- **Verified live** on the E2E stack, 9/9 checks:
+  1. With Kafka stopped, `READY_FOR_PICKUP` still succeeded and its event was staged.
+  2. order-service was killed before publishing; no delivery existed.
+  3. After Kafka and order-service restarted, the relay published the event and auto-dispatch created exactly one delivery.
+  4. No new dead letters, no rows left unpublished; the order reached DELIVERED.
+- payment-service keeps its status-marker re-publish approach.
+
 ### Remaining gaps
 
-- **No outbox.** order-service and delivery-service publish after their database write; a crash in between loses the event. payment-service re-publishes via its status markers.
+- **Driver release is not reconciled.** The outbox (below) guarantees the events, but a `complete` whose driver release fails and is never retried leaves the driver BUSY (driver-service consumes no delivery events). Remaining part of #98: a reconciliation step for the release.
 - **Payloads:** payment and delivery events carry no `customerId`, so notification-service cannot notify on them without a lookup.
 - **Handler time:** kafkajs heartbeats only between messages (session timeout 30 s). Handlers must stay well below that and the 60 s lease, or the lease needs renewal.
 - **No graceful shutdown hooks:** a stopped service stays in its consumer group until the session times out.

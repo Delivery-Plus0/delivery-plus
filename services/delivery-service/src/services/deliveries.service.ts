@@ -11,9 +11,8 @@ import {
   OrderStatus,
   UserRole,
   isTransitionAllowed,
-  KafkaProducerService,
-  TOPICS,
   DeliveryEventType,
+  DeliveryEvent,
   generateCorrelationId,
   lifecycleEventId,
 } from '@food-delivery/shared';
@@ -21,6 +20,7 @@ import { DeliveriesRepository } from '../repositories/deliveries.repository';
 import { OrderServiceClient } from '../common/order-service.client';
 import { DriverDto, DriverServiceClient, DriverStatusRejectedError } from '../common/driver-service.client';
 import { RestaurantServiceClient } from '../common/restaurant-service.client';
+import { OutboxRelayService } from '../common/outbox-relay.service';
 import { DriverCurrentDeliveryDto, NEXT_DRIVER_ACTIONS } from '../dto/driver-current-delivery.dto';
 import { CreateDeliveryDto } from '../dto/create-delivery.dto';
 import { Delivery } from '../entities/delivery.entity';
@@ -51,6 +51,25 @@ export interface DeliveryRequester {
   authHeader: string;
 }
 
+/**
+ * The lifecycle event for a delivery as written. Keyed by orderId (same partition as the order's own
+ * events); the eventId is stable per (delivery, event type), so it is staged and consumed once.
+ */
+function deliveryEvent(eventType: DeliveryEventType, delivery: Delivery): DeliveryEvent {
+  return {
+    eventId: lifecycleEventId(delivery.id, eventType),
+    eventType,
+    timestamp: new Date().toISOString(),
+    correlationId: generateCorrelationId(),
+    payload: {
+      deliveryId: delivery.id,
+      orderId: delivery.orderId,
+      driverId: delivery.driverId || undefined,
+      status: delivery.status,
+    },
+  };
+}
+
 @Injectable()
 export class DeliveriesService {
   private readonly logger = new Logger(DeliveriesService.name);
@@ -59,7 +78,7 @@ export class DeliveriesService {
     private readonly deliveries: DeliveriesRepository,
     private readonly orderClient: OrderServiceClient,
     private readonly driverClient: DriverServiceClient,
-    private readonly kafkaProducer: KafkaProducerService,
+    private readonly outbox: OutboxRelayService,
     private readonly restaurantClient: RestaurantServiceClient,
   ) {}
 
@@ -80,7 +99,7 @@ export class DeliveriesService {
 
     let delivery: Delivery;
     try {
-      delivery = await this.deliveries.create(dto.orderId);
+      delivery = await this.deliveries.create(dto.orderId, (created) => deliveryEvent(DeliveryEventType.CREATED, created));
     } catch (error) {
       // Two creates (e.g. auto-dispatch and a manual dispatch) passed the check above at the same
       // time; the unique index on orderId let only one insert through.
@@ -89,13 +108,15 @@ export class DeliveriesService {
       }
       throw error;
     }
-    await this.publishEvent(DeliveryEventType.CREATED, delivery);
+    this.outbox.kick();
     return delivery;
   }
 
   /*
-   * Retry safety. Each action writes the delivery first (compare-and-set), then runs its side effects:
-   * order-service sync, driver release, event. If a side effect fails (a service is down, or this one
+   * Retry safety. Each action writes the delivery and stages its event in one transaction
+   * (compare-and-set + outbox, #98), then runs its side effects: order-service sync and driver release.
+   * The event is published whatever happens next, and order-service converges from it, so the order
+   * catches up even if the HTTP sync fails. If a side effect fails (a service is down, or this one
    * restarts mid-request) the request errors but the delivery has already moved. Repeating the same
    * action on a delivery that is already in the target status therefore skips the write and re-runs
    * the side effects, each of which is idempotent, instead of answering 409. Without that, a failed
@@ -114,10 +135,12 @@ export class DeliveriesService {
     const driver = await this.claimAvailableDriver();
     let updated: Delivery | null;
     try {
-      updated = await this.deliveries.transition(deliveryId, delivery.status, {
-        driverId: driver.id,
-        status: DeliveryStatus.DRIVER_ASSIGNED,
-      });
+      updated = await this.deliveries.transition(
+        deliveryId,
+        delivery.status,
+        { driverId: driver.id, status: DeliveryStatus.DRIVER_ASSIGNED },
+        (assigned) => deliveryEvent(DeliveryEventType.DRIVER_ASSIGNED, assigned),
+      );
     } catch (error) {
       await this.giveBackClaimedDriver(driver.id);
       throw error;
@@ -131,37 +154,35 @@ export class DeliveriesService {
       }
       return this.afterDriverAssigned(current);
     }
+    this.outbox.kick();
     return this.afterDriverAssigned(updated);
   }
 
   async pickup(deliveryId: string, requesterId: string, requesterRole: UserRole): Promise<Delivery> {
     const delivery = await this.findOrThrow(deliveryId);
     await this.assertAssignedDriver(delivery, requesterId, requesterRole);
-    return this.advance(delivery, DeliveryStatus.PICKED_UP, async (updated) => {
+    return this.advance(delivery, DeliveryStatus.PICKED_UP, DeliveryEventType.PICKED_UP, async (updated) => {
       await this.syncOrderAlongDelivery(updated.orderId, OrderStatus.PICKED_UP);
-      await this.publishEvent(DeliveryEventType.PICKED_UP, updated);
     });
   }
 
   async start(deliveryId: string, requesterId: string, requesterRole: UserRole): Promise<Delivery> {
     const delivery = await this.findOrThrow(deliveryId);
     await this.assertAssignedDriver(delivery, requesterId, requesterRole);
-    return this.advance(delivery, DeliveryStatus.IN_TRANSIT, async (updated) => {
+    return this.advance(delivery, DeliveryStatus.IN_TRANSIT, DeliveryEventType.IN_TRANSIT, async (updated) => {
       // The order has no IN_TRANSIT counterpart and stays PICKED_UP until DELIVERED; syncing it here
       // repairs a pickup whose order update failed before the driver moved on.
       await this.syncOrderAlongDelivery(updated.orderId, OrderStatus.PICKED_UP);
-      await this.publishEvent(DeliveryEventType.IN_TRANSIT, updated);
     });
   }
 
   async complete(deliveryId: string, requesterId: string, requesterRole: UserRole): Promise<Delivery> {
     const delivery = await this.findOrThrow(deliveryId);
     await this.assertAssignedDriver(delivery, requesterId, requesterRole);
-    return this.advance(delivery, DeliveryStatus.DELIVERED, async (updated) => {
+    return this.advance(delivery, DeliveryStatus.DELIVERED, DeliveryEventType.COMPLETED, async (updated) => {
       // Driver first: freeing the driver must not depend on order-service being reachable.
       await this.releaseDriverOf(updated);
       await this.syncOrderAlongDelivery(updated.orderId, OrderStatus.DELIVERED);
-      await this.publishEvent(DeliveryEventType.COMPLETED, updated);
     });
   }
 
@@ -169,10 +190,9 @@ export class DeliveriesService {
     this.assertDispatchRole(requester.role);
     const delivery = await this.findOrThrow(deliveryId);
     await this.assertCanDispatch(delivery.orderId, requester);
-    return this.advance(delivery, DeliveryStatus.CANCELLED, async (updated) => {
+    return this.advance(delivery, DeliveryStatus.CANCELLED, DeliveryEventType.CANCELLED, async (updated) => {
       await this.releaseDriverOf(updated);
       await this.orderClient.updateOrderStatus(updated.orderId, OrderStatus.CANCELLED);
-      await this.publishEvent(DeliveryEventType.CANCELLED, updated);
     });
   }
 
@@ -313,18 +333,23 @@ export class DeliveriesService {
   }
 
   /**
-   * Moves the delivery to `target` (compare-and-set) and runs `effects`. Already at `target` → the
-   * write is skipped and the effects run again (retry after a failed side effect).
+   * Moves the delivery to `target` (compare-and-set, staging `eventType` in the same transaction) and
+   * runs `effects`. Already at `target` → the write is skipped (its event was staged with it) and the
+   * effects run again (retry after a failed side effect).
    */
   private async advance(
     delivery: Delivery,
     target: DeliveryStatus,
+    eventType: DeliveryEventType,
     effects: (updated: Delivery) => Promise<void>,
   ): Promise<Delivery> {
     let current = delivery;
     if (delivery.status !== target) {
       this.assertTransition(delivery.status, target);
-      const updated = await this.deliveries.transition(delivery.id, delivery.status, { status: target });
+      const updated = await this.deliveries.transition(delivery.id, delivery.status, { status: target }, (moved) =>
+        deliveryEvent(eventType, moved),
+      );
+      if (updated) this.outbox.kick();
       current = updated ?? (await this.findOrThrow(delivery.id));
       if (current.status !== target) {
         // Lost the race to a request that moved it elsewhere (e.g. cancel vs complete).
@@ -337,7 +362,6 @@ export class DeliveriesService {
 
   private async afterDriverAssigned(delivery: Delivery): Promise<Delivery> {
     await this.syncOrderAlongDelivery(delivery.orderId, OrderStatus.DRIVER_ASSIGNED);
-    await this.publishEvent(DeliveryEventType.DRIVER_ASSIGNED, delivery);
     return delivery;
   }
 
@@ -412,26 +436,5 @@ export class DeliveriesService {
       throw new NotFoundError(`Delivery ${id} not found`);
     }
     return delivery;
-  }
-
-  /**
-   * Published after the HTTP syncs to order-service and driver-service succeed, so consumers see
-   * the same state the synchronous path already applied. Keyed by orderId (same partition as the
-   * order's own events); the eventId is stable per (delivery, event type), so a re-publish after a
-   * retried request is deduplicated by consumers.
-   */
-  private async publishEvent(eventType: DeliveryEventType, delivery: Delivery) {
-    await this.kafkaProducer.publish(TOPICS.DELIVERY_EVENTS, {
-      eventId: lifecycleEventId(delivery.id, eventType),
-      eventType,
-      timestamp: new Date().toISOString(),
-      correlationId: generateCorrelationId(),
-      payload: {
-        deliveryId: delivery.id,
-        orderId: delivery.orderId,
-        driverId: delivery.driverId || undefined,
-        status: delivery.status,
-      },
-    });
   }
 }

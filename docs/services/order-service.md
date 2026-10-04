@@ -49,7 +49,7 @@ Consumed from:
 - `payment.events` – payment outcome updates
 - `delivery.events` – delivery status updates
 
-The service uses the shared Kafka abstractions (`KafkaProducerService`, `KafkaConsumerService`) from the `shared` package.
+Order events are staged in a transactional outbox (`outbox_events`, migration 004) in the same transaction as the order insert or status compare-and-set, and published by the outbox relay (`OutboxRelay` from `shared`; `OUTBOX_RELAY_INTERVAL_MS`, default 500 ms, plus an immediate kick after each commit). An event is therefore published if and only if its order change committed, even across a crash or a Kafka outage (#98). Consumers use the shared `KafkaConsumerService`.
 
 Status updates are idempotent when the requested status already matches the stored status. This is required because payment creation synchronizes `PAYMENT_PENDING` directly and also publishes a Kafka event; the event consumer may legitimately observe the same transition. Duplicate delivery of the same status event therefore returns the current order instead of producing a false 409 conflict.
 

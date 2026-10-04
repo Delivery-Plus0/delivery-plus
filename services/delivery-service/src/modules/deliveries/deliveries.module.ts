@@ -10,6 +10,7 @@ import { OrderServiceClient } from '../../common/order-service.client';
 import { DriverServiceClient } from '../../common/driver-service.client';
 import { RestaurantServiceClient } from '../../common/restaurant-service.client';
 import { SystemTokenService } from '../../common/system-token.service';
+import { OutboxRelayService } from '../../common/outbox-relay.service';
 import { APP_CONFIG, AppConfig } from '../../config/app-config';
 
 @Module({
@@ -22,6 +23,7 @@ import { APP_CONFIG, AppConfig } from '../../config/app-config';
   ],
   controllers: [DeliveriesController],
   providers: [
+    OutboxRelayService,
     DeliveriesService,
     AutoDispatchService,
     DeliveriesRepository,

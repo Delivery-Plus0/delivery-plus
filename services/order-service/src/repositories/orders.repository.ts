@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { OrderStatus } from '@food-delivery/shared';
+import { BaseEvent, OrderStatus, TOPICS, stageEvent } from '@food-delivery/shared';
 import { Order } from '../entities/order.entity';
 import { OrderItem } from '../entities/order-item.entity';
 
@@ -12,6 +12,9 @@ export interface DeliveryAddress {
   latitude: number | null;
   longitude: number | null;
 }
+
+/** Builds the event describing the change from the order as written (staged in the same transaction). */
+export type OrderEventBuilder = (order: Order) => BaseEvent<unknown>;
 
 export interface NewOrderItem {
   menuItemId: string;
@@ -38,6 +41,7 @@ export class OrdersRepository {
     totalAmount: number,
     idempotencyKey: string | undefined,
     delivery: DeliveryAddress,
+    event: OrderEventBuilder,
   ): Promise<Order> {
     const order = this.repo.create({
       customerId,
@@ -59,7 +63,12 @@ export class OrdersRepository {
           }) as OrderItem,
       ),
     });
-    return this.repo.save(order);
+    // The order and its order.created event commit together (transactional outbox, #98).
+    return this.repo.manager.transaction(async (manager) => {
+      const saved = await manager.getRepository(Order).save(order);
+      await stageEvent(manager, TOPICS.ORDER_EVENTS, event(saved));
+      return saved;
+    });
   }
 
   findByCustomerAndIdempotencyKey(customerId: string, idempotencyKey: string): Promise<Order | null> {
@@ -69,12 +78,20 @@ export class OrdersRepository {
   }
 
   /**
-   * Compare-and-set: moves the order from `from` to `to` only if it is still in `from`.
-   * Returns the updated order, or null when another writer changed it first.
+   * Compare-and-set: moves the order from `from` to `to` only if it is still in `from`, and stages the
+   * event for the change in the same transaction (only the writer that wins stages it). Returns the
+   * updated order, or null when another writer changed it first.
    */
-  async updateStatus(id: string, from: OrderStatus, to: OrderStatus): Promise<Order | null> {
-    const result = await this.repo.update({ id, status: from }, { status: to });
-    return result.affected ? this.findById(id) : null;
+  async updateStatus(id: string, from: OrderStatus, to: OrderStatus, event: OrderEventBuilder): Promise<Order | null> {
+    return this.repo.manager.transaction(async (manager) => {
+      const orders = manager.getRepository(Order);
+      const result = await orders.update({ id, status: from }, { status: to });
+      if (!result.affected) return null;
+      const updated = await orders.findOne({ where: { id } });
+      if (!updated) return null;
+      await stageEvent(manager, TOPICS.ORDER_EVENTS, event(updated));
+      return updated;
+    });
   }
 
   async findByCustomer(customerId: string, page: number, limit: number): Promise<[Order[], number]> {

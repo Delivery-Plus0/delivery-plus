@@ -405,7 +405,7 @@ Gateway: allowed origin? allowed headers? → 204 with Access-Control-Allow-* �
 ```
 
 ### 4. Delivery Plus mapping — **CURRENT**
-- CORS: `getCorsOptions()` in `services/api-gateway/src/main.ts`. Default development origins are `localhost/127.0.0.1` on ports 8081–8084 (Expo web and the customer/driver E2E web servers); `NODE_ENV=production` refuses to start without `CORS_ORIGINS`.
+- CORS: `getCorsOptions()` in `services/api-gateway/src/main.ts`. Default development origins are `localhost/127.0.0.1` on ports 8081–8085 (Expo web and the customer/driver/restaurant E2E web servers); `NODE_ENV=production` refuses to start without `CORS_ORIGINS`.
 - Reverse proxy: `http-proxy-middleware` with `changeOrigin: true`.
 - TLS: **not in the repository** — local traffic is plain HTTP; production TLS would be terminated at a load balancer/ingress in front of the gateway (**FUTURE**, [Book 16](16-networking.md)).
 - Internal hops use Docker DNS names (`http://order-service:3006`) — plain HTTP inside the Docker network.

@@ -71,10 +71,12 @@ describe('gateway browser CORS', () => {
         'http://localhost:8082',
         'http://localhost:8083',
         'http://localhost:8084',
+        'http://localhost:8085',
         'http://127.0.0.1:8081',
         'http://127.0.0.1:8082',
         'http://127.0.0.1:8083',
         'http://127.0.0.1:8084',
+        'http://127.0.0.1:8085',
       ]);
     });
   });

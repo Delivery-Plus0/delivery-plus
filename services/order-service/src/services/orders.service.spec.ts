@@ -23,7 +23,7 @@ describe('OrdersService', () => {
   let cartClient: jest.Mocked<CartServiceClient>;
   let restaurantClient: jest.Mocked<RestaurantServiceClient>;
   let userClient: jest.Mocked<UserServiceClient>;
-  let kafkaProducer: { publish: jest.Mock };
+  let outbox: { kick: jest.Mock };
   let kafkaConsumer: { subscribe: jest.Mock; start: jest.Mock };
 
   const baseOrder = {
@@ -40,6 +40,27 @@ describe('OrdersService', () => {
     createdAt: new Date(),
     updatedAt: new Date(),
   };
+
+  /**
+   * The events the repository staged in the outbox: create/updateStatus call the event builder they
+   * are given with the order they wrote, in the same transaction, only when the write succeeded (a lost
+   * compare-and-set returns null and stages nothing).
+   */
+  async function staged(): Promise<Array<{ eventId: string; eventType: string; payload: Record<string, unknown> }>> {
+    const recorded: Array<{ order: number; event: { eventId: string; eventType: string; payload: Record<string, unknown> } }> = [];
+    const calls: Array<[jest.Mock, number]> = [
+      [orders.create as unknown as jest.Mock, 6],
+      [orders.updateStatus as unknown as jest.Mock, 3],
+    ];
+    for (const [mock, builderIndex] of calls) {
+      for (const [i, args] of mock.mock.calls.entries()) {
+        const written = await Promise.resolve(mock.mock.results[i]?.value).catch(() => null);
+        const build = args[builderIndex];
+        if (written && typeof build === 'function') recorded.push({ order: mock.mock.invocationCallOrder[i], event: build(written) });
+      }
+    }
+    return recorded.sort((a, b) => a.order - b.order).map((r) => r.event);
+  }
 
   beforeEach(() => {
     orders = {
@@ -65,13 +86,13 @@ describe('OrdersService', () => {
       getOwnProfile: jest.fn().mockResolvedValue({ id: 'customer-1', address: '1 Profile Street' }),
     } as unknown as jest.Mocked<UserServiceClient>;
 
-    kafkaProducer = { publish: jest.fn() };
+    outbox = { kick: jest.fn() };
     kafkaConsumer = { subscribe: jest.fn(), start: jest.fn() };
     service = new OrdersService(
       orders,
       cartClient,
       restaurantClient,
-      kafkaProducer as any,
+      outbox as any,
       kafkaConsumer as any,
       userClient,
     );
@@ -210,7 +231,7 @@ describe('OrdersService', () => {
         );
         expect(orders.create).not.toHaveBeenCalled();
         expect(cartClient.clearCart).not.toHaveBeenCalled();
-        expect(kafkaProducer.publish).not.toHaveBeenCalled();
+        expect(await staged()).toHaveLength(0);
       });
 
       it('rejects coordinates without an address instead of pairing them with the profile address', async () => {
@@ -380,8 +401,8 @@ describe('OrdersService', () => {
 
       await (await handlerFor(PaymentEventType.FAILED))({ payload: { orderId: 'order-1' } });
 
-      expect(orders.updateStatus).toHaveBeenCalledWith('order-1', OrderStatus.PAYMENT_PENDING, OrderStatus.FAILED);
-      expect(kafkaProducer.publish.mock.calls[0][1].eventType).toBe(OrderEventType.FAILED);
+      expect(orders.updateStatus).toHaveBeenCalledWith('order-1', OrderStatus.PAYMENT_PENDING, OrderStatus.FAILED, expect.any(Function));
+      expect((await staged())[0].eventType).toBe(OrderEventType.FAILED);
     });
 
     it('payment.completed confirms the order', async () => {
@@ -390,8 +411,8 @@ describe('OrdersService', () => {
 
       await (await handlerFor(PaymentEventType.COMPLETED))({ payload: { orderId: 'order-1' } });
 
-      expect(orders.updateStatus).toHaveBeenCalledWith('order-1', OrderStatus.PAYMENT_PENDING, OrderStatus.CONFIRMED);
-      expect(kafkaProducer.publish.mock.calls[0][1].eventType).toBe(OrderEventType.CONFIRMED);
+      expect(orders.updateStatus).toHaveBeenCalledWith('order-1', OrderStatus.PAYMENT_PENDING, OrderStatus.CONFIRMED, expect.any(Function));
+      expect((await staged())[0].eventType).toBe(OrderEventType.CONFIRMED);
     });
 
     it('a duplicate payment.failed (order already FAILED via the HTTP sync) is a no-op', async () => {
@@ -400,7 +421,7 @@ describe('OrdersService', () => {
       await service.syncStatusFromEvent('order-1', OrderStatus.FAILED);
 
       expect(orders.updateStatus).not.toHaveBeenCalled();
-      expect(kafkaProducer.publish).not.toHaveBeenCalled();
+      expect(await staged()).toHaveLength(0);
     });
 
     it('a late payment.failed after the customer cancelled is skipped instead of failing the consumer', async () => {
@@ -423,7 +444,7 @@ describe('OrdersService', () => {
       await expect(service.syncStatusFromEvent('missing', OrderStatus.FAILED)).resolves.toBeUndefined();
     });
 
-    it('publishes order.confirmed once when two writers race to CONFIRMED (compare-and-set)', async () => {
+    it('stages order.confirmed once when two writers race to CONFIRMED (compare-and-set)', async () => {
       // Both writers read PAYMENT_PENDING; the database lets only the first update through.
       orders.findById
         .mockResolvedValueOnce(withStatus(OrderStatus.PAYMENT_PENDING) as any)
@@ -438,7 +459,7 @@ describe('OrdersService', () => {
         service.updateStatus('order-1', 'system', UserRole.ADMIN, { status: OrderStatus.CONFIRMED }),
       ]);
 
-      const confirmed = kafkaProducer.publish.mock.calls.filter(([, e]) => e.eventType === OrderEventType.CONFIRMED);
+      const confirmed = (await staged()).filter((e) => e.eventType === OrderEventType.CONFIRMED);
       expect(confirmed).toHaveLength(1);
     });
 
@@ -451,7 +472,7 @@ describe('OrdersService', () => {
       await expect(
         service.updateStatus('order-1', 'system', UserRole.ADMIN, { status: OrderStatus.CONFIRMED }),
       ).rejects.toThrow(InvalidStateTransitionError);
-      expect(kafkaProducer.publish).not.toHaveBeenCalled();
+      expect(await staged()).toHaveLength(0);
     });
 
     it('labels the PAYMENT_PENDING transition as order.payment_pending, not order.created', async () => {
@@ -460,7 +481,7 @@ describe('OrdersService', () => {
 
       await service.syncStatusFromEvent('order-1', OrderStatus.PAYMENT_PENDING);
 
-      expect(kafkaProducer.publish.mock.calls[0][1].eventType).toBe(OrderEventType.PAYMENT_PENDING);
+      expect((await staged())[0].eventType).toBe(OrderEventType.PAYMENT_PENDING);
     });
   });
 
@@ -482,8 +503,7 @@ describe('OrdersService', () => {
       expect(orders.updateStatus).toHaveBeenCalledWith(
         'order-1',
         OrderStatus.READY_FOR_PICKUP,
-        OrderStatus.DRIVER_ASSIGNED,
-      );
+        OrderStatus.DRIVER_ASSIGNED, expect.any(Function));
     });
 
     it('delivery.completed after the HTTP sync already delivered the order is a no-op', async () => {
@@ -492,7 +512,7 @@ describe('OrdersService', () => {
       await (await handlerFor(DeliveryEventType.COMPLETED))({ payload: { orderId: 'order-1' } });
 
       expect(orders.updateStatus).not.toHaveBeenCalled();
-      expect(kafkaProducer.publish).not.toHaveBeenCalled();
+      expect(await staged()).toHaveLength(0);
     });
 
     it('a late delivery.driver_assigned once the order is picked up is skipped, not dead-lettered', async () => {
@@ -512,7 +532,7 @@ describe('OrdersService', () => {
 
       await service.updateStatus('order-1', 'system', UserRole.ADMIN, { status: OrderStatus.PREPARING });
 
-      expect(kafkaProducer.publish.mock.calls[0][1].eventId).toBe(
+      expect((await staged())[0].eventId).toBe(
         lifecycleEventId('order-1', OrderEventType.PREPARING),
       );
     });

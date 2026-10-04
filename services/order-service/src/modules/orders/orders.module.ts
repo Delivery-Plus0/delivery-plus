@@ -9,6 +9,7 @@ import { OrdersController } from '../../controllers/orders.controller';
 import { CartServiceClient } from '../../common/cart-service.client';
 import { RestaurantServiceClient } from '../../common/restaurant-service.client';
 import { UserServiceClient } from '../../common/user-service.client';
+import { OutboxRelayService } from '../../common/outbox-relay.service';
 import { APP_CONFIG, AppConfig } from '../../config/app-config';
 import { RolesGuard } from '@food-delivery/shared';
 
@@ -21,6 +22,14 @@ import { RolesGuard } from '@food-delivery/shared';
     }),
   ],
   controllers: [OrdersController],
-  providers: [OrdersService, OrdersRepository, CartServiceClient, RestaurantServiceClient, UserServiceClient, RolesGuard],
+  providers: [
+    OrdersService,
+    OrdersRepository,
+    OutboxRelayService,
+    CartServiceClient,
+    RestaurantServiceClient,
+    UserServiceClient,
+    RolesGuard,
+  ],
 })
 export class OrdersModule {}

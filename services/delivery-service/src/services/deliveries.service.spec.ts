@@ -4,6 +4,7 @@ import { OrderServiceClient } from '../common/order-service.client';
 import { DriverServiceClient, DriverStatusRejectedError } from '../common/driver-service.client';
 import { Delivery } from '../entities/delivery.entity';
 import { RestaurantServiceClient } from '../common/restaurant-service.client';
+import { OutboxRelayService } from '../common/outbox-relay.service';
 import {
   BadRequestError,
   ConflictError,
@@ -12,7 +13,6 @@ import {
   DriverStatus,
   ForbiddenError,
   InvalidStateTransitionError,
-  KafkaProducerService,
   NotFoundError,
   OrderStatus,
   TOPICS,
@@ -31,7 +31,7 @@ describe('DeliveriesService', () => {
   let deliveries: jest.Mocked<DeliveriesRepository>;
   let orderClient: jest.Mocked<OrderServiceClient>;
   let driverClient: jest.Mocked<DriverServiceClient>;
-  let kafkaProducer: { publish: jest.Mock };
+  let outbox: { kick: jest.Mock };
   let restaurantClient: jest.Mocked<RestaurantServiceClient>;
 
   const baseDelivery = {
@@ -42,6 +42,31 @@ describe('DeliveriesService', () => {
     createdAt: new Date(),
     updatedAt: new Date(),
   };
+
+  /**
+   * The [topic, event] pairs the repository staged in the outbox: create/transition call the event
+   * builder they are given with the delivery they wrote, in the same transaction, only when the write
+   * succeeded (a lost compare-and-set returns null and stages nothing).
+   */
+  async function staged(): Promise<Array<[string, { eventId: string; eventType: string; payload: Record<string, unknown> }]>> {
+    const out: Array<[string, { eventId: string; eventType: string; payload: Record<string, unknown> }]> = [];
+    const calls: Array<[jest.Mock, number]> = [
+      [deliveries.create as unknown as jest.Mock, 1],
+      [deliveries.transition as unknown as jest.Mock, 3],
+    ];
+    const recorded: Array<{ order: number; pair: [string, { eventId: string; eventType: string; payload: Record<string, unknown> }] }> = [];
+    for (const [mock, builderIndex] of calls) {
+      for (const [i, args] of mock.mock.calls.entries()) {
+        const written = await Promise.resolve(mock.mock.results[i]?.value).catch(() => null);
+        const build = args[builderIndex];
+        if (written && typeof build === 'function') {
+          recorded.push({ order: mock.mock.invocationCallOrder[i], pair: [TOPICS.DELIVERY_EVENTS, build(written)] });
+        }
+      }
+    }
+    recorded.sort((a, b) => a.order - b.order).forEach((r) => out.push(r.pair));
+    return out;
+  }
 
   beforeEach(() => {
     deliveries = {
@@ -66,13 +91,13 @@ describe('DeliveriesService', () => {
       releaseDriver: jest.fn(),
     } as unknown as jest.Mocked<DriverServiceClient>;
 
-    kafkaProducer = { publish: jest.fn() };
+    outbox = { kick: jest.fn() };
     restaurantClient = { getRestaurant: jest.fn() } as unknown as jest.Mocked<RestaurantServiceClient>;
     service = new DeliveriesService(
       deliveries,
       orderClient,
       driverClient,
-      kafkaProducer as unknown as KafkaProducerService,
+      outbox as unknown as OutboxRelayService,
       restaurantClient,
     );
   });
@@ -124,7 +149,7 @@ describe('DeliveriesService', () => {
       deliveries.create.mockRejectedValue(Object.assign(new Error('duplicate key'), { driverError: { code: '23505' } }));
 
       await expect(service.create(actor(UserRole.ADMIN), { orderId: 'order-1' })).rejects.toThrow(ConflictError);
-      expect(kafkaProducer.publish).not.toHaveBeenCalled();
+      expect(await staged()).toHaveLength(0);
     });
 
     it('does not mask other database errors', async () => {
@@ -186,7 +211,7 @@ describe('DeliveriesService', () => {
         expect(deliveries.transition).toHaveBeenCalledWith('delivery-1', DeliveryStatus.CREATED, {
           driverId: 'driver-b',
           status: DeliveryStatus.DRIVER_ASSIGNED,
-        });
+        }, expect.any(Function));
         // The driver it lost is not "given back": it belongs to the assignment that won.
         expect(driverClient.releaseDriver).not.toHaveBeenCalled();
       });
@@ -400,7 +425,7 @@ describe('DeliveriesService', () => {
         () => service.cancel('delivery-1', actor(UserRole.ADMIN))],
     ];
 
-    it.each(transitions)('%s publishes %s → %s as its delivery event', async (_name, from, to, eventType, run) => {
+    it.each(transitions)('%s stages %s → %s as its delivery event, in the same transaction', async (_name, from, to, eventType, run) => {
       deliveries.findById.mockResolvedValue(at(from));
       deliveries.transition.mockResolvedValue(at(to));
       driverClient.getDriver.mockResolvedValue(assignedDriver);
@@ -408,8 +433,9 @@ describe('DeliveriesService', () => {
 
       await run();
 
-      expect(kafkaProducer.publish).toHaveBeenCalledTimes(1);
-      const [topic, event] = kafkaProducer.publish.mock.calls[0];
+      const events = await staged();
+      expect(events).toHaveLength(1);
+      const [topic, event] = events[0];
       expect(topic).toBe(TOPICS.DELIVERY_EVENTS);
       expect(event).toMatchObject({
         eventId: lifecycleEventId('delivery-1', eventType),
@@ -418,7 +444,7 @@ describe('DeliveriesService', () => {
       });
     });
 
-    it('create publishes delivery.created', async () => {
+    it('create stages delivery.created with the new delivery', async () => {
       deliveries.findByOrderId.mockResolvedValue(null);
       orderClient.getOrder.mockResolvedValue({
         id: 'order-1',
@@ -430,22 +456,23 @@ describe('DeliveriesService', () => {
 
       await service.create(actor(UserRole.ADMIN), { orderId: 'order-1' });
 
-      expect(kafkaProducer.publish.mock.calls[0][1]).toMatchObject({
+      expect((await staged())[0][1]).toMatchObject({
         eventType: DeliveryEventType.CREATED,
         payload: { deliveryId: 'delivery-1', orderId: 'order-1', status: DeliveryStatus.CREATED },
       });
     });
 
-    it('publishes only after order-service and driver-service were synced', async () => {
+    it('commits the event with the write, so it is published even if the order sync then fails', async () => {
       deliveries.findById.mockResolvedValue(at(DeliveryStatus.IN_TRANSIT));
       deliveries.transition.mockResolvedValue(at(DeliveryStatus.DELIVERED));
       driverClient.getDriver.mockResolvedValue(assignedDriver);
+      orderClient.getOrder.mockRejectedValue(new Error('order-service unavailable'));
 
-      await service.complete('delivery-1', 'user-1', UserRole.DRIVER);
+      await expect(service.complete('delivery-1', 'user-1', UserRole.DRIVER)).rejects.toThrow('order-service unavailable');
 
-      const published = kafkaProducer.publish.mock.invocationCallOrder[0];
-      expect(orderClient.updateOrderStatus.mock.invocationCallOrder[0]).toBeLessThan(published);
-      expect(driverClient.releaseDriver.mock.invocationCallOrder[0]).toBeLessThan(published);
+      // order-service converges from delivery.completed, so the order still reaches DELIVERED.
+      expect((await staged()).map(([, e]) => e.eventType)).toEqual([DeliveryEventType.COMPLETED]);
+      expect(outbox.kick).toHaveBeenCalled();
     });
 
     it('publishes nothing when the transition is rejected', async () => {
@@ -456,7 +483,7 @@ describe('DeliveriesService', () => {
       await expect(service.complete('delivery-1', 'user-1', UserRole.DRIVER)).rejects.toThrow(
         InvalidStateTransitionError,
       );
-      expect(kafkaProducer.publish).not.toHaveBeenCalled();
+      expect(await staged()).toHaveLength(0);
     });
   });
 
@@ -476,7 +503,8 @@ describe('DeliveriesService', () => {
       driverClient.releaseDriver.mockRejectedValueOnce(new Error('driver-service unavailable'));
 
       await expect(completeAsDriver()).rejects.toThrow('driver-service unavailable');
-      expect(kafkaProducer.publish).not.toHaveBeenCalled();
+      // The event committed with the write, before the release failed: it is published regardless.
+      expect(await staged()).toHaveLength(1);
 
       // Retry: the delivery is already DELIVERED. Before the fix this was a 409 and the driver stayed BUSY.
       deliveries.findById.mockResolvedValueOnce(at(DeliveryStatus.DELIVERED));
@@ -486,7 +514,8 @@ describe('DeliveriesService', () => {
       expect(deliveries.transition).toHaveBeenCalledTimes(1); // not written twice
       expect(driverClient.releaseDriver).toHaveBeenCalledTimes(2);
       expect(orderClient.updateOrderStatus).toHaveBeenCalledWith('order-1', OrderStatus.DELIVERED);
-      expect(kafkaProducer.publish.mock.calls[0][1].eventType).toBe(DeliveryEventType.COMPLETED);
+      // Staged once, by the first attempt's write; the retry doesn't write, so it stages nothing new.
+      expect((await staged()).map(([, e]) => e.eventType)).toEqual([DeliveryEventType.COMPLETED]);
     });
 
     it('order-service down during completion: the driver is still released first', async () => {
@@ -507,7 +536,7 @@ describe('DeliveriesService', () => {
       await completeAsDriver();
 
       expect(driverClient.releaseDriver).not.toHaveBeenCalled();
-      expect(kafkaProducer.publish).toHaveBeenCalledTimes(1);
+      expect(await staged()).toHaveLength(0); // its event was staged with the original write
     });
 
     it('releases the driver even when the order was cancelled meanwhile (the order is not forced back)', async () => {
@@ -552,7 +581,7 @@ describe('DeliveriesService', () => {
 
       await expect(completeAsDriver()).rejects.toThrow(InvalidStateTransitionError);
       expect(driverClient.releaseDriver).not.toHaveBeenCalled();
-      expect(kafkaProducer.publish).not.toHaveBeenCalled();
+      expect(await staged()).toHaveLength(0);
     });
 
     it('a retried cancel re-runs the release and the order sync', async () => {

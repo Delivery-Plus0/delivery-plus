@@ -27,10 +27,10 @@ From `services/delivery-service/src/controllers/deliveries.controller.ts`:
 ## Events published/consumed
 Every lifecycle transition publishes to `delivery.events`: `delivery.created`, `delivery.driver_assigned`, `delivery.picked_up`, `delivery.in_transit`, `delivery.completed`, `delivery.cancelled`. Payload: `{ deliveryId, orderId, driverId?, status }`.
 
-- Published after the HTTP syncs to order-service and driver-service succeed, so consumers see state the synchronous path already applied. A retried action re-publishes with the same `eventId`.
+- Staged in the transactional outbox (`outbox_events`) in the same transaction as the delivery write, then published by the outbox relay (#98). The HTTP syncs to order-service and driver-service run after the commit; order-service also converges from the event, so a failed order sync is repaired without a client retry.
 - Keyed by `orderId` (same partition as the order's own events).
 - `eventId` is stable per (delivery, event type), so a re-publish is deduplicated by consumers.
-- At-least-once and not transactional with the database write: a crash between the update and the publish loses the event (no outbox yet).
+- Published if and only if the delivery write committed, at-least-once (consumers deduplicate). A retried action stages nothing new (same `eventId`).
 
 Consumed from:
 - `order.events` → `order.ready_for_pickup` (auto-dispatch, below), with durable per-group idempotency
@@ -61,7 +61,7 @@ Orders reach a driver without anyone calling the API (`src/services/auto-dispatc
    - `deliveries.orderId` is unique. A manual create racing the automatic one gets `409` (not 500), and the dispatcher continues with the existing delivery.
    - The delivery transition is compare-and-set, and a lost assignment counts as done.
 5. **Stale events.** An order that is no longer ready (e.g. cancelled) is skipped with a warning. Other failures (e.g. order-service down) are retried by the consumer and then dead-lettered.
-6. **Not covered.** An order whose `ready_for_pickup` event was lost (no outbox yet, #98) gets no delivery automatically; the restaurant owner can still dispatch it manually.
+6. **Lost events.** order-service stages `ready_for_pickup` in its outbox together with the status change, so the event is not lost on a crash or a Kafka outage (#98).
 
 Manual `POST /deliveries` and `/assign` stay available to admins and restaurant owners.
 
@@ -89,7 +89,7 @@ Every action writes the delivery first (compare-and-set on the current status), 
 - `assignDriver` gives the claimed driver back if recording the assignment fails, and a retried assign on an already-assigned delivery does not claim a second driver.
 - Re-published events keep their deterministic `eventId`, so consumers drop the duplicate.
 
-Not covered: if a request fails and the client **never** retries, the side effects stay undone (e.g. a driver left BUSY). Closing that needs a transactional outbox or a reconciliation job.
+Not covered: if a request fails and the client **never** retries, the **driver release** stays undone (a driver left BUSY). The order sync is repaired from the committed delivery event (outbox); the release still needs a reconciliation step (#98).
 
 ## Notes
 Driver assignment is a core orchestration task in this service, with explicit transition rules. Some role restrictions are enforced inside the service rather than uniformly at the controller boundary.

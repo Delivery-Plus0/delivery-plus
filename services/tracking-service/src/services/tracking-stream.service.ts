@@ -183,6 +183,9 @@ class Subscription implements TrackingSubscription {
       snapshot.location?.latitude ?? null,
       snapshot.location?.longitude ?? null,
       snapshot.location?.updatedAt ?? null,
+      snapshot.assignment?.assignedAt ?? null,
+      snapshot.eta.status,
+      snapshot.eta.status === 'ESTIMATED' ? snapshot.eta.seconds : snapshot.eta.reason,
     ]);
     if (key !== this.lastSentKey) {
       this.lastSentKey = key;

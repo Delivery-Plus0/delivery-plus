@@ -73,7 +73,7 @@ Delivery semantics (payment-service):
 
 ### delivery.events
 
-delivery-service publishes one event per lifecycle transition: `delivery.created`, `delivery.driver_assigned`, `delivery.picked_up`, `delivery.in_transit`, `delivery.completed`, `delivery.cancelled`, with `{ deliveryId, orderId, driverId?, status }`.
+delivery-service publishes one event per lifecycle transition: `delivery.created`, `delivery.driver_assigned`, `delivery.picked_up`, `delivery.in_transit`, `delivery.completed`, `delivery.cancelled`, with `{ deliveryId, orderId, customerId?, driverId?, assignedAt?, status }`. `assignedAt` is the assignment contract (#46): set once, in the assignment's own write.
 
 - Staged in the transactional outbox together with the delivery write (#98) and published by the relay; the HTTP syncs to order-service (order status) and driver-service (availability) run after the commit. Because the event is committed with the write, order-service converges from it even when the HTTP order sync fails. Delivery actions are retry-safe: repeating an action on a delivery already in the target status re-runs the syncs (its event was already staged with the original write, same `eventId`), so a failed driver release is repaired by the client's retry (see [docs/services/delivery-service.md](../docs/services/delivery-service.md#retry-safety)). Verified live: with order-service down, `complete` failed after releasing the driver; the retry delivered the order and re-published `delivery.completed` with the same id.
 - order-service applies `driver_assigned`, `picked_up` and `completed` through `syncStatusFromEvent` (same status → no-op; stale → logged and skipped), so a late or redelivered event never fails the consumer.

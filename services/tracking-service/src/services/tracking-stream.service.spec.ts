@@ -4,6 +4,7 @@ import { DriverLocation } from '../entities/location.model';
 import { TrackingStreamService, TrackingStreamSink } from './tracking-stream.service';
 import { DeliveryTrackingContext, DeliveryTrackingInfo, TrackingService } from './tracking.service';
 import { TrackingState, resolveTracking } from './tracking-state';
+import { NO_ETA_ESTIMATOR, deriveEta } from './eta';
 
 /** In-memory stand-in for Redis pub/sub: same subscribe/unsubscribe contract as TrackingEventsBus. */
 class FakeBus {
@@ -55,7 +56,7 @@ const DELIVERY = 'delivery-1';
 describe('TrackingStreamService', () => {
   let bus: FakeBus;
   let sink: RecordingSink;
-  let delivery: Omit<DeliveryTrackingContext, 'deliveryId'>;
+  let delivery: Omit<DeliveryTrackingContext, 'deliveryId' | 'assignedAt'>;
   let allowed: boolean;
   let dependencyDown: boolean;
   let locations: Map<string, DriverLocation>;
@@ -83,15 +84,19 @@ describe('TrackingStreamService', () => {
       loadDeliveryContext: jest.fn(async (deliveryId: string) => {
         if (dependencyDown) throw new Error('delivery-service unreachable');
         if (!allowed) throw new ForbiddenError('You do not have access to this delivery');
-        return { deliveryId, ...delivery };
+        const assignedAt = delivery.driverId ? `assigned:${delivery.driverId}` : null;
+        return { deliveryId, assignedAt, ...delivery };
       }),
       snapshot: jest.fn(async (context: DeliveryTrackingContext) => {
         const location = context.driverUserId ? (locations.get(context.driverUserId) ?? null) : null;
+        const resolved = resolveTracking(context.status, context.driverId, location, new Date(), 60);
         return {
           deliveryId: context.deliveryId,
           status: context.status,
           driverId: context.driverId,
-          ...resolveTracking(context.status, context.driverId, location, new Date(), 60),
+          ...resolved,
+          assignment: context.driverId ? { driverId: context.driverId, assignedAt: context.assignedAt } : null,
+          eta: deriveEta(context, resolved, NO_ETA_ESTIMATOR, new Date(), 60),
         };
       }),
     };

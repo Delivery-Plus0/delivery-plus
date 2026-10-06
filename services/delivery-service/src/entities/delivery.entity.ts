@@ -25,6 +25,15 @@ export class Delivery {
   @Column({ nullable: true })
   driverId?: string; // driver-service Driver.id (not the userId)
 
+  /**
+   * When the current driver's claim was accepted (#46): set in the same compare-and-set write that
+   * moves the delivery to DRIVER_ASSIGNED, never by a client. The assignment contract is
+   * (driverId, assignedAt); a delivery is assigned at most once (DRIVER_ASSIGNED only moves on to
+   * PICKED_UP or CANCELLED), so this never changes after it is set.
+   */
+  @Column({ type: 'timestamptz', nullable: true })
+  assignedAt?: Date | null;
+
   @Column({ type: 'enum', enum: DeliveryStatus, default: DeliveryStatus.CREATED })
   status!: DeliveryStatus;
 

@@ -25,7 +25,10 @@ From `services/delivery-service/src/controllers/deliveries.controller.ts`:
 - Publishes `delivery.events`; consumes `order.ready_for_pickup` (auto-dispatch)
 
 ## Events published/consumed
-Every lifecycle transition publishes to `delivery.events`: `delivery.created`, `delivery.driver_assigned`, `delivery.picked_up`, `delivery.in_transit`, `delivery.completed`, `delivery.cancelled`. Payload: `{ deliveryId, orderId, driverId?, status }`.
+Every lifecycle transition publishes to `delivery.events`: `delivery.created`, `delivery.driver_assigned`, `delivery.picked_up`, `delivery.in_transit`, `delivery.completed`, `delivery.cancelled`. Payload: `{ deliveryId, orderId, customerId?, driverId?, assignedAt?, status }`.
+- `customerId` was added in #5.
+- `assignedAt` (#46) is when the current driver's claim was accepted. delivery-service writes it with the assignment, and it is the same on every event after that (see the assignment contract in [tracking-service](./tracking-service.md#assignment-and-eta-contract-46)).
+- A delivery is assigned at most once, and `delivery.driver_assigned` is emitted exactly once: it has a deterministic event id, and a repeated assign request stages no event.
 
 - Staged in the transactional outbox (`outbox_events`) in the same transaction as the delivery write, then published by the outbox relay (#98). The HTTP syncs to order-service and driver-service run after the commit; order-service also converges from the event, so a failed order sync is repaired without a client retry.
 - Keyed by `orderId` (same partition as the order's own events).

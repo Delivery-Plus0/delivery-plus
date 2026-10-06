@@ -320,7 +320,34 @@ async function runE2E() {
     // Tracking lifecycle (#32): once the driver reports a position the customer sees it LIVE; after
     // delivery the same read is ENDED and returns no position, although Redis still holds the report.
     const trackingUrl = `${API_URL}/api/tracking/delivery/${deliveryId}`;
-    await axios.post(`${API_URL}/api/tracking/location`, { latitude: 30.0444, longitude: 31.2357 }, driverAuth);
+    const locationUrl = `${API_URL}/api/tracking/location`;
+
+    // Trust boundaries (#60). Session binding: before the driver reports on this delivery, no position
+    // is shown, even if Redis still holds a fresh one from the driver's previous delivery.
+    const beforeReport = (await axios.get(trackingUrl, customerAuth)).data;
+    if (beforeReport.tracking !== 'AWAITING_LOCATION' || beforeReport.location !== null) {
+      throw new Error(`Before the first report on this delivery: expected AWAITING_LOCATION, got ${JSON.stringify(beforeReport)}`);
+    }
+    // Derived values are never accepted from a client; untrusted timestamps can only cause rejections.
+    const secondsAgo = (s: number) => new Date(Date.now() - s * 1000).toISOString();
+    const clientEta = await statusOf(axios.post(locationUrl, { latitude: 30.0444, longitude: 31.2357, etaSeconds: 60 }, driverAuth));
+    const clientGeofence = await statusOf(axios.post(locationUrl, { latitude: 30.0444, longitude: 31.2357, arrived: true }, driverAuth));
+    const futureReport = await statusOf(axios.post(locationUrl, { latitude: 30.0444, longitude: 31.2357, recordedAt: secondsAgo(-120) }, driverAuth));
+    const staleReport = await statusOf(axios.post(locationUrl, { latitude: 30.0444, longitude: 31.2357, recordedAt: secondsAgo(600) }, driverAuth));
+    if (clientEta !== 400 || clientGeofence !== 400 || futureReport !== 422 || staleReport !== 422) {
+      throw new Error(`Location trust: client ETA ${clientEta}, client geofence ${clientGeofence} (expected 400); future ${futureReport}, stale ${staleReport} (expected 422)`);
+    }
+    if ((await axios.get(trackingUrl, customerAuth)).data.tracking !== 'AWAITING_LOCATION') {
+      throw new Error('Location trust: a rejected report must not be stored');
+    }
+    const firstReport = { latitude: 30.0444, longitude: 31.2357, recordedAt: secondsAgo(1) };
+    await axios.post(locationUrl, firstReport, driverAuth);
+    const replay = await statusOf(axios.post(locationUrl, firstReport, driverAuth));
+    if (replay !== 422) {
+      throw new Error(`Location trust: a replayed report should be rejected with 422, got ${replay}`);
+    }
+    console.log('Location trust: no position before the first report on this delivery; client ETA/geofence 400; future, stale and replayed reports 422');
+
     const liveTracking = (await axios.get(trackingUrl, customerAuth)).data;
     if (liveTracking.tracking !== 'LIVE' || liveTracking.location?.latitude !== 30.0444) {
       throw new Error(`Customer tracking while on the job: expected LIVE with the position, got ${JSON.stringify(liveTracking)}`);
@@ -398,6 +425,11 @@ async function runE2E() {
     }
     if (endedTracking.eta?.reason !== 'DELIVERY_ENDED' || endedTracking.assignment?.driverId !== assignedDelivery.driverId) {
       throw new Error(`After delivery the ETA must be gone (DELIVERY_ENDED) and the assignment kept, got ${JSON.stringify(endedTracking)}`);
+    }
+    // #60: with no active delivery the driver can't report a location any more.
+    const afterEnd = await statusOf(axios.post(locationUrl, { latitude: 30.0444, longitude: 31.2357 }, driverAuth));
+    if (afterEnd !== 409) {
+      throw new Error(`Location trust: a report after delivery should be rejected with 409, got ${afterEnd}`);
     }
 
     // The stream followed pickup → transit → delivered by push and ends with ENDED (no position), then closes.

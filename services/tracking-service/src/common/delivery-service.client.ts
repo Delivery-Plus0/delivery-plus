@@ -33,4 +33,24 @@ export class DeliveryServiceClient {
 
     return (await response.json()) as DeliveryDto;
   }
+
+  /**
+   * The calling driver's active delivery, resolved by delivery-service from the driver's own token
+   * (GET /deliveries/me/current), or null when they have none (204). Nothing comes from the request
+   * body, so a driver can't bind a report to another driver's delivery.
+   */
+  async getCurrentForDriver(authHeader: string): Promise<{ id: string } | null> {
+    const response = await fetch(`${this.config.deliveryServiceUrl}/deliveries/me/current`, {
+      headers: { Authorization: authHeader },
+    });
+    if (response.status === 204) return null;
+    if (response.status === 401 || response.status === 403) {
+      throw new ForbiddenError('Only the assigned driver can report a location');
+    }
+    if (!response.ok) {
+      throw new BadRequestError('Failed to resolve the driver\'s current delivery');
+    }
+    const current = (await response.json()) as { id?: string } | null;
+    return current?.id ? { id: current.id } : null;
+  }
 }

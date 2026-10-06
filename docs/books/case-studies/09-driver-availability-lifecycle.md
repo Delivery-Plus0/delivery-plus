@@ -1,6 +1,6 @@
 # Case Study 09 — Driver Availability Lifecycle
 
-**Status: PARTIAL (release made retry-safe in `67835d3`; deterministic transitions fixed for [#33](https://github.com/Yousefa7medmaher/delivery-plus/issues/33); drift reconciliation still open)** · [Case studies](README.md) · Books: [09](../09-distributed-systems.md), [10](../10-microservices-and-domain-design.md), [23](../23-geo-location-systems.md) · Lab: [DS-06](../labs/distributed-systems-labs.md#ds-06-repeat-delivery-completion-with-a-service-down)
+**Status: PARTIAL (release made retry-safe in `67835d3`; deterministic transitions fixed for [#33](https://github.com/Delivery-Plus0/delivery-plus/issues/33); drift reconciliation still open)** · [Case studies](README.md) · Books: [09](../09-distributed-systems.md), [10](../10-microservices-and-domain-design.md), [23](../23-geo-location-systems.md) · Lab: [DS-06](../labs/distributed-systems-labs.md#ds-06-repeat-delivery-completion-with-a-service-down)
 
 ## The lifecycle
 

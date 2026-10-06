@@ -1,6 +1,6 @@
 # ADR 0010 — Transactional Outbox
 
-**Status: Proposed** (tracked in [#98](https://github.com/Yousefa7medmaher/delivery-plus/issues/98); **not implemented**) · [ADRs](README.md) · Books: [08](../08-idempotency-and-distributed-operations.md), [27](../27-advanced-data-patterns.md) · Case study: [13](../case-studies/13-transactional-outbox.md) · Lab: [DS-11](../labs/distributed-systems-labs.md#ds-11-outbox-simulation)
+**Status: Proposed** (tracked in [#98](https://github.com/Delivery-Plus0/delivery-plus/issues/98); **not implemented**) · [ADRs](README.md) · Books: [08](../08-idempotency-and-distributed-operations.md), [27](../27-advanced-data-patterns.md) · Case study: [13](../case-studies/13-transactional-outbox.md) · Lab: [DS-11](../labs/distributed-systems-labs.md#ds-11-outbox-simulation)
 
 ## Context
 

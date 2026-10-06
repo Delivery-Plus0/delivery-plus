@@ -37,7 +37,7 @@
 - Two delivery paths are safe because writes are conditional and repeatable.
 
 **Costs and known gaps**
-- The lease has **no owner token** ([#19](https://github.com/Yousefa7medmaher/delivery-plus/issues/19)), so an expired holder can still finish.
+- The lease has **no owner token** ([#19](https://github.com/Delivery-Plus0/delivery-plus/issues/19)), so an expired holder can still finish.
 - There is **no outbox**: an event can be lost after the commit ([ADR 0010](0010-transactional-outbox.md)).
 - Payment is **simulated** (`Math.random() < PAYMENT_SUCCESS_RATE`). A real provider adds webhooks, provider idempotency keys and reconciliation ([Book 25](../25-payment-systems.md)).
 

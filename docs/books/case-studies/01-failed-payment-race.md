@@ -65,7 +65,7 @@ Two writers changed the same order status:
 ## What can still go wrong
 
 - The event is published **after** the database write with no outbox. A crash between the two loses the event ([case study 13](13-transactional-outbox.md)).
-- Payment side effects use a lease with no owner token ([#19](https://github.com/Yousefa7medmaher/delivery-plus/issues/19)). A slow worker whose lease expired can still finish its side effects while a second worker runs them too.
+- Payment side effects use a lease with no owner token ([#19](https://github.com/Delivery-Plus0/delivery-plus/issues/19)). A slow worker whose lease expired can still finish its side effects while a second worker runs them too.
 - Payment success is simulated: `Math.random() < PAYMENT_SUCCESS_RATE`. There is no real gateway, webhook or reconciliation ([Book 25](../25-payment-systems.md)).
 
 ## What a senior engineer would ask

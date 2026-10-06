@@ -18,12 +18,14 @@
 <p align="center">
   <img src="https://img.shields.io/badge/PRs-welcome-red.svg" alt="PRs Welcome">
   <img src="https://img.shields.io/badge/open%20source-yes-red.svg" alt="Open Source">
-  <img src="https://img.shields.io/badge/build-passing-brightgreen.svg" alt="Build Passing">
+  <a href="https://github.com/Delivery-Plus0/delivery-plus/actions/workflows/ci.yml"><img src="https://github.com/Delivery-Plus0/delivery-plus/actions/workflows/ci.yml/badge.svg?branch=dev" alt="CI"></a>
   <img src="https://img.shields.io/badge/code%20style-eslint-red.svg" alt="Code Style: ESLint">
   <img src="https://img.shields.io/badge/tests-jest-red.svg?logo=jest&logoColor=white" alt="Tests: Jest (workspace tests)">
 </p>
 
 <p align="center">
+  <a href="#-the-delivery-plus-platform">Platform</a> ·
+  <a href="#-project-status">Status</a> ·
   <a href="#-architecture">Architecture</a> ·
   <a href="#-tech-stack">Tech Stack</a> ·
   <a href="#-services">Services</a> ·
@@ -41,7 +43,56 @@
 
 For a one-page status of what is implemented, partial, or missing today, see [`.project-context/16-current-state.md`](./.project-context/16-current-state.md).
 
-This is a **backend-only** repository — no frontend/UI is included here by design. It's meant to be consumed by web, mobile, or third-party clients through the **API Gateway**.
+This is the **backend** of the Delivery Plus platform — no frontend/UI is included here by design. The customer, driver and restaurant apps live in companion repositories (below) and, like any third-party client, talk to the platform only through the **API Gateway**.
+
+## <img src="./assets/icons/overview.png" width="26" valign="middle"> The Delivery Plus platform
+
+Delivery Plus connects three roles around one order: a **customer** orders from a **restaurant**, the restaurant prepares it, the platform dispatches a **driver**, and everyone follows the same order and delivery state in real time.
+
+```text
+Delivery Plus  (github.com/Delivery-Plus0)
+│
+├── delivery-plus                  Backend platform (this repository)
+│   └── 12 NestJS services behind one API Gateway · Kafka events · PostgreSQL · Redis · S3
+│
+├── delivery-plus-customer-app     Customer app (Expo / React Native: Android, iOS, web)
+│   └── browse · cart · checkout · order status · live driver tracking · alerts
+│
+├── delivery-plus-driver-app       Driver app (Expo / React Native)
+│   └── online/offline · automatic job assignment · pickup → delivered · location sharing
+│
+└── delivery-plus-restaurant-app   Restaurant app (Expo / React Native, web-first)
+    └── incoming orders · kitchen workflow (preparing → ready for pickup) · availability
+```
+
+| Repository | Responsibility | Visibility |
+|---|---|---|
+| [`delivery-plus`](https://github.com/Delivery-Plus0/delivery-plus) | Business rules, data, events, auth and the public API. The single source of truth for order, payment, delivery and tracking state; also hosts the project-wide issue tracker and roadmap milestones. | Public |
+| [`delivery-plus-customer-app`](https://github.com/Delivery-Plus0/delivery-plus-customer-app) | The customer experience. | Private |
+| [`delivery-plus-driver-app`](https://github.com/Delivery-Plus0/delivery-plus-driver-app) | The driver experience. | Private |
+| [`delivery-plus-restaurant-app`](https://github.com/Delivery-Plus0/delivery-plus-restaurant-app) | The restaurant experience. | Private |
+
+How they interact: every app calls the API Gateway over HTTPS with a JWT whose role (`CUSTOMER`, `DRIVER`, `RESTAURANT_OWNER`) decides what it may do; the apps never talk to each other or to individual services. State changes flow through the backend (for example: restaurant marks an order ready → `order.ready_for_pickup` → automatic dispatch assigns an online driver → the driver app sees the job → the customer app shows the driver and the live map). Each app's E2E suite runs against this repository's isolated E2E stack, and the customer app's business flow drives all three apps in one browser.
+
+## <img src="./assets/icons/overview.png" width="26" valign="middle"> Project status
+
+Honest status, tracked in this repository's [milestones](https://github.com/Delivery-Plus0/delivery-plus/milestones). Details per area: [`.project-context/16-current-state.md`](./.project-context/16-current-state.md).
+
+**Implemented**
+- Accounts and roles (customer, driver, restaurant owner, admin) with JWT; restaurants, menus with availability, Redis cart
+- Order lifecycle with idempotent creation; order and delivery events via a transactional outbox; Kafka consumers with dedupe, retries and dead-letter topics
+- **Simulated** payments (no real card provider)
+- Automatic driver dispatch, driver availability and the delivery lifecycle (assigned → picked up → in transit → delivered)
+- Live tracking: driver location bound to the active delivery, tracking lifecycle, server-sent events with polling fallback; a customer-safe driver card (first name, vehicle, plate)
+- In-app notifications for each order stage (no push notifications)
+- S3-compatible media uploads via presigned POST
+
+**In progress** — [Product sprint · Business & UX](https://github.com/Delivery-Plus0/delivery-plus/milestone/10): live order screen (#140) and driver dashboard (#141) are done; driver/customer history, ratings, menu management UI, profiles, Egypt locale, Arabic/RTL and OTP are open (#142–#155).
+
+**Planned / not built yet**
+- Real payment provider, driver earnings and wallet (#145, #146)
+- Push notifications ([Phase 6](https://github.com/Delivery-Plus0/delivery-plus/milestone/6)); ETA estimation (the contract exists, no estimator)
+- Production readiness: deployment target, observability, hardening ([Phase 9](https://github.com/Delivery-Plus0/delivery-plus/milestone/9))
 
 ## <img src="./assets/icons/architecture.png" width="26" valign="middle"> Architecture
 
@@ -98,7 +149,7 @@ flowchart LR
     NOTIF --> PG
 ```
 
-Every service is self-contained and shares a common foundation through the internal `shared` library. The shared package provides enums, transition helpers, Kafka/Redis helpers, S3 media storage, internal service authentication, JWT and role guards, logging, and common NestJS utilities. Redis is also used for caching, rate limits, and internal-auth nonces, which the diagram omits for readability. Kafka consumers deduplicate events per consumer group in Redis, retry a failing handler three times, then park the message in a `<topic>.dlq` dead-letter topic that `npm run kafka:dlq` can list and replay; events are keyed by `orderId`. There is no transactional outbox yet.
+Every service is self-contained and shares a common foundation through the internal `shared` library. The shared package provides enums, transition helpers, Kafka/Redis helpers, S3 media storage, internal service authentication, JWT and role guards, logging, and common NestJS utilities. Redis is also used for caching, rate limits, and internal-auth nonces, which the diagram omits for readability. Kafka consumers deduplicate events per consumer group in Redis, retry a failing handler three times, then park the message in a `<topic>.dlq` dead-letter topic that `npm run kafka:dlq` can list and replay; events are keyed by `orderId`. Order and delivery events go through a transactional outbox (written in the same database transaction as the state change, then relayed to Kafka); payment-service still publishes directly, at most once per payment status.
 
 ## <img src="./assets/icons/tech_stack.png" width="26" valign="middle"> Tech Stack
 
@@ -144,7 +195,7 @@ Every service, including the API Gateway, exposes a `/health` route used by Comp
 
 ```bash
 # clone the repo
-git clone https://github.com/<your-org>/delivery-plus.git
+git clone https://github.com/Delivery-Plus0/delivery-plus.git
 cd delivery-plus
 
 # install dependencies
@@ -212,6 +263,10 @@ npm run e2e
 - [`docs/architecture.md`](./docs/architecture.md) — deep dive into service boundaries & event flows
 - [`docs/deployment.md`](./docs/deployment.md) — environment variables, ports, deployment guide
 - [`docs/services.md`](./docs/services.md) — per-service API reference
+
+### Related repositories
+
+- [Delivery Plus Customer App](https://github.com/Delivery-Plus0/delivery-plus-customer-app) · [Driver App](https://github.com/Delivery-Plus0/delivery-plus-driver-app) · [Restaurant App](https://github.com/Delivery-Plus0/delivery-plus-restaurant-app)
 
 ## <img src="./assets/icons/contributing.png" width="26" valign="middle"> Contributing
 

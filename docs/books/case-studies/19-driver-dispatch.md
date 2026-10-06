@@ -1,6 +1,6 @@
 # Case Study 19 — Driver Dispatch
 
-**Status: PARTIAL (automatic dispatch CURRENT since [#97](https://github.com/Yousefa7medmaher/delivery-plus/issues/97); driver choice still ignores location and fairness)** · [Case studies](README.md) · Books: [23](../23-geo-location-systems.md), [24](../24-system-design.md) · Lab: [GEO-07](../labs/geo-and-algorithms-labs.md#geo-07-greedy-vs-batch-assignment)
+**Status: PARTIAL (automatic dispatch CURRENT since [#97](https://github.com/Delivery-Plus0/delivery-plus/issues/97); driver choice still ignores location and fairness)** · [Case studies](README.md) · Books: [23](../23-geo-location-systems.md), [24](../24-system-design.md) · Lab: [GEO-07](../labs/geo-and-algorithms-labs.md#geo-07-greedy-vs-batch-assignment)
 
 ## How dispatch works today (CURRENT)
 

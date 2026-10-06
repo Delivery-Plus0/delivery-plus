@@ -1,6 +1,6 @@
 # Case Study 13 — Transactional Outbox
 
-**Status: PLANNED ([#98](https://github.com/Yousefa7medmaher/delivery-plus/issues/98)); not implemented** · [Case studies](README.md) · Books: [08](../08-idempotency-and-distributed-operations.md), [27](../27-advanced-data-patterns.md) · ADR: [0010](../adrs/0010-transactional-outbox.md) · Lab: [DS-11](../labs/distributed-systems-labs.md#ds-11-outbox-simulation)
+**Status: PLANNED ([#98](https://github.com/Delivery-Plus0/delivery-plus/issues/98)); not implemented** · [Case studies](README.md) · Books: [08](../08-idempotency-and-distributed-operations.md), [27](../27-advanced-data-patterns.md) · ADR: [0010](../adrs/0010-transactional-outbox.md) · Lab: [DS-11](../labs/distributed-systems-labs.md#ds-11-outbox-simulation)
 
 ## The problem (CURRENT)
 

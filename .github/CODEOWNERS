@@ -1,6 +1,6 @@
-# Replace these placeholders with real GitHub usernames or teams.
-/shared/ @repository-maintainers
-/.github/ @repository-maintainers
-/Dockerfile @repository-maintainers
-/docker-compose.yml @repository-maintainers
-/SECURITY.md @repository-maintainers
+# Code owners: the Delivery Plus maintainers team (github.com/orgs/Delivery-Plus0/teams/maintainers).
+/shared/ @Delivery-Plus0/maintainers
+/.github/ @Delivery-Plus0/maintainers
+/Dockerfile @Delivery-Plus0/maintainers
+/docker-compose.yml @Delivery-Plus0/maintainers
+/SECURITY.md @Delivery-Plus0/maintainers

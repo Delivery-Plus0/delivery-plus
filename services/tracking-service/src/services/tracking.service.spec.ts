@@ -4,6 +4,7 @@ import { DeliveryServiceClient } from '../common/delivery-service.client';
 import { DriverServiceClient } from '../common/driver-service.client';
 import { DeliveryStatus, ForbiddenError, NotFoundError, UserRole } from '@food-delivery/shared';
 import { TrackingState } from './tracking-state';
+import { TrackingEventsBus } from '../common/tracking-events.bus';
 
 describe('TrackingService', () => {
   let service: TrackingService;
@@ -26,8 +27,17 @@ describe('TrackingService', () => {
       getDriver: jest.fn(),
     } as unknown as jest.Mocked<DriverServiceClient>;
 
-    service = new TrackingService(locationRepository, deliveryClient, driverClient, { locationStaleAfterSeconds: 60 });
+    events = { publishDriverLocation: jest.fn(async () => 1) };
+    service = new TrackingService(
+      locationRepository,
+      deliveryClient,
+      driverClient,
+      { locationStaleAfterSeconds: 60 },
+      events as unknown as TrackingEventsBus,
+    );
   });
+
+  let events: { publishDriverLocation: jest.Mock };
 
   describe('updateLocation', () => {
     it('saves and returns the location with a timestamp', async () => {
@@ -37,6 +47,58 @@ describe('TrackingService', () => {
       expect(locationRepository.save).toHaveBeenCalledWith(
         expect.objectContaining({ userId: 'user-1', latitude: 30.1, longitude: 31.2 }),
       );
+    });
+
+    it('wakes realtime subscribers after the position is stored (#135)', async () => {
+      const order: string[] = [];
+      locationRepository.save.mockImplementation(async () => {
+        order.push('save');
+      });
+      events.publishDriverLocation.mockImplementation(async () => {
+        order.push('publish');
+        return 1;
+      });
+
+      await service.updateLocation('user-1', { latitude: 30.1, longitude: 31.2 });
+
+      expect(events.publishDriverLocation).toHaveBeenCalledWith('user-1');
+      expect(order).toEqual(['save', 'publish']);
+    });
+
+    it('a failed realtime publish does not fail the report (streams resync and clients fall back)', async () => {
+      events.publishDriverLocation.mockRejectedValue(new Error('redis down'));
+      await expect(service.updateLocation('user-1', { latitude: 30.1, longitude: 31.2 })).resolves.toMatchObject({
+        userId: 'user-1',
+      });
+    });
+  });
+
+  describe('loadDeliveryContext + snapshot (the steps the realtime stream reuses)', () => {
+    it('loads the delivery as the caller and resolves the driver user once; snapshot reads only Redis', async () => {
+      deliveryClient.getDelivery.mockResolvedValue({
+        id: 'delivery-1',
+        orderId: 'order-1',
+        driverId: 'driver-1',
+        status: DeliveryStatus.IN_TRANSIT,
+      });
+      driverClient.getDriver.mockResolvedValue({ id: 'driver-1', userId: 'user-1' });
+      locationRepository.find.mockResolvedValue({ userId: 'user-1', latitude: 1, longitude: 2, updatedAt: new Date().toISOString() });
+
+      const context = await service.loadDeliveryContext('delivery-1', 'Bearer x');
+      expect(context).toEqual({ deliveryId: 'delivery-1', status: DeliveryStatus.IN_TRANSIT, driverId: 'driver-1', driverUserId: 'user-1' });
+
+      deliveryClient.getDelivery.mockClear();
+      driverClient.getDriver.mockClear();
+      const snapshot = await service.snapshot(context);
+      expect(snapshot).toMatchObject({ tracking: TrackingState.LIVE, location: { latitude: 1 } });
+      expect(deliveryClient.getDelivery).not.toHaveBeenCalled();
+      expect(driverClient.getDriver).not.toHaveBeenCalled();
+    });
+
+    it('a finished delivery has no driver user to follow', async () => {
+      deliveryClient.getDelivery.mockResolvedValue({ id: 'd', orderId: 'o', driverId: 'driver-1', status: DeliveryStatus.DELIVERED });
+      await expect(service.loadDeliveryContext('d', 'Bearer x')).resolves.toMatchObject({ driverUserId: null });
+      expect(driverClient.getDriver).not.toHaveBeenCalled();
     });
   });
 

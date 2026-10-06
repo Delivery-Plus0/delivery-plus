@@ -133,6 +133,7 @@ export const SERVICE_DEFINITIONS = [
       { method: 'post', path: '/location', summary: 'Report the current driver location', auth: true, statusCode: 201 },
       { method: 'get', path: '/driver/:userId', summary: 'Get a driver location by user id', auth: true, statusCode: 200 },
       { method: 'get', path: '/delivery/:deliveryId', summary: 'Get combined delivery tracking', auth: true, statusCode: 200 },
+      { method: 'get', path: '/delivery/:deliveryId/stream', summary: 'Stream delivery tracking updates (Server-Sent Events)', auth: true, statusCode: 200 },
     ],
   },
   {

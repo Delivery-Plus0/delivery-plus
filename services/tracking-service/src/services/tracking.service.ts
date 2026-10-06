@@ -1,8 +1,9 @@
-import { Inject, Injectable } from '@nestjs/common';
-import { ForbiddenError, JwtPayload, NotFoundError, UserRole } from '@food-delivery/shared';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { DeliveryStatus, ForbiddenError, JwtPayload, NotFoundError, UserRole } from '@food-delivery/shared';
 import { LocationRepository } from '../repositories/location.repository';
 import { DeliveryServiceClient } from '../common/delivery-service.client';
 import { DriverServiceClient } from '../common/driver-service.client';
+import { TrackingEventsBus } from '../common/tracking-events.bus';
 import { UpdateLocationDto } from '../dto/update-location.dto';
 import { DriverLocation } from '../entities/location.model';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
@@ -21,11 +22,14 @@ export interface DeliveryTrackingInfo {
 
 @Injectable()
 export class TrackingService {
+  private readonly logger = new Logger(TrackingService.name);
+
   constructor(
     private readonly locationRepository: LocationRepository,
     private readonly deliveryClient: DeliveryServiceClient,
     private readonly driverClient: DriverServiceClient,
     @Inject(APP_CONFIG) private readonly config: Pick<AppConfig, 'locationStaleAfterSeconds'>,
+    private readonly events: TrackingEventsBus,
   ) {}
 
   async updateLocation(userId: string, dto: UpdateLocationDto): Promise<DriverLocation> {
@@ -36,6 +40,11 @@ export class TrackingService {
       updatedAt: new Date().toISOString(),
     };
     await this.locationRepository.save(location);
+    // Wake realtime subscribers of this driver's delivery (#135). The stored location stays the only
+    // source of truth: the message carries no position, and a lost message is caught by the resync.
+    await this.events.publishDriverLocation(userId).catch((error: Error) =>
+      this.logger.warn(`tracking.push.publish_failed driver location trigger not published: ${error.message}`),
+    );
     return location;
   }
 
@@ -66,25 +75,43 @@ export class TrackingService {
    * position at all (ENDED), even while the driver's last report is still in Redis.
    */
   async getDeliveryTracking(deliveryId: string, authHeader: string): Promise<DeliveryTrackingInfo> {
+    return this.snapshot(await this.loadDeliveryContext(deliveryId, authHeader));
+  }
+
+  /**
+   * Step 1 of a tracking read: the delivery as the caller may see it (delivery-service authorizes with
+   * the caller's token, so this throws Forbidden/NotFound for anyone else) plus the user id its current
+   * driver reports locations under. Finished deliveries skip the driver lookup.
+   */
+  async loadDeliveryContext(deliveryId: string, authHeader: string): Promise<DeliveryTrackingContext> {
     const delivery = await this.deliveryClient.getDelivery(deliveryId, authHeader);
-
-    let location: DriverLocation | null = null;
+    let driverUserId: string | null = null;
     if (delivery.driverId && !isTrackingFinished(delivery.status)) {
-      const driver = await this.driverClient.getDriver(delivery.driverId);
-      location = await this.locationRepository.find(driver.userId);
+      driverUserId = (await this.driverClient.getDriver(delivery.driverId)).userId;
     }
+    return { deliveryId, status: delivery.status, driverId: delivery.driverId, driverUserId };
+  }
 
+  /**
+   * Step 2: the tracking read for a known context, reading only the driver's last position from Redis.
+   * The realtime stream calls this alone on a driver location report and both steps on delivery changes.
+   */
+  async snapshot(context: DeliveryTrackingContext, now = new Date()): Promise<DeliveryTrackingInfo> {
+    const location = context.driverUserId ? await this.locationRepository.find(context.driverUserId) : null;
     return {
-      deliveryId,
-      status: delivery.status,
-      driverId: delivery.driverId,
-      ...resolveTracking(
-        delivery.status,
-        delivery.driverId,
-        location,
-        new Date(),
-        this.config.locationStaleAfterSeconds,
-      ),
+      deliveryId: context.deliveryId,
+      status: context.status,
+      driverId: context.driverId,
+      ...resolveTracking(context.status, context.driverId, location, now, this.config.locationStaleAfterSeconds),
     };
   }
+}
+
+/** The delivery facts a tracking read depends on; see TrackingService.loadDeliveryContext. */
+export interface DeliveryTrackingContext {
+  deliveryId: string;
+  status: DeliveryStatus;
+  driverId?: string;
+  /** User id the current driver reports locations under; null without a driver or once finished. */
+  driverUserId: string | null;
 }

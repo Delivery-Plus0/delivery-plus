@@ -326,12 +326,15 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
       DELIVERY_SERVICE_URL: http://delivery-service:3008
       DRIVER_SERVICE_URL: http://driver-service:3009
+      KAFKA_BROKER: kafka:29092
     healthcheck:
       test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3010/health']
       interval: 5s
       timeout: 5s
       retries: 10
     depends_on:
+      kafka:
+        condition: service_healthy
       redis:
         condition: service_healthy
       delivery-service:

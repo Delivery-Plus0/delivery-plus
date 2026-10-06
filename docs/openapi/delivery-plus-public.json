@@ -2678,6 +2678,51 @@
         ]
       }
     },
+    "/api/tracking/delivery/{deliveryId}/stream": {
+      "get": {
+        "summary": "Stream delivery tracking updates (Server-Sent Events)",
+        "tags": [
+          "tracking"
+        ],
+        "operationId": "tracking_get_api_tracking_delivery_deliveryId_stream",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "parameters": [
+          {
+            "name": "deliveryId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/notifications": {
       "get": {
         "summary": "List notifications for the current user",

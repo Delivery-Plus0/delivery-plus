@@ -32,7 +32,7 @@ This file is the high-level dependency map. For deeper service-by-service detail
 - `order-service` orchestrates state changes using cart and restaurant checks
 - `payment-service` updates order status based on payment outcome
 - `delivery-service` dispatches automatically on `order.ready_for_pickup` (create + assign; deliveries waiting for a driver are retried every `AUTO_DISPATCH_SWEEP_MS`), assigns drivers (claim AVAILABLE → BUSY, moving to the next driver if a concurrent assignment wins), updates order status and publishes `delivery.events`
-- `tracking-service` enriches delivery progress using delivery and driver service data
+- `tracking-service` enriches delivery progress using delivery and driver service data. Each delivery read resolves to one lifecycle state (`NO_DRIVER`, `AWAITING_LOCATION`, `LIVE`, `STALE`, `ENDED`); see [docs/services/tracking-service.md](../docs/services/tracking-service.md)
 - `notification-service` listens for asynchronous events, but payment and delivery handlers currently contain no-op behavior pending the required lookup/contract work
 
 ## Notes

@@ -235,6 +235,15 @@ async function runE2E() {
     }
     console.log(`Driver sees current delivery: pickup ${current.data.pickup.name}, drop-off ${current.data.dropOff.address}`);
 
+    // Tracking lifecycle (#32): once the driver reports a position the customer sees it LIVE; after
+    // delivery the same read is ENDED and returns no position, although Redis still holds the report.
+    const trackingUrl = `${API_URL}/api/tracking/delivery/${deliveryId}`;
+    await axios.post(`${API_URL}/api/tracking/location`, { latitude: 30.0444, longitude: 31.2357 }, driverAuth);
+    const liveTracking = (await axios.get(trackingUrl, customerAuth)).data;
+    if (liveTracking.tracking !== 'LIVE' || liveTracking.location?.latitude !== 30.0444) {
+      throw new Error(`Customer tracking while on the job: expected LIVE with the position, got ${JSON.stringify(liveTracking)}`);
+    }
+
     await axios.post(`${API_URL}/api/deliveries/${deliveryId}/pickup`, {}, driverAuth);
     await axios.post(`${API_URL}/api/deliveries/${deliveryId}/start`, {}, driverAuth);
     await axios.post(`${API_URL}/api/deliveries/${deliveryId}/complete`, {}, driverAuth);
@@ -243,6 +252,11 @@ async function runE2E() {
     if (afterComplete.status !== 204) {
       throw new Error(`After completion the driver should have no current delivery (204), got ${afterComplete.status}`);
     }
+    const endedTracking = (await axios.get(trackingUrl, customerAuth)).data;
+    if (endedTracking.tracking !== 'ENDED' || endedTracking.location !== null) {
+      throw new Error(`Customer tracking after delivery: expected ENDED without a position, got ${JSON.stringify(endedTracking)}`);
+    }
+    console.log('Tracking lifecycle: LIVE while on the job, ENDED (no position) after delivery');
 
     const deliveredOrder = await waitFor(
       'order to reach DELIVERED',

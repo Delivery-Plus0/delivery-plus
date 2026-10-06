@@ -10,6 +10,8 @@ import { DeliveriesController } from '../../controllers/deliveries.controller';
 import { OrderServiceClient } from '../../common/order-service.client';
 import { DriverServiceClient } from '../../common/driver-service.client';
 import { RestaurantServiceClient } from '../../common/restaurant-service.client';
+import { UserServiceClient } from '../../common/user-service.client';
+import { DriverCardService } from '../../services/driver-card.service';
 import { SystemTokenService } from '../../common/system-token.service';
 import { OutboxRelayService } from '../../common/outbox-relay.service';
 import { APP_CONFIG, AppConfig } from '../../config/app-config';
@@ -32,6 +34,8 @@ import { APP_CONFIG, AppConfig } from '../../config/app-config';
     OrderServiceClient,
     DriverServiceClient,
     RestaurantServiceClient,
+    UserServiceClient,
+    DriverCardService,
     SystemTokenService,
   ],
 })

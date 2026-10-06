@@ -388,6 +388,23 @@ async function runE2E() {
     }
     console.log('Tracking authorization: another customer gets 403 on the delivery tracking and the raw driver location');
 
+    // Driver card (#140): the order's customer sees who is coming (first name, photo, vehicle, plate)
+    // and nothing else; another customer can't read the delivery at all.
+    const byOrderUrl = `${API_URL}/api/deliveries/by-order/${orderId}`;
+    const card = (await axios.get(byOrderUrl, customerAuth)).data.driver;
+    if (!card || typeof card.displayName !== 'string' || card.displayName.length === 0) {
+      throw new Error(`Driver card: expected the assigned driver's card, got ${JSON.stringify(card)}`);
+    }
+    const cardKeys = Object.keys(card).sort().join(',');
+    if (cardKeys !== 'avatarUrl,displayName,licensePlate,vehicleType' || /@|\+20|userId/.test(JSON.stringify(card))) {
+      throw new Error(`Driver card must expose only display fields, got ${JSON.stringify(card)}`);
+    }
+    const outsiderByOrder = await statusOf(axios.get(byOrderUrl, outsiderAuth));
+    if (outsiderByOrder !== 403) {
+      throw new Error(`Another customer got ${outsiderByOrder} on the delivery read, expected 403`);
+    }
+    console.log(`Driver card: ${card.displayName}, ${card.vehicleType ?? 'no vehicle'} ${card.licensePlate ?? ''}; another customer 403`);
+
     // Realtime stream (#135): authorized before streaming, then pushes what changes.
     const anonymousStream = await openTrackingStream(deliveryId, null);
     const outsiderStream = await openTrackingStream(deliveryId, outsider.data.accessToken);

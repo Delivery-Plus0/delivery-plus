@@ -9,6 +9,8 @@ export interface AppConfig {
   orderServiceUrl: string;
   driverServiceUrl: string;
   restaurantServiceUrl: string;
+  /** user-service, for the customer-safe driver card (display name, photo) (#140). */
+  userServiceUrl: string;
   /** How often auto-dispatch retries deliveries waiting for a driver; 0 disables the retry. */
   autoDispatchSweepMs: number;
   /** How often drivers left BUSY after a finished delivery are released; 0 disables it (#98). */
@@ -33,6 +35,7 @@ export function loadConfig(): AppConfig {
     orderServiceUrl: process.env.ORDER_SERVICE_URL || 'http://localhost:3006',
     driverServiceUrl: process.env.DRIVER_SERVICE_URL || 'http://localhost:3009',
     restaurantServiceUrl: process.env.RESTAURANT_SERVICE_URL || 'http://localhost:3003',
+    userServiceUrl: process.env.USER_SERVICE_URL || 'http://localhost:3002',
     autoDispatchSweepMs: parseInt(process.env.AUTO_DISPATCH_SWEEP_MS || '15000', 10),
     driverReconcileSweepMs: parseInt(process.env.DRIVER_RECONCILE_SWEEP_MS || '60000', 10),
     driverReconcileGraceMs: parseInt(process.env.DRIVER_RECONCILE_GRACE_MS || '60000', 10),

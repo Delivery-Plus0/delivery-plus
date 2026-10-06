@@ -87,7 +87,7 @@ No workflow collects test coverage.
 Tracked as GitHub milestones (Phase 1–9). Phase 3 (automatic dispatch + driver contracts) is complete.
 
 1. **Phase 4 is complete.** Three private client repos, each with CI, Security and E2E workflows: `delivery-plus-customer-app`, `delivery-plus-driver-app` (#99, closed) and `delivery-plus-restaurant-app` (#100, closed). The business flow runs through all three UIs with no API stand-ins (customer-app #20).
-2. **#98 transactional outbox**: order and delivery events are published if and only if their change committed. Left in #98: reconciling a driver release that failed and was never retried.
+2. **#98 transactional outbox + driver release reconciliation**: order and delivery events are published if and only if their change committed, and a driver release that failed and was never retried is repaired by a sweep.
 3. **Next**: Phase 6 notifications (#5 `customerId` in payloads + handlers), #125 (owners must not set or lift `SUSPENDED`), #7 graceful shutdown.
 4. **Open findings from the 2026-10-01 code review** (most unfiled): see [13-known-issues-and-gotchas.md](./13-known-issues-and-gotchas.md).
 

@@ -3,6 +3,7 @@ import { ApiTags, ApiOperation, ApiBearerAuth, ApiNoContentResponse, ApiOkRespon
 import type { Response } from 'express';
 import { JwtAuthGuard, CurrentUser, JwtPayload, Roles, RolesGuard, UserRole } from '@food-delivery/shared';
 import { DeliveriesService } from '../services/deliveries.service';
+import { DriverCardService } from '../services/driver-card.service';
 import { CreateDeliveryDto } from '../dto/create-delivery.dto';
 import { DriverCurrentDeliveryDto } from '../dto/driver-current-delivery.dto';
 
@@ -11,7 +12,10 @@ import { DriverCurrentDeliveryDto } from '../dto/driver-current-delivery.dto';
 @UseGuards(JwtAuthGuard)
 @Controller('deliveries')
 export class DeliveriesController {
-  constructor(private readonly deliveriesService: DeliveriesService) {}
+  constructor(
+    private readonly deliveriesService: DeliveriesService,
+    private readonly driverCards: DriverCardService,
+  ) {}
 
   @Post()
   @ApiOperation({ summary: 'Create a delivery for an order that is READY_FOR_PICKUP' })
@@ -74,13 +78,18 @@ export class DeliveriesController {
   @Get('by-order/:orderId')
   @ApiOperation({
     summary: 'Get the delivery for an order (order owner, its restaurant owner, the assigned driver, or admin)',
+    description:
+      'Includes `driver`: a customer-safe card (first name, photo, vehicle, plate) once a driver is assigned, null otherwise or when it cannot be composed (#140).',
   })
-  getByOrderId(
+  async getByOrderId(
     @Param('orderId') orderId: string,
     @CurrentUser() user: JwtPayload,
     @Headers('authorization') authHeader: string,
   ) {
-    return this.deliveriesService.getByOrderId(orderId, { userId: user.sub, role: user.role, authHeader });
+    // Authorization happens in getByOrderId; the card is only added to a delivery the reader may see.
+    const delivery = await this.deliveriesService.getByOrderId(orderId, { userId: user.sub, role: user.role, authHeader });
+    const driver = delivery.driverId ? await this.driverCards.getCard(delivery.driverId) : null;
+    return { ...delivery, driver };
   }
 
   @Get(':id')

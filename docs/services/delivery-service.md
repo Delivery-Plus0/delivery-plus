@@ -25,6 +25,13 @@ From `services/delivery-service/src/controllers/deliveries.controller.ts`:
 - Publishes `delivery.events`; consumes `order.ready_for_pickup` (auto-dispatch)
 
 ## Events published/consumed
+## Driver card on the delivery read (#140)
+`GET /deliveries/by-order/:orderId` includes `driver: { displayName, avatarUrl, vehicleType, licensePlate } | null`. This is what the order's customer (and its restaurant owner) may see about who is delivering.
+- **Fields:** first name only, photo, vehicle and plate; never the phone, email, user id, identity data or location.
+- **Order of checks:** authorization runs first, and the card is added only to a delivery the reader may already see.
+- **How it's built:** server-side with the system token, from driver-service (vehicle) and user-service (name, photo), cached for 60 s.
+- **When it's null:** while no driver is assigned, and whenever a lookup fails (the read itself still succeeds).
+
 Every lifecycle transition publishes to `delivery.events`: `delivery.created`, `delivery.driver_assigned`, `delivery.picked_up`, `delivery.in_transit`, `delivery.completed`, `delivery.cancelled`. Payload: `{ deliveryId, orderId, customerId?, driverId?, assignedAt?, status }`.
 - `customerId` was added in #5.
 - `assignedAt` (#46) is when the current driver's claim was accepted. delivery-service writes it with the assignment, and it is the same on every event after that (see the assignment contract in [tracking-service](./tracking-service.md#assignment-and-eta-contract-46)).

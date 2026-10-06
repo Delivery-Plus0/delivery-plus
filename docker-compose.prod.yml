@@ -275,6 +275,7 @@ services:
       ORDER_SERVICE_URL: http://order-service:3006
       DRIVER_SERVICE_URL: http://driver-service:3009
       RESTAURANT_SERVICE_URL: http://restaurant-service:3003
+      USER_SERVICE_URL: http://user-service:3002
     healthcheck:
       test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3008/health']
       interval: 5s

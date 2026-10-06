@@ -49,6 +49,88 @@ async function waitFor<T>(
 }
 
 /** HTTP status of a request, whether it succeeded or failed. */
+type TrackingSnapshot = {
+  tracking: string;
+  status: string;
+  driverId?: string;
+  location: { latitude: number; longitude: number; updatedAt: string } | null;
+};
+
+/**
+ * Minimal Server-Sent Events reader over fetch for GET /api/tracking/delivery/:id/stream (#135):
+ * `next()` resolves with the next `tracking` event, `ended()` once the server closes the stream.
+ */
+async function openTrackingStream(deliveryId: string, token: string | null) {
+  const controller = new AbortController();
+  const response = await fetch(`${API_URL}/api/tracking/delivery/${deliveryId}/stream`, {
+    headers: { Accept: 'text/event-stream', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    signal: controller.signal,
+  });
+  const queue: TrackingSnapshot[] = [];
+  const waiters: ((snapshot: TrackingSnapshot) => void)[] = [];
+  let finished = false;
+  let onFinished: () => void = () => undefined;
+  const finishedPromise = new Promise<void>((resolve) => (onFinished = resolve));
+
+  if (response.ok && response.body) {
+    void (async () => {
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let boundary: number;
+          while ((boundary = buffer.indexOf('\n\n')) >= 0) {
+            const block = buffer.slice(0, boundary);
+            buffer = buffer.slice(boundary + 2);
+            const event = /^event: (.*)$/m.exec(block)?.[1];
+            const data = /^data: (.*)$/m.exec(block)?.[1];
+            if (event === 'tracking' && data) {
+              const snapshot = JSON.parse(data) as TrackingSnapshot;
+              const waiter = waiters.shift();
+              if (waiter) waiter(snapshot);
+              else queue.push(snapshot);
+            }
+          }
+        }
+      } catch {
+        // aborted
+      } finally {
+        finished = true;
+        onFinished();
+      }
+    })();
+  } else {
+    await response.body?.cancel();
+    finished = true;
+    onFinished();
+  }
+
+  return {
+    status: response.status,
+    contentType: response.headers.get('content-type') ?? '',
+    next(timeoutMs = 10_000): Promise<TrackingSnapshot> {
+      const queued = queue.shift();
+      if (queued) return Promise.resolve(queued);
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(`No tracking event within ${timeoutMs} ms`)), timeoutMs);
+        waiters.push((snapshot) => {
+          clearTimeout(timer);
+          resolve(snapshot);
+        });
+      });
+    },
+    async ended(timeoutMs = 10_000): Promise<boolean> {
+      if (finished) return true;
+      return Promise.race([finishedPromise.then(() => true), sleep(timeoutMs).then(() => false)]);
+    },
+    close: () => controller.abort(),
+  };
+}
+
 async function statusOf(request: Promise<unknown>): Promise<number> {
   try {
     const response = (await request) as { status: number };
@@ -263,6 +345,29 @@ async function runE2E() {
     }
     console.log('Tracking authorization: another customer gets 403 on the delivery tracking and the raw driver location');
 
+    // Realtime stream (#135): authorized before streaming, then pushes what changes.
+    const anonymousStream = await openTrackingStream(deliveryId, null);
+    const outsiderStream = await openTrackingStream(deliveryId, outsider.data.accessToken);
+    if (anonymousStream.status !== 401 || outsiderStream.status !== 403) {
+      throw new Error(`Tracking stream: anonymous got ${anonymousStream.status} (expected 401), another customer got ${outsiderStream.status} (expected 403)`);
+    }
+    const trackingStream = await openTrackingStream(deliveryId, customerToken);
+    if (trackingStream.status !== 200 || !trackingStream.contentType.startsWith('text/event-stream')) {
+      throw new Error(`Tracking stream: expected 200 text/event-stream, got ${trackingStream.status} ${trackingStream.contentType}`);
+    }
+    const streamedFirst = await trackingStream.next();
+    if (streamedFirst.tracking !== 'LIVE' || streamedFirst.location?.latitude !== 30.0444) {
+      throw new Error(`Tracking stream: first event should be the current LIVE state, got ${JSON.stringify(streamedFirst)}`);
+    }
+    // A new report reaches the subscriber by push, well within the 10 s polling interval.
+    const pushStartedAt = Date.now();
+    await axios.post(`${API_URL}/api/tracking/location`, { latitude: 30.05, longitude: 31.24 }, driverAuth);
+    const pushed = await trackingStream.next(5_000);
+    if (pushed.tracking !== 'LIVE' || pushed.location?.latitude !== 30.05) {
+      throw new Error(`Tracking stream: expected the new position pushed, got ${JSON.stringify(pushed)}`);
+    }
+    console.log(`Tracking stream: 401 anonymous, 403 another customer; new driver position pushed in ${Date.now() - pushStartedAt} ms`);
+
     await axios.post(`${API_URL}/api/deliveries/${deliveryId}/pickup`, {}, driverAuth);
     await axios.post(`${API_URL}/api/deliveries/${deliveryId}/start`, {}, driverAuth);
     await axios.post(`${API_URL}/api/deliveries/${deliveryId}/complete`, {}, driverAuth);
@@ -275,6 +380,21 @@ async function runE2E() {
     if (endedTracking.tracking !== 'ENDED' || endedTracking.location !== null) {
       throw new Error(`Customer tracking after delivery: expected ENDED without a position, got ${JSON.stringify(endedTracking)}`);
     }
+
+    // The stream followed pickup → transit → delivered by push and ends with ENDED (no position), then closes.
+    const streamedStatuses: string[] = [];
+    let streamed = await trackingStream.next(15_000);
+    while (streamed.tracking !== 'ENDED') {
+      streamedStatuses.push(streamed.status);
+      streamed = await trackingStream.next(15_000);
+    }
+    if (streamed.location !== null) {
+      throw new Error(`Tracking stream: ENDED must carry no position, got ${JSON.stringify(streamed)}`);
+    }
+    if (!(await trackingStream.ended(5_000))) {
+      throw new Error('Tracking stream: the server did not close the stream after ENDED');
+    }
+    console.log(`Tracking stream: pushed ${streamedStatuses.join(' → ') || '(no intermediate states)'} → ENDED, then closed`);
     console.log('Tracking lifecycle: LIVE while on the job, ENDED (no position) after delivery');
 
     const deliveredOrder = await waitFor(

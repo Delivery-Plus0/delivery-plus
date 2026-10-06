@@ -160,7 +160,8 @@ async function seedE2e() {
   const item = (name: string) => items.get(name)!;
 
   log('\nOrder scenarios');
-  // S1 delivered: produces an "Order Confirmed" notification and a completed delivery.
+  // S1 delivered: a completed delivery, and one notification per stage (payment received, order
+  // confirmed, driver assigned, picked up, delivered; #5).
   let delivered = await findOrder(customer, 'DELIVERED');
   if (!delivered) {
     log('• S1 delivered (1× QA Burger)');
@@ -192,8 +193,8 @@ async function seedE2e() {
   }
 
   await del('/api/cart', customer);
-  // One "Order confirmed" notification, from S1 (S2's declined payment sends none).
-  const notifications = await waitForNotifications(customer, 1);
+  // Five notifications, all from S1 (S2's declined payment sends none).
+  const notifications = await waitForNotifications(customer, 5);
   const { status: driverStatus } = await get<{ status: string }>('/api/drivers/me', driver);
 
   const manifest = {

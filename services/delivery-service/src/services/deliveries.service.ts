@@ -64,6 +64,7 @@ function deliveryEvent(eventType: DeliveryEventType, delivery: Delivery): Delive
     payload: {
       deliveryId: delivery.id,
       orderId: delivery.orderId,
+      customerId: delivery.customerId || undefined,
       driverId: delivery.driverId || undefined,
       status: delivery.status,
     },
@@ -99,7 +100,9 @@ export class DeliveriesService {
 
     let delivery: Delivery;
     try {
-      delivery = await this.deliveries.create(dto.orderId, (created) => deliveryEvent(DeliveryEventType.CREATED, created));
+      delivery = await this.deliveries.create(dto.orderId, order.customerId ?? null, (created) =>
+        deliveryEvent(DeliveryEventType.CREATED, created),
+      );
     } catch (error) {
       // Two creates (e.g. auto-dispatch and a manual dispatch) passed the check above at the same
       // time; the unique index on orderId let only one insert through.

@@ -189,7 +189,7 @@ describe('PaymentsService', () => {
         expect.objectContaining({
           eventId: paymentEventId(result.id, PaymentEventType.CREATED),
           eventType: PaymentEventType.CREATED,
-          payload: { paymentId: result.id, orderId: 'order-1', amount: 19.98, status: PaymentStatus.PENDING },
+          payload: { paymentId: result.id, orderId: 'order-1', customerId: 'customer-1', amount: 19.98, status: PaymentStatus.PENDING },
         }),
       );
       expect(orderClient.updateOrderStatus).toHaveBeenCalledWith('order-1', OrderStatus.PAYMENT_PENDING);

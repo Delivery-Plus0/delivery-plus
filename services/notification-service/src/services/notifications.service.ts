@@ -1,10 +1,19 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { NotificationsRepository } from '../repositories/notifications.repository';
 import { NotFoundError, PaginatedResult, KafkaConsumerService, TOPICS, OrderEventType, OrderEvent, PaymentEventType, PaymentEvent, DeliveryEventType, DeliveryEvent } from '@food-delivery/shared';
 import { Notification, NotificationType } from '../entities/notification.entity';
 
+/** Delivery stages that notify the customer: (event, notification type, title, message). */
+const DELIVERY_NOTIFICATIONS: Array<[DeliveryEventType, NotificationType, string, (orderId: string) => string]> = [
+  [DeliveryEventType.DRIVER_ASSIGNED, NotificationType.DRIVER_ASSIGNED, 'Driver Assigned', (id) => `A driver is on the way to pick up your order ${id}.`],
+  [DeliveryEventType.PICKED_UP, NotificationType.PICKED_UP, 'Order Picked Up', (id) => `Your order ${id} has been picked up and is on its way.`],
+  [DeliveryEventType.COMPLETED, NotificationType.DELIVERED, 'Order Delivered', (id) => `Your order ${id} has been delivered. Enjoy!`],
+];
+
 @Injectable()
 export class NotificationsService implements OnModuleInit {
+  private readonly logger = new Logger(NotificationsService.name);
+
   constructor(
     private readonly notifications: NotificationsRepository,
     private readonly kafkaConsumer: KafkaConsumerService,
@@ -28,25 +37,39 @@ export class NotificationsService implements OnModuleInit {
       TOPICS.PAYMENT_EVENTS,
       PaymentEventType.COMPLETED,
       async (event) => {
-        // Here we don't have customerId directly, but order-service handles ORDER_CONFIRMED.
-        // For simplicity, let's just log or skip, as ORDER_CONFIRMED covers it, but spec says "payment completion"
-        // In a real app we'd fetch order or include customerId in payment event.
-        // Actually, payment payload doesn't have customerId (wait, we didn't add it?).
-        // Let's assume we fetch it if we needed it. I will leave it empty as order confirmed fires anyway.
+        await this.notifyCustomer(event.payload.customerId, event, NotificationType.PAYMENT_COMPLETED, 'Payment Received',
+          `We received your payment for order ${event.payload.orderId}.`);
       },
     );
 
-    // Delivery events
-    await this.kafkaConsumer.subscribe<DeliveryEvent['payload']>(
-      TOPICS.DELIVERY_EVENTS,
-      DeliveryEventType.DRIVER_ASSIGNED,
-      async (event) => {
-        // Assume we'd look up customer ID from order, but since we don't have it in delivery event...
-        // Let's just consume it to show it works. (In a complete system we'd use OrderServiceClient to fetch it).
-      },
-    );
+    // Delivery events: one notification per stage the customer sees. delivery.created (a driver is being
+    // found) and delivery.in_transit (no matching notification type) are not notified.
+    for (const [eventType, type, title, message] of DELIVERY_NOTIFICATIONS) {
+      await this.kafkaConsumer.subscribe<DeliveryEvent['payload']>(TOPICS.DELIVERY_EVENTS, eventType, async (event) => {
+        await this.notifyCustomer(event.payload.customerId, event, type, title, message(event.payload.orderId));
+      });
+    }
 
     await this.kafkaConsumer.start();
+  }
+
+  /**
+   * Notifies the customer named in the event. Events without a customerId (published before payment and
+   * delivery events carried one) are skipped with a warning rather than guessed: a notification must
+   * never reach the wrong user. Redelivered events are dropped earlier by durable idempotency (eventId).
+   */
+  private async notifyCustomer(
+    customerId: string | undefined,
+    event: { eventId: string; eventType: string },
+    type: NotificationType,
+    title: string,
+    message: string,
+  ): Promise<void> {
+    if (!customerId) {
+      this.logger.warn(`Not notifying for ${event.eventType} ${event.eventId}: the event has no customerId`);
+      return;
+    }
+    await this.createNotification(customerId, type, title, message);
   }
 
   async createNotification(userId: string, type: NotificationType, title: string, message: string): Promise<Notification> {

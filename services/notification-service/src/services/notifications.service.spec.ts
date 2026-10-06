@@ -36,7 +36,7 @@ describe('NotificationsService', () => {
     it('subscribes to the order, payment, and delivery events and starts the consumer', async () => {
       await service.onModuleInit();
 
-      expect(kafkaConsumer.subscribe).toHaveBeenCalledTimes(3);
+      expect(kafkaConsumer.subscribe).toHaveBeenCalledTimes(5);
       expect(kafkaConsumer.subscribe).toHaveBeenNthCalledWith(
         1,
         TOPICS.ORDER_EVENTS,
@@ -49,12 +49,11 @@ describe('NotificationsService', () => {
         PaymentEventType.COMPLETED,
         expect.any(Function),
       );
-      expect(kafkaConsumer.subscribe).toHaveBeenNthCalledWith(
-        3,
-        TOPICS.DELIVERY_EVENTS,
-        DeliveryEventType.DRIVER_ASSIGNED,
-        expect.any(Function),
-      );
+      expect(kafkaConsumer.subscribe.mock.calls.slice(2).map(([topic, type]) => [topic, type])).toEqual([
+        [TOPICS.DELIVERY_EVENTS, DeliveryEventType.DRIVER_ASSIGNED],
+        [TOPICS.DELIVERY_EVENTS, DeliveryEventType.PICKED_UP],
+        [TOPICS.DELIVERY_EVENTS, DeliveryEventType.COMPLETED],
+      ]);
       expect(kafkaConsumer.start).toHaveBeenCalledTimes(1);
     });
 
@@ -94,6 +93,64 @@ describe('NotificationsService', () => {
         'Order Confirmed',
         'Your order order-42 has been confirmed.',
       );
+    });
+  });
+
+  describe('payment and delivery notifications (#5)', () => {
+    const handlerFor = (eventType: string) => {
+      const call = kafkaConsumer.subscribe.mock.calls.find(([, type]) => type === eventType);
+      if (!call) throw new Error(`no handler for ${eventType}`);
+      return call[2] as (event: unknown) => Promise<void>;
+    };
+    const event = (eventType: string, payload: Record<string, unknown>) => ({
+      eventId: `event-${eventType}`,
+      eventType,
+      correlationId: 'corr-1',
+      timestamp: new Date().toISOString(),
+      payload,
+    });
+
+    beforeEach(async () => {
+      repository.create.mockResolvedValue({} as Notification);
+      await service.onModuleInit();
+    });
+
+    it('notifies the paying customer when the payment completes', async () => {
+      await handlerFor(PaymentEventType.COMPLETED)(
+        event(PaymentEventType.COMPLETED, { paymentId: 'p1', orderId: 'order-42', customerId: 'customer-1', amount: 24.5, status: 'COMPLETED' }),
+      );
+
+      expect(repository.create).toHaveBeenCalledWith(
+        'customer-1',
+        NotificationType.PAYMENT_COMPLETED,
+        'Payment Received',
+        'We received your payment for order order-42.',
+      );
+    });
+
+    it.each([
+      [DeliveryEventType.DRIVER_ASSIGNED, NotificationType.DRIVER_ASSIGNED, 'Driver Assigned', 'A driver is on the way to pick up your order order-42.'],
+      [DeliveryEventType.PICKED_UP, NotificationType.PICKED_UP, 'Order Picked Up', 'Your order order-42 has been picked up and is on its way.'],
+      [DeliveryEventType.COMPLETED, NotificationType.DELIVERED, 'Order Delivered', 'Your order order-42 has been delivered. Enjoy!'],
+    ])('notifies the customer on %s', async (eventType, type, title, message) => {
+      await handlerFor(eventType)(event(eventType, { deliveryId: 'd1', orderId: 'order-42', customerId: 'customer-1', status: 'X' }));
+
+      expect(repository.create).toHaveBeenCalledWith('customer-1', type, title, message);
+    });
+
+    it.each([PaymentEventType.COMPLETED, DeliveryEventType.DRIVER_ASSIGNED, DeliveryEventType.PICKED_UP, DeliveryEventType.COMPLETED])(
+      'skips %s without a customerId instead of notifying anyone (older events)',
+      async (eventType) => {
+        await handlerFor(eventType)(event(eventType, { orderId: 'order-42', status: 'X' }));
+
+        expect(repository.create).not.toHaveBeenCalled();
+      },
+    );
+
+    it('does not notify on delivery.created or delivery.in_transit', () => {
+      const subscribed = kafkaConsumer.subscribe.mock.calls.map(([, type]) => type);
+      expect(subscribed).not.toContain(DeliveryEventType.CREATED);
+      expect(subscribed).not.toContain(DeliveryEventType.IN_TRANSIT);
     });
   });
 

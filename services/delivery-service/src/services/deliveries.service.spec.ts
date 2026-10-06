@@ -51,7 +51,7 @@ describe('DeliveriesService', () => {
   async function staged(): Promise<Array<[string, { eventId: string; eventType: string; payload: Record<string, unknown> }]>> {
     const out: Array<[string, { eventId: string; eventType: string; payload: Record<string, unknown> }]> = [];
     const calls: Array<[jest.Mock, number]> = [
-      [deliveries.create as unknown as jest.Mock, 1],
+      [deliveries.create as unknown as jest.Mock, 2],
       [deliveries.transition as unknown as jest.Mock, 3],
     ];
     const recorded: Array<{ order: number; pair: [string, { eventId: string; eventType: string; payload: Record<string, unknown> }] }> = [];
@@ -444,7 +444,7 @@ describe('DeliveriesService', () => {
       });
     });
 
-    it('create stages delivery.created with the new delivery', async () => {
+    it('create stores the order\'s customer and stages delivery.created naming them (#5)', async () => {
       deliveries.findByOrderId.mockResolvedValue(null);
       orderClient.getOrder.mockResolvedValue({
         id: 'order-1',
@@ -452,14 +452,25 @@ describe('DeliveriesService', () => {
         restaurantId: 'r1',
         status: OrderStatus.READY_FOR_PICKUP,
       });
-      deliveries.create.mockResolvedValue(baseDelivery);
+      deliveries.create.mockResolvedValue({ ...baseDelivery, customerId: 'c1' });
 
       await service.create(actor(UserRole.ADMIN), { orderId: 'order-1' });
 
+      expect(deliveries.create).toHaveBeenCalledWith('order-1', 'c1', expect.any(Function));
       expect((await staged())[0][1]).toMatchObject({
         eventType: DeliveryEventType.CREATED,
-        payload: { deliveryId: 'delivery-1', orderId: 'order-1', status: DeliveryStatus.CREATED },
+        payload: { deliveryId: 'delivery-1', orderId: 'order-1', customerId: 'c1', status: DeliveryStatus.CREATED },
       });
+    });
+
+    it('later delivery events keep naming the customer stored on the delivery (#5)', async () => {
+      deliveries.findById.mockResolvedValue({ ...at(DeliveryStatus.DRIVER_ASSIGNED), customerId: 'c1' });
+      deliveries.transition.mockResolvedValue({ ...at(DeliveryStatus.PICKED_UP), customerId: 'c1' });
+      driverClient.getDriver.mockResolvedValue(assignedDriver);
+
+      await service.pickup('delivery-1', 'user-1', UserRole.DRIVER);
+
+      expect((await staged())[0][1].payload).toMatchObject({ customerId: 'c1', status: DeliveryStatus.PICKED_UP });
     });
 
     it('commits the event with the write, so it is published even if the order sync then fails', async () => {

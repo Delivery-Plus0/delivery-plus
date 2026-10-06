@@ -32,6 +32,7 @@ describe('RestaurantsService', () => {
       findByOwner: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      updateStatusUnlessSuspended: jest.fn(),
       list: jest.fn(),
       findOpenById: jest.fn(),
     } as unknown as jest.Mocked<RestaurantsRepository>;
@@ -76,14 +77,59 @@ describe('RestaurantsService', () => {
     expect(result.name).toBe('New Name');
   });
 
-  it('updateStatus allows the owner to change status', async () => {
+  it('updateStatus allows the owner to change status (compare-and-set against SUSPENDED)', async () => {
     repo.findById.mockResolvedValue(baseRestaurant);
-    repo.update.mockResolvedValue({ ...baseRestaurant, status: RestaurantStatus.OPEN });
+    repo.updateStatusUnlessSuspended.mockResolvedValue({ ...baseRestaurant, status: RestaurantStatus.OPEN });
 
     const result = await service.updateStatus('r1', 'owner-1', UserRole.RESTAURANT_OWNER, {
       status: RestaurantStatus.OPEN,
     });
     expect(result.status).toBe(RestaurantStatus.OPEN);
+    expect(repo.updateStatusUnlessSuspended).toHaveBeenCalledWith('r1', RestaurantStatus.OPEN);
+    expect(repo.update).not.toHaveBeenCalled();
+  });
+
+  it('updateStatus refuses an owner setting SUSPENDED (#125)', async () => {
+    repo.findById.mockResolvedValue(baseRestaurant);
+
+    await expect(
+      service.updateStatus('r1', 'owner-1', UserRole.RESTAURANT_OWNER, { status: RestaurantStatus.SUSPENDED }),
+    ).rejects.toThrow(ForbiddenError);
+    expect(repo.update).not.toHaveBeenCalled();
+    expect(repo.updateStatusUnlessSuspended).not.toHaveBeenCalled();
+  });
+
+  it.each([RestaurantStatus.OPEN, RestaurantStatus.BUSY, RestaurantStatus.CLOSED])(
+    'updateStatus refuses an owner lifting an admin suspension (→ %s) (#125)',
+    async (target) => {
+      repo.findById.mockResolvedValue({ ...baseRestaurant, status: RestaurantStatus.SUSPENDED });
+      repo.updateStatusUnlessSuspended.mockResolvedValue(null); // the compare-and-set found it SUSPENDED
+
+      await expect(service.updateStatus('r1', 'owner-1', UserRole.RESTAURANT_OWNER, { status: target })).rejects.toThrow(
+        ForbiddenError,
+      );
+      expect(repo.update).not.toHaveBeenCalled();
+    },
+  );
+
+  it('updateStatus refuses the owner even when the cached read still shows the restaurant unsuspended', async () => {
+    // An admin suspended it after the owner's (cached) ownership read; the database write decides.
+    repo.findById.mockResolvedValue({ ...baseRestaurant, status: RestaurantStatus.OPEN });
+    repo.updateStatusUnlessSuspended.mockResolvedValue(null);
+
+    await expect(
+      service.updateStatus('r1', 'owner-1', UserRole.RESTAURANT_OWNER, { status: RestaurantStatus.CLOSED }),
+    ).rejects.toThrow('suspended by an administrator');
+    expect(cache.del).toHaveBeenCalledWith('restaurant:r1');
+  });
+
+  it('updateStatus lets ADMIN lift a suspension', async () => {
+    repo.findById.mockResolvedValue({ ...baseRestaurant, status: RestaurantStatus.SUSPENDED });
+    repo.update.mockResolvedValue({ ...baseRestaurant, status: RestaurantStatus.OPEN });
+
+    const result = await service.updateStatus('r1', 'admin-1', UserRole.ADMIN, { status: RestaurantStatus.OPEN });
+    expect(result.status).toBe(RestaurantStatus.OPEN);
+    expect(repo.updateStatusUnlessSuspended).not.toHaveBeenCalled();
   });
 
   it('updateStatus allows ADMIN to bypass ownership', async () => {

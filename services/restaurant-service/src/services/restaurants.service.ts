@@ -3,6 +3,7 @@ import {
   ForbiddenError,
   NotFoundError,
   PaginatedResult,
+  RestaurantStatus,
   S3StorageService,
   UserRole,
   CacheService,
@@ -74,15 +75,27 @@ export class RestaurantsService {
     requesterRole: UserRole,
     dto: UpdateRestaurantStatusDto,
   ): Promise<Restaurant> {
-    // ADMIN can force any status transition (e.g. SUSPENDED); owners manage their own restaurant.
-    if (requesterRole !== UserRole.ADMIN) {
-      await this.assertOwnership(id, requesterId);
-    } else {
+    // ADMIN can force any status transition, including setting and lifting SUSPENDED.
+    if (requesterRole === UserRole.ADMIN) {
       await this.getEntityById(id);
+      const updated = await this.restaurants.update(id, { status: dto.status });
+      await this.cache.del(`restaurant:${id}`);
+      return updated as Restaurant;
     }
-    const updated = await this.restaurants.update(id, { status: dto.status });
+
+    // Owners manage OPEN / BUSY / CLOSED only: they can neither suspend their restaurant nor lift an
+    // admin suspension (#125). The write is compare-and-set against SUSPENDED, because the ownership
+    // read above may come from the cache and an admin may suspend the restaurant at any moment.
+    await this.assertOwnership(id, requesterId);
+    if (dto.status === RestaurantStatus.SUSPENDED) {
+      throw new ForbiddenError('Only an administrator can suspend a restaurant');
+    }
+    const updated = await this.restaurants.updateStatusUnlessSuspended(id, dto.status);
     await this.cache.del(`restaurant:${id}`);
-    return updated as Restaurant;
+    if (!updated) {
+      throw new ForbiddenError('This restaurant is suspended by an administrator; contact support to have it reinstated');
+    }
+    return updated;
   }
 
   async createImageUploadUrl(

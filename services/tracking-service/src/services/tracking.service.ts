@@ -1,5 +1,11 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { DeliveryStatus, ForbiddenError, JwtPayload, NotFoundError, UserRole } from '@food-delivery/shared';
+import { ConflictError, DeliveryStatus, ForbiddenError, JwtPayload, NotFoundError, UserRole } from '@food-delivery/shared';
+import {
+  LocationReportRejectedError,
+  REJECTION_MESSAGES,
+  checkLocationReport,
+  positionForDelivery,
+} from './location-trust';
 import { LocationRepository } from '../repositories/location.repository';
 import { DeliveryServiceClient } from '../common/delivery-service.client';
 import { DriverServiceClient } from '../common/driver-service.client';
@@ -45,12 +51,39 @@ export class TrackingService {
     @Inject(ETA_ESTIMATOR) private readonly etaEstimator: EtaEstimator,
   ) {}
 
-  async updateLocation(userId: string, dto: UpdateLocationDto): Promise<DriverLocation> {
+  /**
+   * Accepts a driver's location report (trust rules: location-trust.ts, #60). The report is bound to the
+   * driver's active delivery, resolved by delivery-service from the driver's own token; a driver with
+   * no active delivery can't report (409). The client's `recordedAt` can only cause a rejection (422:
+   * future, too old, or not newer than the last accepted report). Accepted coordinates are stored as a
+   * claim with the server receive time; nothing else in the platform is changed by them.
+   */
+  async updateLocation(userId: string, dto: UpdateLocationDto, authHeader: string): Promise<DriverLocation> {
+    const current = await this.deliveryClient.getCurrentForDriver(authHeader);
+    if (!current) {
+      this.logger.warn(`tracking.location.rejected driver=${userId} reason=NO_ACTIVE_DELIVERY`);
+      throw new ConflictError('Location reports are accepted only while you are on a delivery');
+    }
+    const now = new Date();
+    const rejection = checkLocationReport({
+      now,
+      recordedAt: dto.recordedAt,
+      previous: await this.locationRepository.find(userId),
+      deliveryId: current.id,
+      maxAgeSeconds: this.config.locationStaleAfterSeconds,
+    });
+    if (rejection) {
+      this.logger.warn(`tracking.location.rejected driver=${userId} delivery=${current.id} reason=${rejection}`);
+      throw new LocationReportRejectedError(rejection, REJECTION_MESSAGES[rejection]);
+    }
+
     const location: DriverLocation = {
       userId,
       latitude: dto.latitude,
       longitude: dto.longitude,
-      updatedAt: new Date().toISOString(),
+      updatedAt: now.toISOString(),
+      deliveryId: current.id,
+      ...(dto.recordedAt !== undefined ? { recordedAt: new Date(dto.recordedAt).toISOString() } : {}),
     };
     await this.locationRepository.save(location);
     // Wake realtime subscribers of this driver's delivery (#135). The stored location stays the only
@@ -116,7 +149,9 @@ export class TrackingService {
    * The realtime stream calls this alone on a driver location report and both steps on delivery changes.
    */
   async snapshot(context: DeliveryTrackingContext, now = new Date()): Promise<DeliveryTrackingInfo> {
-    const location = context.driverUserId ? await this.locationRepository.find(context.driverUserId) : null;
+    // Only a position reported while the driver was on this delivery counts (#60 session binding).
+    const stored = context.driverUserId ? await this.locationRepository.find(context.driverUserId) : null;
+    const location = positionForDelivery(stored, context.deliveryId);
     const staleAfter = this.config.locationStaleAfterSeconds;
     const resolved = resolveTracking(context.status, context.driverId, location, now, staleAfter);
     return {

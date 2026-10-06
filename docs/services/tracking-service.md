@@ -6,7 +6,7 @@ Collects real-time driver location updates and exposes delivery-tracking summari
 ## Main REST endpoints
 From `services/tracking-service/src/controllers/tracking.controller.ts`:
 
-- `POST /tracking/location` – driver reports their current location (DRIVER only, keyed by the token's user)
+- `POST /tracking/location` – driver reports their current location: `{latitude, longitude, recordedAt?}`. DRIVER only, keyed by the token's user, and bound to the driver's active delivery (409 without one; 422 for a future, too old or replayed report; 400 for any other field). See [Trust boundaries](#trust-boundaries-60)
 - `GET /tracking/driver/:userId` – fetch a driver’s last known location (the driver themself or admin)
 - `GET /tracking/delivery/:deliveryId` – fetch delivery status plus driver location (delivery ownership is checked by delivery-service with the caller's token)
 - `GET /tracking/delivery/:deliveryId/stream` – the same data pushed as Server-Sent Events (see [Realtime stream](#realtime-stream))
@@ -42,6 +42,33 @@ Response (fields added in #32 are backward compatible):
   "locationAgeSeconds": 8
 }
 ```
+
+## Trust boundaries (#60)
+A driver's location report is a **claim**: it says where the driver's device reports it is, never proof that the driver is there.
+
+| Class | What | May be used for |
+| --- | --- | --- |
+| **Trusted** | caller identity and role (JWT); delivery status and assignment `(driverId, assignedAt)` from delivery-service; the server's receive time | business decisions and authorization |
+| **Untrusted** | reported `latitude`/`longitude`; the client's `recordedAt` | display only, after validation; `recordedAt` only to *reject* a report |
+| **Derived** | tracking state (`LIVE`/`STALE`…), `locationAgeSeconds`, `eta`, any future geofence/arrival signal | display and estimation only; never a delivery transition |
+
+Rules enforced in code (`services/location-trust.ts`, `TrackingService.updateLocation`, `snapshot`):
+- **Bound to the active delivery.**
+  - `POST /tracking/location` resolves the driver's active delivery from their own token (`GET /deliveries/me/current`), so a driver can only ever report for their own assigned delivery. The body can't name a delivery.
+  - With no active delivery (none yet, delivered, cancelled) the report gets **409** and nothing is stored.
+  - Each stored position records its `deliveryId`.
+- **Session-bound reads.** A tracking read uses the driver's position only if it was reported on *that* delivery. A fresh position from the driver's previous job, or a record stored before #60 (no `deliveryId`), is not shown: the read says `AWAITING_LOCATION` until the next report (≤ 10 s). A reassigned or previous driver's position can't leak into another delivery.
+- **Client time can only reject.** The optional `recordedAt` (ISO 8601) gets **422 `LocationReportRejected`** when it is:
+  - more than 30 s in the future (`FUTURE_TIMESTAMP`);
+  - older than the stale threshold (`TOO_OLD`: a stale event or a replay);
+  - not newer than the last accepted report for the same delivery (`OUT_OF_ORDER`: a replay, duplicate or reordered report).
+
+  Freshness (`LIVE`/`STALE`, ETA validity) is **always** measured from the server receive time, so a wrong or forged device clock can't make a position look newer. Reports without `recordedAt` (older clients) are accepted and ordered by receive time.
+- **Derived values are never accepted from a client.** Any extra field on a report, such as an ETA, an "arrived" flag or a geofence id, gets **400** from the global ValidationPipe (`forbidNonWhitelisted`).
+- **Location never drives delivery state.** Pickup, start and complete are explicit actions by the assigned driver, authorized by delivery-service. Nothing in the platform changes a delivery, order or payment because of a reported position. There is no geofence today; a future one must stay advisory, or require a server-validated signal plus the driver's own action, and may only use accepted, session-bound reports.
+- **Not done (and why):** speed or teleport plausibility checks. GPS jumps would cause false rejections, and a plausibility filter still wouldn't make a report proof of presence, so the rule above (never authoritative) is the boundary.
+
+Rejected reports are logged as `tracking.location.rejected driver=… [delivery=…] reason=…`, with no coordinates.
 
 ## Assignment and ETA contract (#46)
 Every tracking read (`GET` and each SSE `tracking` event) also carries:

@@ -77,6 +77,11 @@ This means the platform often relies on consistent user identifiers while still 
 - **Public registration picks the role on the server.** `RegisterDto.role` accepts only `SELF_SERVICE_ROLES` (`CUSTOMER`, `RESTAURANT_OWNER`, `DRIVER`; omitted or null → `CUSTOMER`). `AuthService.register` re-checks the same allow-list before touching the database (403), so `ADMIN` can never be self-assigned (#105, found in the 2026-10-01 review). There is no admin-provisioning endpoint: admins are created out of band. The only ADMIN principals in normal operation are service system tokens.
 - Email verification (off by default: `EMAIL_VERIFICATION_REQUIRED=false`) and failed-login lockout (5 attempts → 15 minutes, generic "Invalid email or password") are implemented.
 - Ownership is enforced per object in each service (orders, payments, deliveries, tracking, notifications). Drivers may only move themselves between OFFLINE and AVAILABLE; claim and release are system-token (ADMIN) operations (#33).
+- **Driver locations are untrusted claims (#60).**
+  - A report is accepted only while the driver has an active delivery, resolved from their own token, and is stored bound to it. Reads only use positions bound to the delivery being read.
+  - The client's `recordedAt` can only reject a report: future, too old, or replayed/out of order. Freshness is server time.
+  - Derived values (tracking state, ETA, any future geofence) are display-only and never drive a delivery transition; client-sent ETA/geofence fields are rejected.
+  - Details: [docs/services/tracking-service.md](../docs/services/tracking-service.md#trust-boundaries-60).
 
 ## Current auth backlog and planned hardening
 

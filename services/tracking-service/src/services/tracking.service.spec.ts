@@ -2,7 +2,7 @@ import { TrackingService } from './tracking.service';
 import { LocationRepository } from '../repositories/location.repository';
 import { DeliveryServiceClient } from '../common/delivery-service.client';
 import { DriverServiceClient } from '../common/driver-service.client';
-import { DeliveryStatus, ForbiddenError, NotFoundError, UserRole } from '@food-delivery/shared';
+import { ConflictError, DeliveryStatus, ForbiddenError, NotFoundError, UserRole } from '@food-delivery/shared';
 import { TrackingState } from './tracking-state';
 import { TrackingEventsBus } from '../common/tracking-events.bus';
 import { EtaUnavailableReason, NO_ETA_ESTIMATOR } from './eta';
@@ -22,6 +22,8 @@ describe('TrackingService', () => {
 
     deliveryClient = {
       getDelivery: jest.fn(),
+      // By default the reporting driver is on delivery-1.
+      getCurrentForDriver: jest.fn(async () => ({ id: 'delivery-1' })),
     } as unknown as jest.Mocked<DeliveryServiceClient>;
 
     driverClient = {
@@ -42,13 +44,109 @@ describe('TrackingService', () => {
   let events: { publishDriverLocation: jest.Mock };
 
   describe('updateLocation', () => {
-    it('saves and returns the location with a timestamp', async () => {
-      const result = await service.updateLocation('user-1', { latitude: 30.1, longitude: 31.2 });
-      expect(result.userId).toBe('user-1');
-      expect(result.latitude).toBe(30.1);
-      expect(locationRepository.save).toHaveBeenCalledWith(
-        expect.objectContaining({ userId: 'user-1', latitude: 30.1, longitude: 31.2 }),
-      );
+    const DRIVER = 'Bearer driver';
+    const report = (overrides: Partial<{ latitude: number; longitude: number; recordedAt: string }> = {}) =>
+      service.updateLocation('user-1', { latitude: 30.1, longitude: 31.2, ...overrides }, DRIVER);
+
+    it('stores the report bound to the driver\'s active delivery, resolved server-side, with the server time', async () => {
+      const before = Date.now();
+      const result = await report();
+
+      expect(deliveryClient.getCurrentForDriver).toHaveBeenCalledWith(DRIVER);
+      expect(result).toMatchObject({ userId: 'user-1', deliveryId: 'delivery-1', latitude: 30.1, longitude: 31.2 });
+      expect(Date.parse(result.updatedAt)).toBeGreaterThanOrEqual(before);
+      expect(locationRepository.save).toHaveBeenCalledWith(result);
+    });
+
+    describe('trust boundaries (#60)', () => {
+      const ago = (seconds: number) => new Date(Date.now() - seconds * 1000).toISOString();
+
+      it('a driver with no active delivery (none yet, delivered or cancelled) cannot report: 409, nothing stored or pushed', async () => {
+        deliveryClient.getCurrentForDriver.mockResolvedValue(null);
+
+        await expect(report()).rejects.toThrow(ConflictError);
+        expect(locationRepository.save).not.toHaveBeenCalled();
+        expect(events.publishDriverLocation).not.toHaveBeenCalled();
+      });
+
+      it('driver A can only ever report for their own delivery: the delivery comes from their token, never the body', async () => {
+        deliveryClient.getCurrentForDriver.mockResolvedValue({ id: 'delivery-of-driver-a' });
+
+        const result = await report();
+
+        expect(result.deliveryId).toBe('delivery-of-driver-a');
+      });
+
+      it.each([
+        ['a future timestamp beyond the allowed skew', () => new Date(Date.now() + 60_000).toISOString(), 'FUTURE_TIMESTAMP'],
+        ['a timestamp older than the stale threshold (stale or replayed)', () => ago(61), 'TOO_OLD'],
+      ])('rejects %s with 422, storing and pushing nothing', async (_label, recordedAt, reason) => {
+        await expect(report({ recordedAt: recordedAt() })).rejects.toMatchObject({ statusCode: 422, reason });
+        expect(locationRepository.save).not.toHaveBeenCalled();
+        expect(events.publishDriverLocation).not.toHaveBeenCalled();
+      });
+
+      it('rejects a replayed or reordered report (not newer than the last accepted one for this delivery)', async () => {
+        locationRepository.find.mockResolvedValue({
+          userId: 'user-1',
+          deliveryId: 'delivery-1',
+          latitude: 30.2,
+          longitude: 31.3,
+          updatedAt: new Date().toISOString(),
+          recordedAt: ago(5),
+        });
+
+        await expect(report({ recordedAt: ago(5) })).rejects.toMatchObject({ reason: 'OUT_OF_ORDER' }); // replay
+        await expect(report({ recordedAt: ago(8) })).rejects.toMatchObject({ reason: 'OUT_OF_ORDER' }); // reordered
+        expect(locationRepository.save).not.toHaveBeenCalled();
+
+        await expect(report({ recordedAt: ago(1) })).resolves.toMatchObject({ latitude: 30.1 });
+      });
+
+      it("the previous delivery's last report does not block the first report of a new delivery", async () => {
+        locationRepository.find.mockResolvedValue({
+          userId: 'user-1',
+          deliveryId: 'previous-delivery',
+          latitude: 30.2,
+          longitude: 31.3,
+          updatedAt: new Date().toISOString(),
+          recordedAt: ago(1),
+        });
+
+        await expect(report({ recordedAt: ago(3) })).resolves.toMatchObject({ deliveryId: 'delivery-1' });
+      });
+
+      it('the client time is kept only as a claim: freshness is always the server receive time', async () => {
+        const claimed = ago(50);
+        const result = await report({ recordedAt: claimed });
+        expect(result.recordedAt).toBe(claimed);
+        expect(Date.now() - Date.parse(result.updatedAt)).toBeLessThan(1_000);
+      });
+    });
+
+    describe('session binding on reads (#60)', () => {
+      const delivery = { id: 'delivery-1', orderId: 'order-1', driverId: 'driver-1', status: DeliveryStatus.DRIVER_ASSIGNED };
+      beforeEach(() => {
+        deliveryClient.getDelivery.mockResolvedValue(delivery);
+        driverClient.getDriver.mockResolvedValue({ id: 'driver-1', userId: 'user-1' });
+      });
+
+      it.each([
+        ["the driver's previous delivery", 'previous-delivery'],
+        ['a record stored before reports were bound', undefined],
+      ])('a fresh position from %s is never shown for this delivery (waiting for location instead)', async (_label, deliveryId) => {
+        locationRepository.find.mockResolvedValue({ userId: 'user-1', deliveryId, latitude: 1, longitude: 2, updatedAt: new Date().toISOString() });
+
+        const result = await service.getDeliveryTracking('delivery-1', 'Bearer customer');
+
+        expect(result).toMatchObject({ tracking: TrackingState.AWAITING_LOCATION, location: null });
+        expect(result.eta).toEqual({ status: 'UNAVAILABLE', reason: EtaUnavailableReason.NO_LOCATION });
+      });
+
+      it('a position reported on this delivery is shown', async () => {
+        locationRepository.find.mockResolvedValue({ userId: 'user-1', deliveryId: 'delivery-1', latitude: 1, longitude: 2, updatedAt: new Date().toISOString() });
+        expect((await service.getDeliveryTracking('delivery-1', 'Bearer customer')).tracking).toBe(TrackingState.LIVE);
+      });
     });
 
     it('wakes realtime subscribers after the position is stored (#135)', async () => {
@@ -61,7 +159,7 @@ describe('TrackingService', () => {
         return 1;
       });
 
-      await service.updateLocation('user-1', { latitude: 30.1, longitude: 31.2 });
+      await service.updateLocation('user-1', { latitude: 30.1, longitude: 31.2 }, 'Bearer driver');
 
       expect(events.publishDriverLocation).toHaveBeenCalledWith('user-1');
       expect(order).toEqual(['save', 'publish']);
@@ -69,7 +167,7 @@ describe('TrackingService', () => {
 
     it('a failed realtime publish does not fail the report (streams resync and clients fall back)', async () => {
       events.publishDriverLocation.mockRejectedValue(new Error('redis down'));
-      await expect(service.updateLocation('user-1', { latitude: 30.1, longitude: 31.2 })).resolves.toMatchObject({
+      await expect(service.updateLocation('user-1', { latitude: 30.1, longitude: 31.2 }, 'Bearer driver')).resolves.toMatchObject({
         userId: 'user-1',
       });
     });
@@ -87,7 +185,7 @@ describe('TrackingService', () => {
         status: DeliveryStatus.IN_TRANSIT,
       });
       driverClient.getDriver.mockResolvedValue({ id: 'driver-1', userId: 'user-1' });
-      locationRepository.find.mockResolvedValue({ userId: 'user-1', latitude: 1, longitude: 2, updatedAt: new Date().toISOString() });
+      locationRepository.find.mockResolvedValue({ userId: 'user-1', deliveryId: 'delivery-1', latitude: 1, longitude: 2, updatedAt: new Date().toISOString() });
 
       const result = await service.getDeliveryTracking('delivery-1', 'Bearer x');
 
@@ -127,14 +225,14 @@ describe('TrackingService', () => {
       deliveryClient.getDelivery.mockResolvedValue({ id: 'delivery-1', orderId: 'order-1', driverId: 'driver-1', assignedAt, status: DeliveryStatus.IN_TRANSIT });
       driverClient.getDriver.mockResolvedValue({ id: 'driver-1', userId: 'user-1' });
 
-      locationRepository.find.mockResolvedValue({ userId: 'user-1', latitude: 1, longitude: 2, updatedAt: new Date(Date.now() - 5 * 60_000).toISOString() });
+      locationRepository.find.mockResolvedValue({ userId: 'user-1', deliveryId: 'delivery-1', latitude: 1, longitude: 2, updatedAt: new Date(Date.now() - 5 * 60_000).toISOString() });
       expect((await withEstimator.getDeliveryTracking('delivery-1', 'Bearer x')).eta).toEqual({
         status: 'UNAVAILABLE',
         reason: EtaUnavailableReason.STALE_LOCATION,
       });
       expect(estimator.estimateSeconds).not.toHaveBeenCalled();
 
-      locationRepository.find.mockResolvedValue({ userId: 'user-1', latitude: 1, longitude: 2, updatedAt: new Date().toISOString() });
+      locationRepository.find.mockResolvedValue({ userId: 'user-1', deliveryId: 'delivery-1', latitude: 1, longitude: 2, updatedAt: new Date().toISOString() });
       expect((await withEstimator.getDeliveryTracking('delivery-1', 'Bearer x')).eta).toMatchObject({
         status: 'ESTIMATED',
         seconds: 300,
@@ -153,7 +251,7 @@ describe('TrackingService', () => {
         status: DeliveryStatus.IN_TRANSIT,
       });
       driverClient.getDriver.mockResolvedValue({ id: 'driver-1', userId: 'user-1' });
-      locationRepository.find.mockResolvedValue({ userId: 'user-1', latitude: 1, longitude: 2, updatedAt: new Date().toISOString() });
+      locationRepository.find.mockResolvedValue({ userId: 'user-1', deliveryId: 'delivery-1', latitude: 1, longitude: 2, updatedAt: new Date().toISOString() });
 
       const context = await service.loadDeliveryContext('delivery-1', 'Bearer x');
       expect(context).toEqual({
@@ -201,7 +299,7 @@ describe('TrackingService', () => {
     });
 
     it('lets an admin read any driver location', async () => {
-      locationRepository.find.mockResolvedValue({ userId: 'user-1', latitude: 1, longitude: 2, updatedAt: '' });
+      locationRepository.find.mockResolvedValue({ userId: 'user-1', deliveryId: 'delivery-1', latitude: 1, longitude: 2, updatedAt: '' });
       await expect(
         service.getDriverLocation('user-1', { sub: 'admin', role: UserRole.ADMIN }),
       ).resolves.toBeDefined();
@@ -209,7 +307,7 @@ describe('TrackingService', () => {
 
     it('returns the stored location', async () => {
       locationRepository.find.mockResolvedValue({
-        userId: 'user-1',
+        userId: 'user-1', deliveryId: 'delivery-1',
         latitude: 30.1,
         longitude: 31.2,
         updatedAt: new Date().toISOString(),
@@ -257,7 +355,7 @@ describe('TrackingService', () => {
       });
       driverClient.getDriver.mockResolvedValue({ id: 'driver-1', userId: 'user-1' });
       locationRepository.find.mockResolvedValue({
-        userId: 'user-1',
+        userId: 'user-1', deliveryId: 'delivery-1',
         latitude: 30.1,
         longitude: 31.2,
         updatedAt: new Date(Date.now() - 5 * 60_000).toISOString(),
@@ -274,7 +372,7 @@ describe('TrackingService', () => {
       async (status) => {
         deliveryClient.getDelivery.mockResolvedValue({ id: 'delivery-1', orderId: 'order-1', driverId: 'driver-1', status });
         locationRepository.find.mockResolvedValue({
-          userId: 'user-1',
+          userId: 'user-1', deliveryId: 'delivery-1',
           latitude: 30.1,
           longitude: 31.2,
           updatedAt: new Date().toISOString(),
@@ -297,7 +395,7 @@ describe('TrackingService', () => {
       driverClient.getDriver.mockResolvedValue({ id: 'driver-2', userId: 'user-2' });
       locationRepository.find.mockImplementation(async (userId) =>
         userId === 'user-1'
-          ? { userId: 'user-1', latitude: 1, longitude: 1, updatedAt: new Date().toISOString() }
+          ? { userId: 'user-1', deliveryId: 'delivery-1', latitude: 1, longitude: 1, updatedAt: new Date().toISOString() }
           : null,
       );
 
@@ -327,7 +425,7 @@ describe('TrackingService', () => {
       });
       driverClient.getDriver.mockResolvedValue({ id: 'driver-1', userId: 'user-1' });
       locationRepository.find.mockResolvedValue({
-        userId: 'user-1',
+        userId: 'user-1', deliveryId: 'delivery-1',
         latitude: 30.1,
         longitude: 31.2,
         updatedAt: new Date().toISOString(),

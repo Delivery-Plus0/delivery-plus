@@ -19,8 +19,12 @@ export class TrackingController {
   @Roles(UserRole.DRIVER)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Report the current driver location' })
-  updateLocation(@CurrentUser() user: JwtPayload, @Body() dto: UpdateLocationDto) {
-    return this.trackingService.updateLocation(user.sub, dto);
+  updateLocation(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: UpdateLocationDto,
+    @Headers('authorization') authHeader: string,
+  ) {
+    return this.trackingService.updateLocation(user.sub, dto, authHeader);
   }
 
   @Get('driver/:userId')

@@ -1,4 +1,4 @@
-import { DeliveriesService } from './deliveries.service';
+import { DeliveriesService, stageTime } from './deliveries.service';
 import { DeliveriesRepository } from '../repositories/deliveries.repository';
 import { OrderServiceClient } from '../common/order-service.client';
 import { DriverServiceClient, DriverStatusRejectedError } from '../common/driver-service.client';
@@ -359,6 +359,32 @@ describe('DeliveriesService', () => {
       await expect(
         service.pickup('delivery-1', 'user-1', UserRole.DRIVER),
       ).rejects.toThrow(ConflictError); // no driver assigned yet
+    });
+  });
+
+  describe('stage times (#142)', () => {
+    it('maps each later stage to its timestamp column', () => {
+      const now = new Date('2026-10-07T10:00:00Z');
+      expect(stageTime(DeliveryStatus.PICKED_UP, now)).toEqual({ pickedUpAt: now });
+      expect(stageTime(DeliveryStatus.DELIVERED, now)).toEqual({ deliveredAt: now });
+      expect(stageTime(DeliveryStatus.CANCELLED, now)).toEqual({ cancelledAt: now });
+      expect(stageTime(DeliveryStatus.IN_TRANSIT, now)).toEqual({});
+      expect(stageTime(DeliveryStatus.DRIVER_ASSIGNED, now)).toEqual({});
+    });
+
+    it('writes the stage time in the same compare-and-set as the status', async () => {
+      deliveries.findById.mockResolvedValue({ ...baseDelivery, driverId: 'driver-1', status: DeliveryStatus.DRIVER_ASSIGNED });
+      driverClient.getDriver.mockResolvedValue({ id: 'driver-1', userId: 'user-1', status: DriverStatus.BUSY });
+      deliveries.transition.mockResolvedValue({ ...baseDelivery, driverId: 'driver-1', status: DeliveryStatus.PICKED_UP });
+
+      await service.pickup('delivery-1', 'user-1', UserRole.DRIVER);
+
+      expect(deliveries.transition).toHaveBeenCalledWith(
+        'delivery-1',
+        DeliveryStatus.DRIVER_ASSIGNED,
+        { status: DeliveryStatus.PICKED_UP, pickedUpAt: expect.any(Date) },
+        expect.any(Function),
+      );
     });
   });
 

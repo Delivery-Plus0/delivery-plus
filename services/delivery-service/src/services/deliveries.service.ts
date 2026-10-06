@@ -72,6 +72,20 @@ function deliveryEvent(eventType: DeliveryEventType, delivery: Delivery): Delive
   };
 }
 
+/** The stage timestamp written together with a move to `target` (#142); assignment has its own. */
+export function stageTime(target: DeliveryStatus, now = new Date()): Partial<Delivery> {
+  switch (target) {
+    case DeliveryStatus.PICKED_UP:
+      return { pickedUpAt: now };
+    case DeliveryStatus.DELIVERED:
+      return { deliveredAt: now };
+    case DeliveryStatus.CANCELLED:
+      return { cancelledAt: now };
+    default:
+      return {};
+  }
+}
+
 @Injectable()
 export class DeliveriesService {
   private readonly logger = new Logger(DeliveriesService.name);
@@ -351,7 +365,7 @@ export class DeliveriesService {
     let current = delivery;
     if (delivery.status !== target) {
       this.assertTransition(delivery.status, target);
-      const updated = await this.deliveries.transition(delivery.id, delivery.status, { status: target }, (moved) =>
+      const updated = await this.deliveries.transition(delivery.id, delivery.status, { status: target, ...stageTime(target) }, (moved) =>
         deliveryEvent(eventType, moved),
       );
       if (updated) this.outbox.kick();

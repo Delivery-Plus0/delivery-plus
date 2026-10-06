@@ -9,6 +9,7 @@ import {
 } from 'typeorm';
 
 @Entity('deliveries')
+@Index('IDX_deliveries_driver_updated', ['driverId', 'updatedAt'])
 export class Delivery {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -33,6 +34,19 @@ export class Delivery {
    */
   @Column({ type: 'timestamptz', nullable: true })
   assignedAt?: Date | null;
+
+  /**
+   * When the delivery reached each later stage (#142, driver history). Written in the same
+   * compare-and-set as the status change, by the server only; null until that stage happens.
+   */
+  @Column({ type: 'timestamptz', nullable: true })
+  pickedUpAt?: Date | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  deliveredAt?: Date | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  cancelledAt?: Date | null;
 
   @Column({ type: 'enum', enum: DeliveryStatus, default: DeliveryStatus.CREATED })
   status!: DeliveryStatus;

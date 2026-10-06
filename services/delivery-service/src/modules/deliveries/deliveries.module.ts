@@ -12,6 +12,7 @@ import { DriverServiceClient } from '../../common/driver-service.client';
 import { RestaurantServiceClient } from '../../common/restaurant-service.client';
 import { UserServiceClient } from '../../common/user-service.client';
 import { DriverCardService } from '../../services/driver-card.service';
+import { DriverHistoryService } from '../../services/driver-history.service';
 import { SystemTokenService } from '../../common/system-token.service';
 import { OutboxRelayService } from '../../common/outbox-relay.service';
 import { APP_CONFIG, AppConfig } from '../../config/app-config';
@@ -36,6 +37,7 @@ import { APP_CONFIG, AppConfig } from '../../config/app-config';
     RestaurantServiceClient,
     UserServiceClient,
     DriverCardService,
+    DriverHistoryService,
     SystemTokenService,
   ],
 })

@@ -32,6 +32,26 @@ export class DeliveriesRepository {
       .getMany();
   }
 
+  /**
+   * One page of a driver's deliveries, newest first (#142), optionally limited to `statuses`.
+   * Uses IDX_deliveries_driver_updated; id breaks ties so paging is stable.
+   */
+  findPageByDriverId(
+    driverId: string,
+    statuses: DeliveryStatus[] | null,
+    page: number,
+    limit: number,
+  ): Promise<[Delivery[], number]> {
+    const query = this.repo.createQueryBuilder('d').where('d.driverId = :driverId', { driverId });
+    if (statuses) query.andWhere('d.status IN (:...statuses)', { statuses });
+    return query
+      .orderBy('d.updatedAt', 'DESC')
+      .addOrderBy('d.id', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
+  }
+
   /** Finished (delivered or cancelled) deliveries with a driver, changed since `since`, newest first. */
   findFinishedWithDriverSince(since: Date, limit: number): Promise<Delivery[]> {
     return this.repo

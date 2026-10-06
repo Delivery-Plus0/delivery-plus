@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, HttpStatus, Param, Post, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpStatus, Param, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiNoContentResponse, ApiOkResponse } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { JwtAuthGuard, CurrentUser, JwtPayload, Roles, RolesGuard, UserRole } from '@food-delivery/shared';
@@ -6,6 +6,8 @@ import { DeliveriesService } from '../services/deliveries.service';
 import { DriverCardService } from '../services/driver-card.service';
 import { CreateDeliveryDto } from '../dto/create-delivery.dto';
 import { DriverCurrentDeliveryDto } from '../dto/driver-current-delivery.dto';
+import { DriverHistoryPageDto, DriverHistoryQueryDto } from '../dto/driver-delivery-history.dto';
+import { DriverHistoryService } from '../services/driver-history.service';
 
 @ApiTags('deliveries')
 @ApiBearerAuth()
@@ -15,6 +17,7 @@ export class DeliveriesController {
   constructor(
     private readonly deliveriesService: DeliveriesService,
     private readonly driverCards: DriverCardService,
+    private readonly driverHistory: DriverHistoryService,
   ) {}
 
   @Post()
@@ -73,6 +76,19 @@ export class DeliveriesController {
       return undefined;
     }
     return current;
+  }
+
+  @Get('me/history')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.DRIVER)
+  @ApiOperation({
+    summary: "The calling driver's deliveries, newest first (#142)",
+    description:
+      'Filter with status=active|completed|cancelled. The driver comes from the token only. Rows carry stage times, the restaurant name and an order summary with the drop-off address (no customer name, phone, notes or coordinates).',
+  })
+  @ApiOkResponse({ type: DriverHistoryPageDto })
+  getMyHistory(@Headers('authorization') authHeader: string, @Query() query: DriverHistoryQueryDto): Promise<DriverHistoryPageDto> {
+    return this.driverHistory.getForDriver(authHeader, query);
   }
 
   @Get('by-order/:orderId')

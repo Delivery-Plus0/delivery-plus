@@ -8,6 +8,14 @@ import { UpdateLocationDto } from '../dto/update-location.dto';
 import { DriverLocation } from '../entities/location.model';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { TrackingState, isTrackingFinished, resolveTracking } from './tracking-state';
+import { DeliveryEta, ETA_ESTIMATOR, EtaEstimator, deriveEta } from './eta';
+
+/** Who is assigned, as delivery-service recorded it (#46). Identity only: never a position. */
+export interface DeliveryAssignment {
+  driverId: string;
+  /** When the claim was accepted; null for deliveries assigned before it was recorded. */
+  assignedAt: string | null;
+}
 
 export interface DeliveryTrackingInfo {
   deliveryId: string;
@@ -18,6 +26,10 @@ export interface DeliveryTrackingInfo {
   tracking: TrackingState;
   /** Seconds since the driver reported `location`; null when no location is returned. */
   locationAgeSeconds: number | null;
+  /** Assignment contract (#46): the current assignment, or null while no driver is assigned. */
+  assignment: DeliveryAssignment | null;
+  /** ETA contract (#46): derived on this read, never stored; see DeliveryEta. */
+  eta: DeliveryEta;
 }
 
 @Injectable()
@@ -30,6 +42,7 @@ export class TrackingService {
     private readonly driverClient: DriverServiceClient,
     @Inject(APP_CONFIG) private readonly config: Pick<AppConfig, 'locationStaleAfterSeconds'>,
     private readonly events: TrackingEventsBus,
+    @Inject(ETA_ESTIMATOR) private readonly etaEstimator: EtaEstimator,
   ) {}
 
   async updateLocation(userId: string, dto: UpdateLocationDto): Promise<DriverLocation> {
@@ -89,7 +102,13 @@ export class TrackingService {
     if (delivery.driverId && !isTrackingFinished(delivery.status)) {
       driverUserId = (await this.driverClient.getDriver(delivery.driverId)).userId;
     }
-    return { deliveryId, status: delivery.status, driverId: delivery.driverId, driverUserId };
+    return {
+      deliveryId,
+      status: delivery.status,
+      driverId: delivery.driverId,
+      assignedAt: delivery.driverId ? (delivery.assignedAt ?? null) : null,
+      driverUserId,
+    };
   }
 
   /**
@@ -98,11 +117,15 @@ export class TrackingService {
    */
   async snapshot(context: DeliveryTrackingContext, now = new Date()): Promise<DeliveryTrackingInfo> {
     const location = context.driverUserId ? await this.locationRepository.find(context.driverUserId) : null;
+    const staleAfter = this.config.locationStaleAfterSeconds;
+    const resolved = resolveTracking(context.status, context.driverId, location, now, staleAfter);
     return {
       deliveryId: context.deliveryId,
       status: context.status,
       driverId: context.driverId,
-      ...resolveTracking(context.status, context.driverId, location, now, this.config.locationStaleAfterSeconds),
+      ...resolved,
+      assignment: context.driverId ? { driverId: context.driverId, assignedAt: context.assignedAt } : null,
+      eta: deriveEta(context, resolved, this.etaEstimator, now, staleAfter),
     };
   }
 }
@@ -112,6 +135,8 @@ export interface DeliveryTrackingContext {
   deliveryId: string;
   status: DeliveryStatus;
   driverId?: string;
+  /** When the current assignment was accepted (#46); null without a driver. */
+  assignedAt: string | null;
   /** User id the current driver reports locations under; null without a driver or once finished. */
   driverUserId: string | null;
 }

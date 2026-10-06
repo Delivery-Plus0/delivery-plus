@@ -325,6 +325,22 @@ async function runE2E() {
     if (liveTracking.tracking !== 'LIVE' || liveTracking.location?.latitude !== 30.0444) {
       throw new Error(`Customer tracking while on the job: expected LIVE with the position, got ${JSON.stringify(liveTracking)}`);
     }
+    // Assignment + ETA contract (#46): the customer sees the same assignment delivery-service recorded
+    // (and shows the driver in me/current); the ETA is derived, and without an estimator it says why.
+    const assignedAt = current.data.assignedAt;
+    if (!assignedAt || Number.isNaN(Date.parse(assignedAt)) || Date.parse(assignedAt) > Date.now() + 5_000) {
+      throw new Error(`Driver current delivery: expected a server-recorded assignedAt, got ${JSON.stringify(assignedAt)}`);
+    }
+    if (
+      liveTracking.assignment?.driverId !== assignedDelivery.driverId ||
+      liveTracking.assignment?.assignedAt !== new Date(assignedAt).toISOString()
+    ) {
+      throw new Error(`Tracking assignment should match delivery-service, got ${JSON.stringify(liveTracking.assignment)}`);
+    }
+    if (liveTracking.eta?.status !== 'UNAVAILABLE' || liveTracking.eta?.reason !== 'NOT_ESTIMATED') {
+      throw new Error(`Tracking ETA without an estimator should be UNAVAILABLE/NOT_ESTIMATED, got ${JSON.stringify(liveTracking.eta)}`);
+    }
+    console.log(`Assignment contract: driver ${liveTracking.assignment.driverId} assigned at ${liveTracking.assignment.assignedAt}; ETA ${liveTracking.eta.status} (${liveTracking.eta.reason})`);
     // While that position is live, another customer can read neither this delivery's tracking nor
     // the driver's raw location (#132: the customer map must not widen access).
     const outsider = await axios.post(`${API_URL}/api/auth/register`, {
@@ -379,6 +395,9 @@ async function runE2E() {
     const endedTracking = (await axios.get(trackingUrl, customerAuth)).data;
     if (endedTracking.tracking !== 'ENDED' || endedTracking.location !== null) {
       throw new Error(`Customer tracking after delivery: expected ENDED without a position, got ${JSON.stringify(endedTracking)}`);
+    }
+    if (endedTracking.eta?.reason !== 'DELIVERY_ENDED' || endedTracking.assignment?.driverId !== assignedDelivery.driverId) {
+      throw new Error(`After delivery the ETA must be gone (DELIVERY_ENDED) and the assignment kept, got ${JSON.stringify(endedTracking)}`);
     }
 
     // The stream followed pickup → transit → delivered by push and ends with ENDED (no position), then closes.

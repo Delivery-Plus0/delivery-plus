@@ -211,6 +211,7 @@ describe('DeliveriesService', () => {
         expect(deliveries.transition).toHaveBeenCalledWith('delivery-1', DeliveryStatus.CREATED, {
           driverId: 'driver-b',
           status: DeliveryStatus.DRIVER_ASSIGNED,
+          assignedAt: expect.any(Date),
         }, expect.any(Function));
         // The driver it lost is not "given back": it belongs to the assignment that won.
         expect(driverClient.releaseDriver).not.toHaveBeenCalled();
@@ -271,6 +272,7 @@ describe('DeliveriesService', () => {
         orderId: 'order-1',
         createdAt: assigned.createdAt,
         updatedAt: assigned.updatedAt,
+        assignedAt: assigned.assignedAt ?? null,
         pickup: { restaurantId: 'r1', name: 'Burger Palace', address: '123 Main St' },
         dropOff: { address: '9 Nile Corniche', notes: 'Gate 42', latitude: 30.0444, longitude: 31.2357 },
         order: { id: 'order-1', items: [{ name: 'Burger', quantity: 2 }], totalAmount: '19.98' },
@@ -460,6 +462,60 @@ describe('DeliveriesService', () => {
       expect((await staged())[0][1]).toMatchObject({
         eventType: DeliveryEventType.CREATED,
         payload: { deliveryId: 'delivery-1', orderId: 'order-1', customerId: 'c1', status: DeliveryStatus.CREATED },
+      });
+    });
+
+    describe('assignment contract (#46)', () => {
+      const assignedAt = new Date('2026-10-06T12:00:00.000Z');
+
+      it('records assignedAt in the same compare-and-set write as the assignment, and the event carries it', async () => {
+        deliveries.findById.mockResolvedValue(baseDelivery);
+        driverClient.findAvailableDriver.mockResolvedValue({ ...assignedDriver, status: DriverStatus.AVAILABLE });
+        deliveries.transition.mockImplementation(async (_id, _from, data) => ({ ...baseDelivery, ...data }) as Delivery);
+
+        const before = Date.now();
+        await service.assignDriver('delivery-1', actor(UserRole.ADMIN));
+
+        const written = deliveries.transition.mock.calls[0][2] as Partial<Delivery>;
+        expect(written).toMatchObject({ driverId: 'driver-1', status: DeliveryStatus.DRIVER_ASSIGNED });
+        expect((written.assignedAt as Date).getTime()).toBeGreaterThanOrEqual(before);
+        const [, event] = (await staged())[0];
+        expect(event.payload).toMatchObject({ driverId: 'driver-1', assignedAt: (written.assignedAt as Date).toISOString() });
+      });
+
+      it('a repeated assign of an assigned delivery stages no second event and keeps the original assignment', async () => {
+        const assigned = { ...at(DeliveryStatus.DRIVER_ASSIGNED), assignedAt };
+        deliveries.findById.mockResolvedValue(assigned);
+        driverClient.getDriver.mockResolvedValue(assignedDriver);
+
+        const result = await service.assignDriver('delivery-1', actor(UserRole.ADMIN));
+
+        expect(deliveries.transition).not.toHaveBeenCalled();
+        expect(await staged()).toHaveLength(0);
+        expect(result.assignedAt).toBe(assignedAt);
+        expect(driverClient.findAvailableDriver).not.toHaveBeenCalled();
+      });
+
+      it('events after the assignment keep the same (driverId, assignedAt)', async () => {
+        deliveries.findById.mockResolvedValue({ ...at(DeliveryStatus.DRIVER_ASSIGNED), assignedAt });
+        deliveries.transition.mockResolvedValue({ ...at(DeliveryStatus.PICKED_UP), assignedAt });
+        driverClient.getDriver.mockResolvedValue(assignedDriver);
+
+        await service.pickup('delivery-1', 'user-1', UserRole.DRIVER);
+
+        expect((await staged())[0][1].payload).toMatchObject({ driverId: 'driver-1', assignedAt: assignedAt.toISOString() });
+      });
+
+      it('events before any assignment carry no assignment', async () => {
+        deliveries.findByOrderId.mockResolvedValue(null);
+        orderClient.getOrder.mockResolvedValue({ id: 'order-1', customerId: 'c1', restaurantId: 'r1', status: OrderStatus.READY_FOR_PICKUP });
+        deliveries.create.mockResolvedValue({ ...baseDelivery, customerId: 'c1' });
+
+        await service.create(actor(UserRole.ADMIN), { orderId: 'order-1' });
+
+        const payload = (await staged())[0][1].payload;
+        expect(payload.driverId).toBeUndefined();
+        expect(payload.assignedAt).toBeUndefined();
       });
     });
 

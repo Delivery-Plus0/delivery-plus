@@ -43,6 +43,8 @@ export class DriverCurrentDeliveryDto {
   @ApiProperty() orderId!: string;
   @ApiProperty() createdAt!: Date;
   @ApiProperty() updatedAt!: Date;
+  /** When this driver's assignment was accepted (#46 assignment contract). */
+  @ApiProperty({ nullable: true, type: Date }) assignedAt!: Date | null;
   @ApiProperty({ type: PickupDto }) pickup!: PickupDto;
   @ApiProperty({ type: DropOffDto }) dropOff!: DropOffDto;
   @ApiProperty({ type: OrderSummaryDto }) order!: OrderSummaryDto;

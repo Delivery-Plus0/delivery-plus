@@ -43,6 +43,38 @@ Response (fields added in #32 are backward compatible):
 }
 ```
 
+## Assignment and ETA contract (#46)
+Every tracking read (`GET` and each SSE `tracking` event) also carries:
+
+```json
+"assignment": { "driverId": "…", "assignedAt": "2026-10-06T11:58:00.000Z" },
+"eta": { "status": "UNAVAILABLE", "reason": "NOT_ESTIMATED" }
+```
+
+**Assignment:**
+- **Source of truth:** delivery-service. `assignedAt` is set in the same compare-and-set write that moves the delivery to `DRIVER_ASSIGNED`, never by a client.
+- **Where it appears:** it is also in the `delivery.*` event payloads (`assignedAt`, optional for older deliveries) and in the driver's `GET /deliveries/me/current`.
+- **Fixed once set:** a delivery is assigned at most once (`DRIVER_ASSIGNED` only moves to `PICKED_UP` or `CANCELLED`), so `(driverId, assignedAt)` never changes.
+- **One event:** the `driver_assigned` event has a deterministic id and is staged in the outbox with the write. A repeated assign request stages nothing, so the assignment notification is emitted exactly once.
+- **Values:** `assignment` is `null` until a driver is assigned, and stays after the end as a historical identity, never a position. Deliveries assigned before the column existed were backfilled with their last update time.
+
+**ETA:**
+- **Derived on every read, from server-side state only:** the current assignment and status from delivery-service, and the last accepted position from Redis. It is never accepted from a client, and never stored or cached, so a cancellation, end, reassignment or stale position can't leave an old ETA behind.
+- **One gate (`deriveEta`), checked in order:**
+
+| Condition | `eta` |
+| --- | --- |
+| delivery `DELIVERED` / `CANCELLED` | `UNAVAILABLE` · `DELIVERY_ENDED` |
+| no driver | `UNAVAILABLE` · `NO_DRIVER` |
+| no usable position | `UNAVAILABLE` · `NO_LOCATION` |
+| position stale (`STALE`) | `UNAVAILABLE` · `STALE_LOCATION` |
+| LIVE position, estimator has no answer | `UNAVAILABLE` · `NOT_ESTIMATED` |
+| LIVE position + estimate | `ESTIMATED` with `seconds`, `driverId`, `assignedAt`, `basedOnLocationAt`, `computedAt`, `validUntil` |
+
+- **Validity:** `validUntil` is the moment the position behind the estimate turns stale. `isEtaValid` rejects an ETA once it is past `validUntil`, if the `(driverId, assignedAt)` differs (reassignment), or if the delivery has ended.
+- **No estimator yet:** routing/ETA computation is out of scope for #46, and orders don't carry drop-off coordinates. So no estimator is configured (`NO_ETA_ESTIMATOR`) and a valid input reports `NOT_ESTIMATED`. A future provider is bound to `ETA_ESTIMATOR`; it receives only validated server-side inputs and can't bypass the gate.
+- **Clients:** they must treat any `UNAVAILABLE` as "no ETA", not as an error. The customer app doesn't show an ETA yet.
+
 ## Realtime stream
 `GET /tracking/delivery/:deliveryId/stream` (#134, #135) pushes the tracking read to the customer as it changes. It covers **customer delivery tracking only**.
 

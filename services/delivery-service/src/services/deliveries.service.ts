@@ -66,6 +66,7 @@ function deliveryEvent(eventType: DeliveryEventType, delivery: Delivery): Delive
       orderId: delivery.orderId,
       customerId: delivery.customerId || undefined,
       driverId: delivery.driverId || undefined,
+      assignedAt: delivery.assignedAt ? new Date(delivery.assignedAt).toISOString() : undefined,
       status: delivery.status,
     },
   };
@@ -141,7 +142,7 @@ export class DeliveriesService {
       updated = await this.deliveries.transition(
         deliveryId,
         delivery.status,
-        { driverId: driver.id, status: DeliveryStatus.DRIVER_ASSIGNED },
+        { driverId: driver.id, status: DeliveryStatus.DRIVER_ASSIGNED, assignedAt: new Date() },
         (assigned) => deliveryEvent(DeliveryEventType.DRIVER_ASSIGNED, assigned),
       );
     } catch (error) {
@@ -225,6 +226,7 @@ export class DeliveriesService {
       orderId: delivery.orderId,
       createdAt: delivery.createdAt,
       updatedAt: delivery.updatedAt,
+      assignedAt: delivery.assignedAt ?? null,
       pickup: { restaurantId: restaurant.id, name: restaurant.name, address: restaurant.address },
       dropOff: {
         address: order.deliveryAddress ?? null,

@@ -6,6 +6,8 @@ export interface DeliveryDto {
   id: string;
   orderId: string;
   driverId?: string;
+  /** When the current driver's assignment was accepted (#46); null/absent before assignment. */
+  assignedAt?: string | null;
   status: DeliveryStatus;
 }
 

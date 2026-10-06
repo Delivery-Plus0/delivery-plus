@@ -2,7 +2,11 @@
 
 A one-page snapshot of what the platform does today, what is partial, and what is missing. Read it right after [01-project-overview.md](./01-project-overview.md) so later files are read with the right expectations.
 
-Snapshot of `dev` with the transactional outbox (#98, 2026-10-04): Phase 1 and 2 cores, all of Phase 3 (automatic dispatch + driver contracts) and Phase 4 (driver and restaurant clients, in their own private repos) are merged. When code and this file disagree, the code wins; update this file in the same PR that changes the behavior.
+Snapshot of `dev` after per-stage customer notifications (#129, 2026-10-06). Merged so far:
+- Phase 1 and 2 cores, including the transactional outbox (#98).
+- All of Phase 3 (automatic dispatch + driver contracts).
+- All of Phase 4 (driver and restaurant clients, in their own private repos).
+- The Phase 6 core (#5). When code and this file disagree, the code wins; update this file in the same PR that changes the behavior.
 
 ## Platform at a glance
 
@@ -41,7 +45,7 @@ Snapshot of `dev` with the transactional outbox (#98, 2026-10-04): Phase 1 and 2
 | Tracking | Implemented | Last-known driver location in Redis with a TTL. `GET /tracking/driver/:userId` requires JWT (the driver themself or admin); customers go through `GET /tracking/delivery/:id`, which inherits delivery ownership |
 | Notifications | Implemented (in-app) | One notification per customer-visible stage: payment received, order confirmed, driver assigned, picked up, delivered (#5); recipients come from the event's `customerId`, duplicates are dropped by durable idempotency. Mark-as-read is scoped to the owner (404 otherwise). No push yet |
 | Media uploads (S3) | Implemented | Presigned POST, byte verification, content-addressed keys; see [15-media-and-storage.md](./15-media-and-storage.md) |
-| Kafka reliability | Implemented (transactional outbox for order and delivery events, #98) | Durable Redis idempotency per consumer group (order-service, notification-service, delivery-service); 3 attempts, then `<topic>.dlq` with failure headers; `npm run kafka:dlq` lists/replays. Events keyed by `orderId`; order/delivery event ids are deterministic. Redis runs with AOF persistence. Still missing: transactional outbox, `customerId` in payment/delivery payloads. See [05-event-driven-design.md](./05-event-driven-design.md) |
+| Kafka reliability | Implemented (transactional outbox for order and delivery events, #98) | Durable Redis idempotency per consumer group (order-service, notification-service, delivery-service); 3 attempts, then `<topic>.dlq` with failure headers; `npm run kafka:dlq` lists/replays. Events keyed by `orderId`; order/delivery event ids are deterministic. Redis runs with AOF persistence. order-service and delivery-service stage events in `outbox_events` with the write and an `OutboxRelay` publishes them; delivery-service also sweeps for drivers left BUSY after a finished delivery (#127). Still missing: versioned event contracts (#23). See [05-event-driven-design.md](./05-event-driven-design.md) |
 | Gateway health | Implemented | `GET /health` and `GET /health/live` (liveness only, no dependency checks) |
 | Public API contract | Implemented | Generated OpenAPI at `docs/openapi/delivery-plus-public.json`, checked in CI |
 | Push/email delivery, real payment provider, observability stack | Not implemented | Roadmap |
@@ -65,7 +69,13 @@ No workflow collects test coverage.
 
 | PR | Change |
 | --- | --- |
-| branch `feat/restaurant-ownership-boundaries` | Restaurant ownership boundary hardening (#59, not merged yet): `GET /restaurants/me`, public restaurant DTOs, HMAC-protected ownership verification, signed menu/order internal clients, restaurant-order role guard, and gateway blocking of public ownership probes. |
+| #129 | Customer notification at every stage: `customerId?` on payment and delivery payloads (delivery stores it, migration 004); handlers for `payment.completed`, `delivery.driver_assigned`, `delivery.picked_up`, `delivery.completed`; events without `customerId` are skipped; `npm run e2e` and `seed:e2e` assert them (closes #5) |
+| #128 | Owners can neither set nor lift `SUSPENDED`: owner status writes are compare-and-set against a non-suspended row (closes #125) |
+| #127 | Driver-release reconciliation sweep in delivery-service (`DRIVER_RECONCILE_SWEEP_MS`, `DRIVER_RECONCILE_GRACE_MS`) (#98) |
+| #126 | Transactional outbox for order and delivery events (`outbox_events`, `OutboxRelay`) (#98) |
+| #124 | Gateway dev CORS allows the restaurant app E2E origin (:8085) |
+| #123 | Restaurant ownership boundaries (#59): `GET /restaurants/me`, public restaurant DTOs, HMAC-protected ownership verification, signed menu/order internal clients, restaurant-order role guard, gateway blocking of public ownership probes |
+| #111 | Gateway dev CORS allows the driver app E2E origin (:8084) |
 | #110 | Automatic dispatch on `order.ready_for_pickup` with a waiting-delivery sweep; Redis + durable idempotency in delivery-service; concurrent create maps to 409; seeds and `npm run e2e` no longer dispatch by hand; seed-e2e drops scenario S3 (closes #97) |
 | #109 | `GET /deliveries/me/current`: the calling driver's active delivery with pickup, drop-off, order summary and next actions; 204 when none (closes #96) |
 | #108 | Orders snapshot the delivery address at checkout (`CreateOrderDto`, profile fallback, migration `003-order-delivery-address`) (closes #95) |
@@ -87,9 +97,10 @@ No workflow collects test coverage.
 Tracked as GitHub milestones (Phase 1–9). Phase 3 (automatic dispatch + driver contracts) is complete.
 
 1. **Phase 4 is complete.** Three private client repos, each with CI, Security and E2E workflows: `delivery-plus-customer-app`, `delivery-plus-driver-app` (#99, closed) and `delivery-plus-restaurant-app` (#100, closed). The business flow runs through all three UIs with no API stand-ins (customer-app #20).
-2. **#98 transactional outbox + driver release reconciliation**: order and delivery events are published if and only if their change committed, and a driver release that failed and was never retried is repaired by a sweep.
-3. **Next**: Phase 6 notifications (#5 `customerId` in payloads + handlers), #125 (owners must not set or lift `SUSPENDED`), #7 graceful shutdown.
-4. **Open findings from the 2026-10-01 code review** (most unfiled): see [13-known-issues-and-gotchas.md](./13-known-issues-and-gotchas.md).
+2. **#98 transactional outbox + driver release reconciliation** (#126, #127): order and delivery events are published if and only if their change committed, and a driver release that failed and was never retried is repaired by a sweep.
+3. **Phase 6 core** (#129): a notification for every customer-visible stage. Remaining in Phase 6: failed/cancelled-payment notifications, retries (#50), templates/preferences (#51), push.
+4. **Next**: Phase 7 real-time tracking (#32, #46, #60: customer location UI, then SSE/WebSocket); #7 graceful shutdown.
+5. **Open findings from the 2026-10-01 code review** (most unfiled): see [13-known-issues-and-gotchas.md](./13-known-issues-and-gotchas.md).
 
 Open gaps and technical debt are listed in [13-known-issues-and-gotchas.md](./13-known-issues-and-gotchas.md).
 

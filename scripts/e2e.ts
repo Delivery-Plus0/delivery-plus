@@ -243,6 +243,25 @@ async function runE2E() {
     if (liveTracking.tracking !== 'LIVE' || liveTracking.location?.latitude !== 30.0444) {
       throw new Error(`Customer tracking while on the job: expected LIVE with the position, got ${JSON.stringify(liveTracking)}`);
     }
+    // While that position is live, another customer can read neither this delivery's tracking nor
+    // the driver's raw location (#132: the customer map must not widen access).
+    const outsider = await axios.post(`${API_URL}/api/auth/register`, {
+      email: `e2e.outsider.${Date.now()}@example.com`,
+      password: 'password123',
+      fullName: 'E2E Outsider',
+    });
+    const outsiderAuth = { headers: { Authorization: `Bearer ${outsider.data.accessToken}` } };
+    const outsiderTracking = await statusOf(axios.get(trackingUrl, outsiderAuth));
+    if (outsiderTracking !== 403) {
+      throw new Error(`Another customer got ${outsiderTracking} on this delivery's tracking, expected 403`);
+    }
+    const outsiderDriverLocation = await statusOf(
+      axios.get(`${API_URL}/api/tracking/driver/${driverProfile.userId}`, outsiderAuth),
+    );
+    if (outsiderDriverLocation !== 403) {
+      throw new Error(`Another customer got ${outsiderDriverLocation} on the driver's raw location, expected 403`);
+    }
+    console.log('Tracking authorization: another customer gets 403 on the delivery tracking and the raw driver location');
 
     await axios.post(`${API_URL}/api/deliveries/${deliveryId}/pickup`, {}, driverAuth);
     await axios.post(`${API_URL}/api/deliveries/${deliveryId}/start`, {}, driverAuth);

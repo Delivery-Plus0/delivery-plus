@@ -42,6 +42,11 @@ Response (fields added in #32 are backward compatible):
 }
 ```
 
+## Clients
+- **Customer app:** the order screen polls this endpoint every 10 s for an unfinished delivery. It shows `LIVE`/`STALE` positions as a pin on a street map ("Live" or "Last known location"), the other states as text only, and nothing once `ENDED` (#132).
+- **Authorization:** `npm run e2e` asserts that another customer gets 403 on both this route and `GET /tracking/driver/:userId`.
+- **Polling only:** there is no push yet. SSE/WebSocket with polling as fallback is the next step.
+
 ## Dependencies
 - Uses Redis for location snapshots via `LocationRepository`
 - Calls `delivery-service` and `driver-service` for verification and metadata

@@ -32,6 +32,18 @@ export class DeliveriesRepository {
       .getMany();
   }
 
+  /** Finished (delivered or cancelled) deliveries with a driver, changed since `since`, newest first. */
+  findFinishedWithDriverSince(since: Date, limit: number): Promise<Delivery[]> {
+    return this.repo
+      .createQueryBuilder('d')
+      .where('d.driverId IS NOT NULL')
+      .andWhere('d.status IN (:...finished)', { finished: [DeliveryStatus.DELIVERED, DeliveryStatus.CANCELLED] })
+      .andWhere('d.updatedAt >= :since', { since })
+      .orderBy('d.updatedAt', 'DESC')
+      .take(limit)
+      .getMany();
+  }
+
   /** Deliveries still waiting for a driver, oldest first (what auto-dispatch retries). */
   findWaitingForDriver(limit: number): Promise<Delivery[]> {
     return this.repo.find({

@@ -169,9 +169,24 @@ order-service and delivery-service no longer publish from the request path. Each
   4. No new dead letters, no rows left unpublished; the order reached DELIVERED.
 - payment-service keeps its status-marker re-publish approach.
 
+### Driver release reconciliation (#98)
+
+`DriverReconciliationService` (delivery-service) releases drivers left BUSY after their delivery finished. It sweeps every `DRIVER_RECONCILE_SWEEP_MS` (60 s; 3 s on the E2E stack) over the drivers of deliveries DELIVERED or CANCELLED in the last 24 h. It releases a driver only when all of these hold:
+- they have no active delivery;
+- driver-service still reports BUSY;
+- their status has not changed for `DRIVER_RECONCILE_GRACE_MS` (60 s; 5 s on E2E).
+
+The grace period protects an assignment in progress: claiming a driver changes their status. A stuck BUSY driver cannot be claimed (claims need AVAILABLE), so the check and the release don't race a new assignment.
+
+**Verified live, 10/10:**
+1. A row lock let `complete` commit DELIVERED while the release blocked. delivery-service was stopped and the waiting release statement was killed.
+2. The driver was BUSY with no active delivery, and still BUSY 8 s later.
+3. After delivery-service restarted, with no client retry, the sweep released the driver, and the order was DELIVERED from the committed event.
+4. One delivery, no dead letters.
+
 ### Remaining gaps
 
-- **Driver release is not reconciled.** The outbox (below) guarantees the events, but a `complete` whose driver release fails and is never retried leaves the driver BUSY (driver-service consumes no delivery events). Remaining part of #98: a reconciliation step for the release.
+- **Driver release is reconciled by a sweep, not by events.** driver-service still consumes no delivery events. A `complete`/`cancel` whose driver release fails and is never retried is repaired by delivery-service's `DriverReconciliationService` (see below).
 - **Payloads:** payment and delivery events carry no `customerId`, so notification-service cannot notify on them without a lookup.
 - **Handler time:** kafkajs heartbeats only between messages (session timeout 30 s). Handlers must stay well below that and the 60 s lease, or the lease needs renewal.
 - **No graceful shutdown hooks:** a stopped service stays in its consumer group until the session times out.

@@ -89,7 +89,12 @@ Every action writes the delivery first (compare-and-set on the current status), 
 - `assignDriver` gives the claimed driver back if recording the assignment fails, and a retried assign on an already-assigned delivery does not claim a second driver.
 - Re-published events keep their deterministic `eventId`, so consumers drop the duplicate.
 
-Not covered: if a request fails and the client **never** retries, the **driver release** stays undone (a driver left BUSY). The order sync is repaired from the committed delivery event (outbox); the release still needs a reconciliation step (#98).
+If a request fails and the client **never** retries:
+- The order sync is repaired from the committed delivery event (outbox).
+- The driver release is repaired by the **driver reconciliation sweep** (#98). Every `DRIVER_RECONCILE_SWEEP_MS` (60 s) it releases drivers of recently finished deliveries who are still BUSY, have no active delivery, and whose status hasn't changed for `DRIVER_RECONCILE_GRACE_MS` (60 s).
+- The grace period keeps it away from an assignment in progress.
+
+Not covered: a driver claimed for an assignment that crashed before the delivery recorded them.
 
 ## Notes
 Driver assignment is a core orchestration task in this service, with explicit transition rules. Some role restrictions are enforced inside the service rather than uniformly at the controller boundary.

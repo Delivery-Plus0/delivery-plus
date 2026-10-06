@@ -14,6 +14,8 @@ export interface DriverDto {
   id: string;
   userId: string;
   status: DriverStatus;
+  /** Last change to the driver (status changes included), as returned by driver-service. */
+  updatedAt?: string;
 }
 
 @Injectable()

@@ -48,7 +48,7 @@ The workspace root defines commands, but actual validation is still service-spec
 
 ## 11. Current implementation gaps
 
-- Order and delivery events go through a transactional outbox (#98): they are published if and only if the state change committed. The order sync after a delivery action is also repaired without a client retry (order-service converges from the committed delivery event). Not yet: the **driver release**. A `complete` whose release fails and is never retried leaves the driver BUSY (needs a reconciliation step; remaining part of #98).
+- Order and delivery events go through a transactional outbox (#98): they are published if and only if the state change committed. The order sync after a delivery action is also repaired without a client retry (order-service converges from the committed delivery event). A driver release that fails and is never retried is repaired by delivery-service's reconciliation sweep (BUSY, no active delivery, status unchanged for the grace period; #98).
 - Notification payment and delivery handlers are currently no-ops; payment and delivery payloads carry no `customerId`.
 - Kafka handlers must finish well within the 30 s session timeout and the 60 s idempotency lease; neither is enforced. Services have no graceful shutdown hooks, so a stopped consumer stays in its group until the session expires (resetting offsets has to wait for that).
 - kafkajs logs `Topic creation errors` at ERROR on every consumer start when the topics already exist; it is harmless.
@@ -58,7 +58,7 @@ The workspace root defines commands, but actual validation is still service-spec
 - Health routes (gateway included) are liveness checks; they do not verify Kafka, Redis, or downstream services.
 - No CI workflow collects coverage.
 - Automatic dispatch depends on `order.ready_for_pickup` being published; the outbox guarantees that once the order change committed (verified with Kafka down and order-service killed before publishing). Driver choice is "most recently updated AVAILABLE driver": no location, distance or fairness. The waiting-delivery sweep runs in every delivery-service replica (safe, because claims and transitions are compare-and-set, but redundant).
-- A driver left BUSY with no active delivery (e.g. a crash between claim and assignment) is not reconciled automatically.
+- A driver left BUSY by a crash **between claim and assignment** (no delivery ever recorded the driver) is still not reconciled: the reconciliation sweep only looks at drivers of finished deliveries.
 - Self-registered `DRIVER` and `RESTAURANT_OWNER` accounts need no approval.
 
 Open findings from the 2026-10-01 code review (mostly not filed as issues yet; the critical one, self-registered ADMIN, is fixed in #105, and the driver claim race in #107):

@@ -59,3 +59,6 @@ services:
   delivery-service:
     environment:
       AUTO_DISPATCH_SWEEP_MS: '2000'
+      # Driver release reconciliation (#98): sweep and grace shortened so E2E checks run in seconds.
+      DRIVER_RECONCILE_SWEEP_MS: '3000'
+      DRIVER_RECONCILE_GRACE_MS: '5000'

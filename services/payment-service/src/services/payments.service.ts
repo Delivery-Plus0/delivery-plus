@@ -258,6 +258,7 @@ export class PaymentsService {
           payload: {
             paymentId: current.id,
             orderId: current.orderId,
+            customerId: current.customerId,
             amount: parseFloat(current.amount),
             status: current.status,
           },

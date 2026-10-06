@@ -49,7 +49,7 @@ The workspace root defines commands, but actual validation is still service-spec
 ## 11. Current implementation gaps
 
 - Order and delivery events go through a transactional outbox (#98): they are published if and only if the state change committed. The order sync after a delivery action is also repaired without a client retry (order-service converges from the committed delivery event). A driver release that fails and is never retried is repaired by delivery-service's reconciliation sweep (BUSY, no active delivery, status unchanged for the grace period; #98).
-- Notification payment and delivery handlers are currently no-ops; payment and delivery payloads carry no `customerId`.
+- Notifications cover payment received, order confirmed, driver assigned, picked up and delivered (#5). Not yet: payment failed / order cancelled notifications (no notification types for them), retries and templates/preferences (#50, #51), push delivery.
 - Kafka handlers must finish well within the 30 s session timeout and the 60 s idempotency lease; neither is enforced. Services have no graceful shutdown hooks, so a stopped consumer stays in its group until the session expires (resetting offsets has to wait for that).
 - kafkajs logs `Topic creation errors` at ERROR on every consumer start when the topics already exist; it is harmless.
 - Internal user profile creation requires HMAC service identity, and user profile lookup enforces owner or admin access.

@@ -1,7 +1,7 @@
 # Notification Service
 
 ## Purpose
-Stores user notifications and subscribes to Kafka events. Order notification handling is implemented; payment and delivery handlers currently contain no-op behavior pending customer/order lookup and contract work.
+Stores user notifications and subscribes to Kafka events. The customer is notified at every stage they see: payment received, order confirmed, driver assigned, picked up, delivered (#5).
 
 ## Main REST endpoints
 From `services/notification-service/src/controllers/notifications.controller.ts`:
@@ -21,11 +21,20 @@ Subscribed to:
 - `payment.events`
 - `delivery.events`
 
-Current handler status:
+Notifications created (recipient = the event's `customerId`):
 
-- order events: implemented notification persistence
-- payment events: subscribed, handler currently no-op
-- delivery events: subscribed (`delivery.driver_assigned`), handler currently no-op; the payload has no `customerId` yet
+| Event | Notification type | Title |
+| --- | --- | --- |
+| `payment.completed` | `PAYMENT_COMPLETED` | Payment Received |
+| `order.confirmed` | `ORDER_CONFIRMED` | Order Confirmed |
+| `delivery.driver_assigned` | `DRIVER_ASSIGNED` | Driver Assigned |
+| `delivery.picked_up` | `PICKED_UP` | Order Picked Up |
+| `delivery.completed` | `DELIVERED` | Order Delivered |
+
+- `payment.events` and `delivery.events` carry an optional `customerId`. payment-service takes it from the payment; delivery-service stores the order's customer on the delivery at creation (migration 004).
+- An event without `customerId`, i.e. one published before #5 or for a delivery created before migration 004, is skipped with a warning. It is never sent to a guessed recipient.
+- Duplicates (Kafka redelivery, outbox re-sends) are dropped by durable idempotency on `eventId`, so each stage notifies once.
+- Not notified: `delivery.created` (the order screen shows "Finding a driver") and `delivery.in_transit` (no matching notification type).
 
 Published:
 - none directly implemented in this service

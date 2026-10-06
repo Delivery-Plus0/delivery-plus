@@ -54,10 +54,10 @@ export class DeliveriesRepository {
   }
 
   /** Creates the delivery and stages its delivery.created event in one transaction (outbox, #98). */
-  create(orderId: string, event: DeliveryEventBuilder): Promise<Delivery> {
+  create(orderId: string, customerId: string | null, event: DeliveryEventBuilder): Promise<Delivery> {
     return this.repo.manager.transaction(async (manager) => {
       const deliveries = manager.getRepository(Delivery);
-      const delivery = await deliveries.save(deliveries.create({ orderId, status: DeliveryStatus.CREATED }));
+      const delivery = await deliveries.save(deliveries.create({ orderId, customerId, status: DeliveryStatus.CREATED }));
       await stageEvent(manager, TOPICS.DELIVERY_EVENTS, event(delivery));
       return delivery;
     });

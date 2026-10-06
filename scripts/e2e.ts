@@ -255,6 +255,23 @@ async function runE2E() {
       throw new Error(`Expected order to be DELIVERED, got ${deliveredOrder.status}`);
     }
 
+    // #5: one notification per customer-visible stage of this order, and no duplicates.
+    const stages = ['PAYMENT_COMPLETED', 'ORDER_CONFIRMED', 'DRIVER_ASSIGNED', 'PICKED_UP', 'DELIVERED'];
+    const forThisOrder = async () => {
+      const page = (await axios.get(`${API_URL}/api/notifications?limit=50`, customerAuth)).data as {
+        items: { type: string; message: string }[];
+      };
+      return page.items.filter((n) => n.message.includes(orderId));
+    };
+    const orderNotifications = await waitFor('a notification for every stage', forThisOrder, (items) =>
+      stages.every((type) => items.some((n) => n.type === type)),
+    );
+    for (const type of stages) {
+      const count = orderNotifications.filter((n) => n.type === type).length;
+      if (count !== 1) throw new Error(`Expected exactly one ${type} notification for order ${orderId}, found ${count}`);
+    }
+    console.log(`Customer notified at every stage: ${stages.join(' → ')}`);
+
     console.log('E2E critical-path flow completed successfully!');
   } catch (error: any) {
     console.error('E2E failed:');

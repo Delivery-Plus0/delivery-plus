@@ -78,7 +78,7 @@ delivery-service publishes one event per lifecycle transition: `delivery.created
 - Staged in the transactional outbox together with the delivery write (#98) and published by the relay; the HTTP syncs to order-service (order status) and driver-service (availability) run after the commit. Because the event is committed with the write, order-service converges from it even when the HTTP order sync fails. Delivery actions are retry-safe: repeating an action on a delivery already in the target status re-runs the syncs (its event was already staged with the original write, same `eventId`), so a failed driver release is repaired by the client's retry (see [docs/services/delivery-service.md](../docs/services/delivery-service.md#retry-safety)). Verified live: with order-service down, `complete` failed after releasing the driver; the retry delivered the order and re-published `delivery.completed` with the same id.
 - order-service applies `driver_assigned`, `picked_up` and `completed` through `syncStatusFromEvent` (same status → no-op; stale → logged and skipped), so a late or redelivered event never fails the consumer.
 - driver-service does **not** consume delivery events. Its old release-on-completion consumer was removed: a late `delivery.completed` could free a driver already on the next delivery, and AVAILABLE → AVAILABLE is not a valid transition.
-- notification-service subscribes to `delivery.driver_assigned` but does nothing yet (no `customerId` in the payload).
+- Delivery events carry the order's `customerId` (stored on the delivery at creation, #5). notification-service notifies on `driver_assigned`, `picked_up` and `completed`.
 
 ## Event-driven patterns in the repository
 
@@ -103,7 +103,7 @@ The repository does not implement a centralized event store. Instead, each servi
 
 Services react to incoming events by updating their own internal state or creating follow-up side effects:
 
-- `notification-service` subscribes to order/payment/delivery topics and persists order notifications; payment and delivery handlers currently contain no-op behavior because the required lookup/contract work is not implemented
+- `notification-service` subscribes to order/payment/delivery topics and notifies the customer on `payment.completed`, `order.confirmed`, `delivery.driver_assigned`, `delivery.picked_up` and `delivery.completed` (#5). Events without `customerId` are skipped, never guessed
 - `order-service` converges its status from payment and delivery events (tolerant of duplicates and stale events)
 - `delivery-service` consumes `order.ready_for_pickup` and dispatches automatically: it creates the delivery if none exists and assigns a driver. With no driver free, the delivery waits and a periodic sweep retries; the event is not dead-lettered. Durable idempotency is used, and races with manual dispatch end in one delivery and one driver (see [docs/services/delivery-service.md](../docs/services/delivery-service.md#automatic-dispatch))
 - `driver-service` consumes nothing; availability is set synchronously by delivery-service (compare-and-set claim and release; a BUSY driver cannot make themselves AVAILABLE)
@@ -187,7 +187,7 @@ The grace period protects an assignment in progress: claiming a driver changes t
 ### Remaining gaps
 
 - **Driver release is reconciled by a sweep, not by events.** driver-service still consumes no delivery events. A `complete`/`cancel` whose driver release fails and is never retried is repaired by delivery-service's `DriverReconciliationService` (see below).
-- **Payloads:** payment and delivery events carry no `customerId`, so notification-service cannot notify on them without a lookup.
+- **Payloads:** payment and delivery events carry an optional `customerId` (#5); events published before it, or for deliveries created before migration 004, have none and are not notified.
 - **Handler time:** kafkajs heartbeats only between messages (session timeout 30 s). Handlers must stay well below that and the 60 s lease, or the lease needs renewal.
 - **No graceful shutdown hooks:** a stopped service stays in its consumer group until the session times out.
 - **No schema registry or runtime validation** of payloads beyond `eventId`/`eventType`.

@@ -17,6 +17,10 @@ export class Delivery {
   @Column()
   orderId!: string;
 
+  /** The order's customer, copied at creation so delivery events can name whom to notify (#5). */
+  @Column({ type: 'uuid', nullable: true })
+  customerId?: string | null;
+
   @Index()
   @Column({ nullable: true })
   driverId?: string; // driver-service Driver.id (not the userId)

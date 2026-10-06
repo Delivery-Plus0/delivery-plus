@@ -9,6 +9,8 @@ export enum PaymentEventType {
 export interface PaymentPayload {
   paymentId: string;
   orderId: string;
+  /** The paying customer (#5). Optional: events published before it was added have none. */
+  customerId?: string;
   amount: number;
   status: string; // PENDING, PROCESSING, COMPLETED, FAILED
 }

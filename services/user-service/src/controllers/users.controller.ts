@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Patch, Post, Query, Req, UseGuards, Delete } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser, JwtPayload } from '@food-delivery/shared';
 import { UsersService } from '../services/users.service';
@@ -56,6 +56,14 @@ export class UsersController {
   @ApiOperation({ summary: 'Confirm and save the current user avatar upload' })
   confirmAvatarUpload(@CurrentUser() user: JwtPayload, @Body() dto: ConfirmAvatarUploadDto) {
     return this.usersService.confirmAvatarUpload(user, dto.objectKey);
+  }
+
+  @Delete('users/me/avatar')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "Remove the current user's avatar (#150)" })
+  removeAvatar(@CurrentUser() user: JwtPayload): Promise<UserProfile> {
+    return this.usersService.removeAvatar(user);
   }
 
   @Get('users/me/orders')

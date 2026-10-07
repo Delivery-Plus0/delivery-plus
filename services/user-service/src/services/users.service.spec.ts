@@ -204,6 +204,24 @@ describe('UsersService', () => {
     });
   });
 
+  describe('removeAvatar (#150)', () => {
+    it("clears the caller's own avatar", async () => {
+      profiles.findById.mockResolvedValue(profile({ avatarUrl: 'https://cdn/a.jpg' }));
+      profiles.update.mockResolvedValue(profile({ avatarUrl: null as unknown as string }));
+
+      await expect(service.removeAvatar(owner)).resolves.toMatchObject({ avatarUrl: null });
+      expect(profiles.update).toHaveBeenCalledWith('u-owner', { avatarUrl: null });
+    });
+
+    it('is a no-op without an avatar', async () => {
+      profiles.findById.mockResolvedValue(profile({ avatarUrl: null as unknown as string }));
+
+      await service.removeAvatar(owner);
+
+      expect(profiles.update).not.toHaveBeenCalled();
+    });
+  });
+
   describe('avatar uploads', () => {
     it('rejects a mismatched object key before persisting an avatar URL', async () => {
       profiles.findById.mockResolvedValue(profile());

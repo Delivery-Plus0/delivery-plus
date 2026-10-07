@@ -92,6 +92,14 @@ export class UsersService {
     return updated as UserProfile;
   }
 
+  /** Removes the caller's photo (#150): the profile falls back to initials. Repeating it is a no-op. */
+  async removeAvatar(requester: JwtPayload): Promise<UserProfile> {
+    const profile = await this.getOwnProfile(requester);
+    if (!profile.avatarUrl) return profile;
+    const updated = await this.profiles.update(profile.id, { avatarUrl: null as unknown as string });
+    return updated as UserProfile;
+  }
+
   async getOrderHistory(requester: JwtPayload, authHeader: string, page: number, limit: number): Promise<unknown> {
     if (!authHeader) {
       throw new UnauthorizedError('Missing authorization header');

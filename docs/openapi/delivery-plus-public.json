@@ -539,6 +539,41 @@
         }
       }
     },
+    "/api/users/me/avatar": {
+      "delete": {
+        "summary": "Remove the current user avatar",
+        "tags": [
+          "users"
+        ],
+        "operationId": "users_delete_api_users_me_avatar",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/restaurants": {
       "post": {
         "summary": "Create a restaurant",

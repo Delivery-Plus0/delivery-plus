@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import {
   BadRequestError,
   ForbiddenError,
@@ -23,6 +23,23 @@ import {
 } from '@food-delivery/shared';
 import { DeliveryAddress, OrdersRepository } from '../repositories/orders.repository';
 import { OrderPaymentStatus, outcomeFor } from '../common/order-outcome';
+import { priceOrder } from '../common/pricing';
+import { APP_CONFIG, AppConfig } from '../config/app-config';
+
+export interface OrderQuote {
+  subtotalAmount: string;
+  deliveryFee: string;
+  totalAmount: string;
+  currency: 'EGP';
+}
+
+export interface OrderFeeSplit {
+  orderId: string;
+  deliveryFee: string;
+  driverFeeShare: string;
+  platformFeeShare: string;
+  driverCancelFeeShare: string;
+}
 import { ORDER_LIST_FILTER_STATUSES, OrderListFilter } from '../dto/list-orders-query.dto';
 import { CartServiceClient } from '../common/cart-service.client';
 import { RestaurantServiceClient } from '../common/restaurant-service.client';
@@ -74,6 +91,7 @@ export class OrdersService implements OnModuleInit {
     private readonly outbox: OutboxRelayService,
     private readonly kafkaConsumer: KafkaConsumerService,
     private readonly userClient: UserServiceClient,
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
   async onModuleInit() {
@@ -169,7 +187,8 @@ export class OrdersService implements OnModuleInit {
           price: item.price,
           quantity: item.quantity,
         })),
-        cart.total,
+        // Fee and split are priced here and stored with the order (#145).
+        priceOrder(cart.total, this.config.pricing),
         idempotencyKey,
         delivery,
         (created) => orderEvent(created, OrderEventType.CREATED),
@@ -188,6 +207,26 @@ export class OrdersService implements OnModuleInit {
       }
       throw error;
     }
+  }
+
+  /** What checking out the current cart would cost (#145), priced by the same rules as the order. */
+  async quote(authHeader: string): Promise<OrderQuote> {
+    const cart = await this.cartClient.getCart(authHeader);
+    const { subtotalAmount, deliveryFee, totalAmount } = priceOrder(cart.items.length ? cart.total : 0, this.config.pricing);
+    return { subtotalAmount, deliveryFee, totalAmount, currency: 'EGP' };
+  }
+
+  /** The order's internal fee split, for delivery-service's earnings ledger (ADMIN-only route). */
+  async getFeeSplit(id: string): Promise<OrderFeeSplit> {
+    const split = await this.orders.findFeeSplit(id);
+    if (!split) throw new NotFoundError(`Order ${id} not found`);
+    return {
+      orderId: split.id,
+      deliveryFee: split.deliveryFee ?? '0.00',
+      driverFeeShare: split.driverFeeShare ?? '0.00',
+      platformFeeShare: split.platformFeeShare ?? '0.00',
+      driverCancelFeeShare: split.driverCancelFeeShare ?? '0.00',
+    };
   }
 
   async getById(id: string, requesterId: string, requesterRole: UserRole): Promise<Order> {

@@ -1731,6 +1731,41 @@
         ]
       }
     },
+    "/api/orders/quote": {
+      "get": {
+        "summary": "Price the current cart: subtotal, delivery fee and total (EGP)",
+        "tags": [
+          "orders"
+        ],
+        "operationId": "orders_get_api_orders_quote",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/orders/{id}": {
       "get": {
         "summary": "Get an order by id",
@@ -2271,6 +2306,41 @@
           },
           "204": {
             "description": "No active delivery (or no driver profile yet)"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/deliveries/me/earnings": {
+      "get": {
+        "summary": "Get the calling driver's earnings: pending, available, balance and ledger entries",
+        "tags": [
+          "deliveries"
+        ],
+        "operationId": "deliveries_get_api_deliveries_me_earnings",
+        "responses": {
+          "200": {
+            "description": "Successful response"
           },
           "400": {
             "description": "Bad request",

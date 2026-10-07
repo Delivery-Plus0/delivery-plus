@@ -1,4 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { EntityManager } from 'typeorm';
 import {
   BadRequestError,
   ConflictError,
@@ -24,6 +25,9 @@ import { OutboxRelayService } from '../common/outbox-relay.service';
 import { DriverCurrentDeliveryDto, NEXT_DRIVER_ACTIONS } from '../dto/driver-current-delivery.dto';
 import { CreateDeliveryDto } from '../dto/create-delivery.dto';
 import { Delivery } from '../entities/delivery.entity';
+import { LedgerEntryType } from '../entities/driver-ledger-entry.entity';
+import { LedgerRepository } from '../repositories/ledger.repository';
+import { APP_CONFIG, AppConfig } from '../config/app-config';
 
 const DISPATCH_ROLES = [UserRole.RESTAURANT_OWNER, UserRole.ADMIN];
 
@@ -96,6 +100,8 @@ export class DeliveriesService {
     private readonly driverClient: DriverServiceClient,
     private readonly outbox: OutboxRelayService,
     private readonly restaurantClient: RestaurantServiceClient,
+    private readonly ledger: LedgerRepository,
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
   async create(requester: DeliveryRequester, dto: CreateDeliveryDto): Promise<Delivery> {
@@ -197,21 +203,23 @@ export class DeliveriesService {
   async complete(deliveryId: string, requesterId: string, requesterRole: UserRole): Promise<Delivery> {
     const delivery = await this.findOrThrow(deliveryId);
     await this.assertAssignedDriver(delivery, requesterId, requesterRole);
+    const earning = await this.earningFor(delivery, DeliveryStatus.DELIVERED);
     return this.advance(delivery, DeliveryStatus.DELIVERED, DeliveryEventType.COMPLETED, async (updated) => {
       // Driver first: freeing the driver must not depend on order-service being reachable.
       await this.releaseDriverOf(updated);
       await this.syncOrderAlongDelivery(updated.orderId, OrderStatus.DELIVERED);
-    });
+    }, earning);
   }
 
   async cancel(deliveryId: string, requester: DeliveryRequester): Promise<Delivery> {
     this.assertDispatchRole(requester.role);
     const delivery = await this.findOrThrow(deliveryId);
     await this.assertCanDispatch(delivery.orderId, requester);
+    const compensation = await this.earningFor(delivery, DeliveryStatus.CANCELLED);
     return this.advance(delivery, DeliveryStatus.CANCELLED, DeliveryEventType.CANCELLED, async (updated) => {
       await this.releaseDriverOf(updated);
       await this.orderClient.updateOrderStatus(updated.orderId, OrderStatus.CANCELLED);
-    });
+    }, compensation);
   }
 
   /**
@@ -361,12 +369,17 @@ export class DeliveriesService {
     target: DeliveryStatus,
     eventType: DeliveryEventType,
     effects: (updated: Delivery) => Promise<void>,
+    inTransaction?: (manager: EntityManager, updated: Delivery) => Promise<void>,
   ): Promise<Delivery> {
     let current = delivery;
     if (delivery.status !== target) {
       this.assertTransition(delivery.status, target);
-      const updated = await this.deliveries.transition(delivery.id, delivery.status, { status: target, ...stageTime(target) }, (moved) =>
-        deliveryEvent(eventType, moved),
+      const updated = await this.deliveries.transition(
+        delivery.id,
+        delivery.status,
+        { status: target, ...stageTime(target) },
+        (moved) => deliveryEvent(eventType, moved),
+        inTransaction,
       );
       if (updated) this.outbox.kick();
       current = updated ?? (await this.findOrThrow(delivery.id));
@@ -377,6 +390,37 @@ export class DeliveriesService {
     }
     await effects(current);
     return current;
+  }
+
+  /**
+   * The driver's ledger entry for this move (#145), written in the same transaction as the status:
+   * completing pays the order's driverFeeShare; cancelling after pickup pays its driverCancelFeeShare.
+   * Both settle after the configured window. Nothing for other moves, for a delivery already at the
+   * target (its entry was written with the first move), or for orders from before fees (share 0).
+   */
+  private async earningFor(
+    delivery: Delivery,
+    target: DeliveryStatus.DELIVERED | DeliveryStatus.CANCELLED,
+  ): Promise<((manager: EntityManager, updated: Delivery) => Promise<void>) | undefined> {
+    if (delivery.status === target || !delivery.driverId) return undefined;
+    const afterPickup = delivery.status === DeliveryStatus.PICKED_UP || delivery.status === DeliveryStatus.IN_TRANSIT;
+    if (target === DeliveryStatus.CANCELLED && !afterPickup) return undefined;
+
+    const split = await this.orderClient.getFeeSplit(delivery.orderId);
+    const amount = target === DeliveryStatus.DELIVERED ? split.driverFeeShare : split.driverCancelFeeShare;
+    if (!(Number.parseFloat(amount) > 0)) return undefined;
+    const type = target === DeliveryStatus.DELIVERED ? LedgerEntryType.DELIVERY_EARNING : LedgerEntryType.CANCELLATION_COMPENSATION;
+    const settlementMs = this.config.earningsSettlementHours * 60 * 60 * 1000;
+
+    return (manager, updated) =>
+      this.ledger.appendOnce(manager, {
+        driverId: updated.driverId!,
+        deliveryId: updated.id,
+        orderId: updated.orderId,
+        type,
+        amount,
+        availableAt: new Date(Date.now() + settlementMs),
+      });
   }
 
   private async afterDriverAssigned(delivery: Delivery): Promise<Delivery> {

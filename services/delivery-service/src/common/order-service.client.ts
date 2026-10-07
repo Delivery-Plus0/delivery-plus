@@ -16,6 +16,14 @@ export interface OrderDto {
   deliveryLongitude?: number | null;
 }
 
+export interface OrderFeeSplitDto {
+  orderId: string;
+  deliveryFee: string;
+  driverFeeShare: string;
+  platformFeeShare: string;
+  driverCancelFeeShare: string;
+}
+
 @Injectable()
 export class OrderServiceClient {
   constructor(
@@ -38,6 +46,18 @@ export class OrderServiceClient {
     }
 
     return (await response.json()) as OrderDto;
+  }
+
+  /** The order's delivery-fee split (#145), from order-service's ADMIN-only route, with the service token. */
+  async getFeeSplit(orderId: string): Promise<OrderFeeSplitDto> {
+    const safeOrderId = assertValidUuidV4(orderId, 'orderId');
+    const authHeader = await this.systemToken.mint();
+    const response = await fetch(`${this.config.orderServiceUrl}/orders/${safeOrderId}/fee-split`, {
+      headers: { Authorization: authHeader },
+    });
+    if (response.status === 404) throw new NotFoundError(`Order ${safeOrderId} not found`);
+    if (!response.ok) throw new BadRequestError(`Failed to fetch the fee split of order ${safeOrderId}`);
+    return (await response.json()) as OrderFeeSplitDto;
   }
 
   /**

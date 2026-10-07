@@ -4,6 +4,7 @@ import { Repository, In } from 'typeorm';
 import { BaseEvent, OrderStatus, TOPICS, stageEvent } from '@food-delivery/shared';
 import { Order } from '../entities/order.entity';
 import { OrderItem } from '../entities/order-item.entity';
+import { PricingSnapshot } from '../common/pricing';
 
 /** Drop-off address snapshot stored on a new order. */
 export interface DeliveryAddress {
@@ -38,7 +39,7 @@ export class OrdersRepository {
     customerId: string,
     restaurantId: string,
     items: NewOrderItem[],
-    totalAmount: number,
+    pricing: PricingSnapshot,
     idempotencyKey: string | undefined,
     delivery: DeliveryAddress,
     event: OrderEventBuilder,
@@ -47,7 +48,12 @@ export class OrdersRepository {
       customerId,
       restaurantId,
       status: OrderStatus.CREATED,
-      totalAmount: totalAmount.toFixed(2),
+      totalAmount: pricing.totalAmount,
+      subtotalAmount: pricing.subtotalAmount,
+      deliveryFee: pricing.deliveryFee,
+      driverFeeShare: pricing.driverFeeShare,
+      platformFeeShare: pricing.platformFeeShare,
+      driverCancelFeeShare: pricing.driverCancelFeeShare,
       idempotencyKey: idempotencyKey ?? null,
       deliveryAddress: delivery.address,
       deliveryNotes: delivery.notes,
@@ -109,6 +115,16 @@ export class OrdersRepository {
   async recordPaymentStatus(id: string, status: string): Promise<void> {
     const replaceable = status === 'PENDING' ? '"paymentStatus" IS NULL' : '("paymentStatus" IS NULL OR "paymentStatus" = \'PENDING\')';
     await this.repo.query(`UPDATE "orders" SET "paymentStatus" = $1 WHERE "id" = $2 AND ${replaceable}`, [status, id]);
+  }
+
+  /** The internal fee split of an order (#145); null for an unknown order. */
+  findFeeSplit(id: string): Promise<Pick<Order, 'id' | 'deliveryFee' | 'driverFeeShare' | 'platformFeeShare' | 'driverCancelFeeShare'> | null> {
+    return this.repo
+      .createQueryBuilder('o')
+      .select(['o.id', 'o.deliveryFee'])
+      .addSelect(['o.driverFeeShare', 'o.platformFeeShare', 'o.driverCancelFeeShare'])
+      .where('o.id = :id', { id })
+      .getOne();
   }
 
   async findByCustomer(

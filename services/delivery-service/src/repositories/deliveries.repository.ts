@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import { BaseEvent, DeliveryStatus, TOPICS, stageEvent } from '@food-delivery/shared';
 import { Delivery } from '../entities/delivery.entity';
 
@@ -88,7 +88,13 @@ export class DeliveriesRepository {
    * another request moved it first, so two concurrent writers (e.g. cancel and complete) cannot both win.
    * Only the winner stages the event for the change, in the same transaction (outbox, #98).
    */
-  async transition(id: string, from: DeliveryStatus, data: Partial<Delivery>, event: DeliveryEventBuilder): Promise<Delivery | null> {
+  async transition(
+    id: string,
+    from: DeliveryStatus,
+    data: Partial<Delivery>,
+    event: DeliveryEventBuilder,
+    inTransaction?: (manager: EntityManager, updated: Delivery) => Promise<void>,
+  ): Promise<Delivery | null> {
     return this.repo.manager.transaction(async (manager) => {
       const deliveries = manager.getRepository(Delivery);
       const result = await deliveries.update({ id, status: from }, data);
@@ -96,6 +102,8 @@ export class DeliveriesRepository {
       const updated = await deliveries.findOne({ where: { id } });
       if (!updated) return null;
       await stageEvent(manager, TOPICS.DELIVERY_EVENTS, event(updated));
+      // Writes that must commit with the status (e.g. the earnings ledger, #145).
+      if (inTransaction) await inTransaction(manager, updated);
       return updated;
     });
   }

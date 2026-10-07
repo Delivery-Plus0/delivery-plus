@@ -1,3 +1,4 @@
+import { DEFAULT_PRICING } from '../common/pricing';
 import { OrdersService } from './orders.service';
 import { OrdersRepository } from '../repositories/orders.repository';
 import { CartServiceClient } from '../common/cart-service.client';
@@ -39,6 +40,8 @@ describe('OrdersService', () => {
     cancelledBy: null,
     cancellationReason: null,
     paymentStatus: null,
+    subtotalAmount: '9.99',
+    deliveryFee: '0.00',
     items: [],
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -71,6 +74,7 @@ describe('OrdersService', () => {
       create: jest.fn(),
       updateStatus: jest.fn(),
       findByCustomer: jest.fn(),
+      findFeeSplit: jest.fn(),
       recordPaymentStatus: jest.fn(),
       findByRestaurant: jest.fn(),
       findByCustomerAndIdempotencyKey: jest.fn(),
@@ -99,6 +103,7 @@ describe('OrdersService', () => {
       outbox as any,
       kafkaConsumer as any,
       userClient,
+      { pricing: DEFAULT_PRICING } as any,
     );
   });
 
@@ -618,6 +623,62 @@ describe('OrdersService', () => {
       orders.findByCustomer.mockResolvedValue([[], 0]);
       await expect(service.listByCustomer('customer-1', 1, 20)).resolves.toMatchObject({ total: 0, totalPages: 1 });
       expect(orders.findByCustomer).toHaveBeenCalledWith('customer-1', 1, 20, null);
+    });
+  });
+
+  describe('delivery fee (#145)', () => {
+    it('prices the order at checkout: items + flat fee, with the split stored as a snapshot', async () => {
+      cartClient.getCart.mockResolvedValue({
+        userId: 'customer-1',
+        restaurantId: 'restaurant-1',
+        items: [{ menuItemId: 'i1', name: 'Burger', price: 100, quantity: 2 }],
+        total: 200,
+      } as any);
+      restaurantClient.getRestaurant.mockResolvedValue({ id: 'restaurant-1', status: 'OPEN' } as any);
+      orders.create.mockResolvedValue({ ...baseOrder, id: 'order-1' } as any);
+
+      await service.createFromCart('customer-1', 'Bearer x', undefined, { deliveryAddress: '1 Test Street' } as any);
+
+      expect(orders.create.mock.calls[0][3]).toEqual({
+        subtotalAmount: '200.00',
+        deliveryFee: '25.00',
+        totalAmount: '225.00',
+        driverFeeShare: '12.50',
+        platformFeeShare: '12.50',
+        driverCancelFeeShare: '6.25',
+      });
+    });
+
+    it('quotes the current cart with the same rules, without the internal split', async () => {
+      cartClient.getCart.mockResolvedValue({ userId: 'customer-1', restaurantId: 'r', items: [{}], total: 19.98 } as any);
+      await expect(service.quote('Bearer x')).resolves.toEqual({
+        subtotalAmount: '19.98',
+        deliveryFee: '25.00',
+        totalAmount: '44.98',
+        currency: 'EGP',
+      });
+    });
+
+    it('quotes an empty cart as no items, fee still shown', async () => {
+      cartClient.getCart.mockResolvedValue({ userId: 'customer-1', restaurantId: null, items: [], total: 0 } as any);
+      await expect(service.quote('Bearer x')).resolves.toMatchObject({ subtotalAmount: '0.00', totalAmount: '25.00' });
+    });
+
+    it('reads the internal fee split for delivery-service, defaulting older orders to zero', async () => {
+      orders.findFeeSplit.mockResolvedValueOnce({ id: 'order-1', deliveryFee: '25.00', driverFeeShare: '12.50', platformFeeShare: '12.50', driverCancelFeeShare: '6.25' } as any);
+      await expect(service.getFeeSplit('order-1')).resolves.toEqual({
+        orderId: 'order-1',
+        deliveryFee: '25.00',
+        driverFeeShare: '12.50',
+        platformFeeShare: '12.50',
+        driverCancelFeeShare: '6.25',
+      });
+
+      orders.findFeeSplit.mockResolvedValueOnce({ id: 'old', deliveryFee: null, driverFeeShare: null, platformFeeShare: null, driverCancelFeeShare: null } as any);
+      await expect(service.getFeeSplit('old')).resolves.toMatchObject({ deliveryFee: '0.00', driverFeeShare: '0.00' });
+
+      orders.findFeeSplit.mockResolvedValueOnce(null);
+      await expect(service.getFeeSplit('nope')).rejects.toThrow(NotFoundError);
     });
   });
 });

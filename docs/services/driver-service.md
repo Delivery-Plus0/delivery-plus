@@ -30,6 +30,18 @@ From `services/driver-service/src/config/app-config.ts`:
 - `PORT` (default: `3009`)
 - `NODE_ENV` (default: `development`)
 
+## Driver profile and verification (#147)
+
+- **Verification status:** `verificationStatus` is `PENDING` (default, also for drivers registered before #147), `VERIFIED` or `REJECTED`, plus an optional `verificationNote` for the driver and `verifiedAt`.
+  - Only an admin sets it: `PATCH /drivers/:id/verification`. Admin review tooling is out of scope.
+  - It is informational for now: it doesn't gate going online.
+- **Vehicle:** `PATCH /drivers/me/vehicle` (DRIVER) changes the vehicle type and plate (trimmed; the plate is upper-cased), **only while OFFLINE**, checked with a compare-and-set (409 otherwise). A change mid-shift would make the customer's driver card wrong for a job already on its way.
+- **Name, phone and photo** belong to user-service (`PATCH /users/me` with the Egyptian phone rules of #152, and the avatar upload). driver-service doesn't copy them.
+- **No identity documents.** The business does not require national-ID details today, so none are collected or stored, in line with the data-minimisation rule.
+  - If that changes, they belong here only, restricted to the driver and admins.
+  - They are never returned to customers and never copied into other services.
+- Customers only ever see the delivery-service driver card (first name, photo, vehicle, plate); the verification fields are not part of it.
+
 ## Availability lifecycle
 
 Statuses and allowed transitions (`DRIVER_TRANSITIONS` in `shared/src/types/enums.ts`):

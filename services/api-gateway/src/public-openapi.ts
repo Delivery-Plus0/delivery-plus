@@ -128,12 +128,14 @@ export const SERVICE_DEFINITIONS = [
     routes: [
       { method: 'post', path: '/register', summary: 'Register a driver profile', auth: true, statusCode: 201 },
       { method: 'get', path: '/me', summary: 'Get the current driver profile', auth: true, statusCode: 200 },
+      { method: 'patch', path: '/me/vehicle', summary: 'Change your vehicle (only while offline)', auth: true, statusCode: 200 },
       { method: 'post', path: '/me/online', summary: 'Go online', auth: true, statusCode: 201 },
       { method: 'post', path: '/me/offline', summary: 'Go offline', auth: true, statusCode: 201 },
       { method: 'post', path: '/me/status', summary: 'Set driver status explicitly', auth: true, statusCode: 201 },
       { method: 'get', path: '/available', summary: 'List available drivers (admin/system only)', auth: true, statusCode: 200 },
       { method: 'get', path: '/:id', summary: 'Get a driver by id (self or admin)', auth: true, statusCode: 200 },
       { method: 'patch', path: '/:id/status', summary: 'Set a driver status as admin', auth: true, statusCode: 200 },
+      { method: 'patch', path: '/:id/verification', summary: "Set a driver's verification status (admin only)", auth: true, statusCode: 200 },
     ],
   },
   {

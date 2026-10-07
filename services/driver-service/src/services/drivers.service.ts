@@ -16,6 +16,7 @@ import { RegisterDriverDto } from '../dto/register-driver.dto';
 import { UpdateDriverStatusDto } from '../dto/update-driver-status.dto';
 import { IDEMPOTENT_STATUSES, isRoleAllowedForTransition } from '../common/driver-transition-rules';
 import { Driver } from '../entities/driver.entity';
+import { UpdateVehicleDto, UpdateVerificationDto } from '../dto/driver-profile.dto';
 
 /**
  * Driver availability is changed synchronously by delivery-service (BUSY on assignment, AVAILABLE on
@@ -38,6 +39,32 @@ export class DriversService {
       vehicleType: dto.vehicleType,
       licensePlate: dto.licensePlate,
     });
+  }
+
+  /**
+   * The driver's own vehicle (#147). Only while OFFLINE: a vehicle change mid-shift would make the
+   * customer's driver card wrong for a job already on its way.
+   */
+  async updateOwnVehicle(userId: string, dto: UpdateVehicleDto): Promise<Driver> {
+    const driver = await this.getByUserId(userId);
+    if (driver.status !== DriverStatus.OFFLINE) {
+      throw new ConflictError('Go offline before changing your vehicle.');
+    }
+    const updated = await this.drivers.updateVehicleWhileOffline(driver.id, { vehicleType: dto.vehicleType, licensePlate: dto.licensePlate });
+    if (!updated) throw new ConflictError('Go offline before changing your vehicle.');
+    return updated;
+  }
+
+  /** Admin review (#147): VERIFIED records when; PENDING and REJECTED clear it. */
+  async setVerification(id: string, dto: UpdateVerificationDto, now = new Date()): Promise<Driver> {
+    await this.getById(id);
+    const updated = await this.drivers.updateVerification(id, {
+      verificationStatus: dto.status,
+      verificationNote: dto.note ? dto.note : null,
+      verifiedAt: dto.status === 'VERIFIED' ? now : null,
+    });
+    if (!updated) throw new NotFoundError(`Driver ${id} not found`);
+    return updated;
   }
 
   async getByUserId(userId: string): Promise<Driver> {

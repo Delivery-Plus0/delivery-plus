@@ -5,6 +5,7 @@ import { DriversService } from '../services/drivers.service';
 import { RegisterDriverDto } from '../dto/register-driver.dto';
 import { UpdateDriverStatusDto } from '../dto/update-driver-status.dto';
 import { ListDriversQueryDto } from '../dto/list-drivers-query.dto';
+import { UpdateVehicleDto, UpdateVerificationDto } from '../dto/driver-profile.dto';
 
 @ApiTags('drivers')
 @Controller('drivers')
@@ -27,6 +28,24 @@ export class DriversController {
   @ApiOperation({ summary: 'Get the current driver profile' })
   getMe(@CurrentUser() user: JwtPayload) {
     return this.driversService.getByUserId(user.sub);
+  }
+
+  @Patch('me/vehicle')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.DRIVER)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Change your vehicle type and plate (#147; only while OFFLINE, 409 otherwise)' })
+  updateMyVehicle(@CurrentUser() user: JwtPayload, @Body() dto: UpdateVehicleDto) {
+    return this.driversService.updateOwnVehicle(user.sub, dto);
+  }
+
+  @Patch(':id/verification')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "Set a driver's verification status (ADMIN only, #147)" })
+  setVerification(@Param('id') id: string, @Body() dto: UpdateVerificationDto) {
+    return this.driversService.setVerification(id, dto);
   }
 
   @Post('me/online')

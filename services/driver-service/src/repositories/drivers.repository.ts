@@ -32,6 +32,17 @@ export class DriversRepository {
     return result.affected ? this.findById(id) : null;
   }
 
+  /** Vehicle change only while the driver is still OFFLINE (compare-and-set, #147). */
+  async updateVehicleWhileOffline(id: string, vehicle: Pick<Driver, 'vehicleType' | 'licensePlate'>): Promise<Driver | null> {
+    const result = await this.repo.update({ id, status: DriverStatus.OFFLINE }, vehicle);
+    return result.affected ? this.findById(id) : null;
+  }
+
+  async updateVerification(id: string, data: Pick<Driver, 'verificationStatus' | 'verificationNote' | 'verifiedAt'>): Promise<Driver | null> {
+    await this.repo.update({ id }, data);
+    return this.findById(id);
+  }
+
   findAvailable(page: number, limit: number): Promise<[Driver[], number]> {
     return this.repo.findAndCount({
       where: { status: DriverStatus.AVAILABLE },

@@ -532,6 +532,52 @@ async function runE2E() {
     }
     console.log(`Customer notified at every stage: ${stages.join(' → ')}`);
 
+    // Order outcomes (#143): every unsuccessful end records who ended it and why, and the payment
+    // status comes from payment events; the customer's list filters by outcome.
+    const waitForOrderFields = async (id: string, done: (order: Record<string, unknown>) => boolean, label: string) => {
+      const deadline = Date.now() + 20_000;
+      for (;;) {
+        const order = (await axios.get(`${API_URL}/api/orders/${id}`, customerAuth)).data;
+        if (done(order)) return order;
+        if (Date.now() > deadline) throw new Error(`Order ${id}: ${label}, got ${JSON.stringify(order)}`);
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    };
+    await axios.post(`${API_URL}/api/cart/items`, { menuItemId, quantity: 1 }, customerAuth);
+    const declinedId = (await axios.post(`${API_URL}/api/orders`, {}, customerAuth)).data.id;
+    const declinedPayment = (await axios.post(`${API_URL}/api/payments`, { orderId: declinedId }, customerAuth)).data;
+    await axios.post(`${API_URL}/api/payments/${declinedPayment.id}/process`, { simulateFailure: true }, customerAuth);
+    const declined = await waitForOrderFields(
+      declinedId,
+      (order) => order.status === 'FAILED' && order.paymentStatus === 'FAILED',
+      'expected FAILED with payment FAILED',
+    );
+    if (declined.cancelledBy !== 'PAYMENT' || !String(declined.cancellationReason).includes('declined')) {
+      throw new Error(`Declined order outcome: ${JSON.stringify({ by: declined.cancelledBy, reason: declined.cancellationReason })}`);
+    }
+
+    await axios.post(`${API_URL}/api/cart/items`, { menuItemId, quantity: 1 }, customerAuth);
+    const cancelledId = (await axios.post(`${API_URL}/api/orders`, {}, customerAuth)).data.id;
+    await axios.patch(`${API_URL}/api/orders/${cancelledId}/status`, { status: 'CANCELLED' }, customerAuth);
+    const cancelled = await waitForOrderFields(cancelledId, (order) => order.status === 'CANCELLED', 'expected CANCELLED');
+    if (cancelled.cancelledBy !== 'CUSTOMER' || cancelled.cancellationReason !== 'You cancelled this order.') {
+      throw new Error(`Cancelled order outcome: ${JSON.stringify({ by: cancelled.cancelledBy, reason: cancelled.cancellationReason })}`);
+    }
+    if (deliveredOrder.cancelledBy !== null && deliveredOrder.cancelledBy !== undefined) {
+      throw new Error(`A delivered order must have no cancellation, got ${deliveredOrder.cancelledBy}`);
+    }
+
+    const endedIds = ((await axios.get(`${API_URL}/api/orders?status=cancelled&limit=50`, customerAuth)).data.items as { id: string }[]).map(
+      (order) => order.id,
+    );
+    const completedIds = ((await axios.get(`${API_URL}/api/orders?status=completed&limit=50`, customerAuth)).data.items as { id: string }[]).map(
+      (order) => order.id,
+    );
+    if (!endedIds.includes(declinedId) || !endedIds.includes(cancelledId) || endedIds.includes(orderId) || !completedIds.includes(orderId)) {
+      throw new Error('Order list filters: expected the declined and cancelled orders under cancelled, the delivered one under completed');
+    }
+    console.log('Order outcomes: declined → PAYMENT (payment FAILED), customer cancel → CUSTOMER; list filters completed/cancelled');
+
     console.log('E2E critical-path flow completed successfully!');
   } catch (error: any) {
     console.error('E2E failed:');

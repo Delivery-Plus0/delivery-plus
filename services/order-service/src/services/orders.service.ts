@@ -22,6 +22,8 @@ import {
   lifecycleEventId,
 } from '@food-delivery/shared';
 import { DeliveryAddress, OrdersRepository } from '../repositories/orders.repository';
+import { OrderPaymentStatus, outcomeFor } from '../common/order-outcome';
+import { ORDER_LIST_FILTER_STATUSES, OrderListFilter } from '../dto/list-orders-query.dto';
 import { CartServiceClient } from '../common/cart-service.client';
 import { RestaurantServiceClient } from '../common/restaurant-service.client';
 import { UserServiceClient } from '../common/user-service.client';
@@ -79,6 +81,7 @@ export class OrdersService implements OnModuleInit {
       TOPICS.PAYMENT_EVENTS,
       PaymentEventType.CREATED,
       async (event) => {
+        await this.orders.recordPaymentStatus(event.payload.orderId, OrderPaymentStatus.PENDING);
         await this.syncStatusFromEvent(event.payload.orderId, OrderStatus.PAYMENT_PENDING);
       },
     );
@@ -87,6 +90,7 @@ export class OrdersService implements OnModuleInit {
       TOPICS.PAYMENT_EVENTS,
       PaymentEventType.COMPLETED,
       async (event) => {
+        await this.orders.recordPaymentStatus(event.payload.orderId, OrderPaymentStatus.COMPLETED);
         await this.syncStatusFromEvent(event.payload.orderId, OrderStatus.CONFIRMED);
       },
     );
@@ -95,6 +99,7 @@ export class OrdersService implements OnModuleInit {
       TOPICS.PAYMENT_EVENTS,
       PaymentEventType.FAILED,
       async (event) => {
+        await this.orders.recordPaymentStatus(event.payload.orderId, OrderPaymentStatus.FAILED);
         // A declined payment is FAILED, not CANCELLED: payment-service syncs the same status over
         // HTTP, so both paths must agree or the second writer hits an invalid transition.
         await this.syncStatusFromEvent(event.payload.orderId, OrderStatus.FAILED);
@@ -228,8 +233,9 @@ export class OrdersService implements OnModuleInit {
     return { address: profileAddress, notes, latitude: null, longitude: null };
   }
 
-  async listByCustomer(customerId: string, page: number, limit: number): Promise<PaginatedResult<Order>> {
-    const [items, total] = await this.orders.findByCustomer(customerId, page, limit);
+  async listByCustomer(customerId: string, page: number, limit: number, filter?: OrderListFilter): Promise<PaginatedResult<Order>> {
+    const statuses = filter ? ORDER_LIST_FILTER_STATUSES[filter] : null;
+    const [items, total] = await this.orders.findByCustomer(customerId, page, limit, statuses);
     return { items, page, limit, total, totalPages: Math.ceil(total / limit) || 1 };
   }
 
@@ -277,7 +283,9 @@ export class OrdersService implements OnModuleInit {
     // Compare-and-set so two writers racing to the same status (e.g. payment-service's HTTP sync and
     // the payment.completed consumer) cannot both "win"; only the winner stages the event, in the same
     // transaction as the change (transactional outbox, #98).
-    const updated = await this.orders.updateStatus(id, order.status, dto.status, (changed) => orderEvent(changed, eventType));
+    // Who ended the order and why is written in the same compare-and-set as the status (#143).
+    const outcome = outcomeFor(dto.status, requesterRole, dto.reason) ?? {};
+    const updated = await this.orders.updateStatus(id, order.status, dto.status, (changed) => orderEvent(changed, eventType), outcome);
     if (!updated) {
       const current = await this.findOrThrow(id);
       if (current.status === dto.status) {

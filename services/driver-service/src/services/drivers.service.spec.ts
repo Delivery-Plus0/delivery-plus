@@ -1,13 +1,6 @@
 import { DriversService } from './drivers.service';
 import { DriversRepository } from '../repositories/drivers.repository';
-import {
-  ConflictError,
-  DriverStatus,
-  ForbiddenError,
-  InvalidStateTransitionError,
-  NotFoundError,
-  UserRole,
-} from '@food-delivery/shared';
+import { ConflictError, DriverStatus, ForbiddenError, InvalidStateTransitionError, NotFoundError, UserRole } from '@food-delivery/shared';
 
 describe('DriversService', () => {
   let service: DriversService;
@@ -19,6 +12,9 @@ describe('DriversService', () => {
     vehicleType: 'motorcycle',
     licensePlate: 'ABC-123',
     status: DriverStatus.OFFLINE,
+    verificationStatus: 'PENDING' as const,
+    verificationNote: null,
+    verifiedAt: null,
     createdAt: new Date(),
     updatedAt: new Date(),
   };
@@ -30,6 +26,8 @@ describe('DriversService', () => {
       create: jest.fn(),
       transitionStatus: jest.fn(),
       findAvailable: jest.fn(),
+      updateVehicleWhileOffline: jest.fn(),
+      updateVerification: jest.fn(),
     } as unknown as jest.Mocked<DriversRepository>;
 
     service = new DriversService(drivers);
@@ -310,6 +308,59 @@ describe('DriversService', () => {
 
       expect([claim.status, offline.status].filter((s) => s === 'fulfilled')).toHaveLength(1);
       expect(row.status).toBe(claim.status === 'fulfilled' ? DriverStatus.BUSY : DriverStatus.OFFLINE);
+    });
+  });
+
+  describe('vehicle (#147)', () => {
+    it('lets an offline driver change their vehicle', async () => {
+      drivers.findByUserId.mockResolvedValue(baseDriver as any);
+      drivers.updateVehicleWhileOffline.mockResolvedValue({ ...baseDriver, vehicleType: 'Car', licensePlate: 'XYZ-9' } as any);
+
+      await expect(service.updateOwnVehicle('user-1', { vehicleType: 'Car', licensePlate: 'XYZ-9' })).resolves.toMatchObject({ vehicleType: 'Car' });
+      expect(drivers.updateVehicleWhileOffline).toHaveBeenCalledWith('driver-1', { vehicleType: 'Car', licensePlate: 'XYZ-9' });
+    });
+
+    it.each([DriverStatus.AVAILABLE, DriverStatus.BUSY])('refuses while %s (409)', async (status) => {
+      drivers.findByUserId.mockResolvedValue({ ...baseDriver, status } as any);
+      await expect(service.updateOwnVehicle('user-1', { vehicleType: 'Car', licensePlate: 'XYZ-9' })).rejects.toThrow('Go offline before changing your vehicle.');
+      expect(drivers.updateVehicleWhileOffline).not.toHaveBeenCalled();
+    });
+
+    it('refuses when the driver went online in the meantime (compare-and-set lost)', async () => {
+      drivers.findByUserId.mockResolvedValue(baseDriver as any);
+      drivers.updateVehicleWhileOffline.mockResolvedValue(null);
+      await expect(service.updateOwnVehicle('user-1', { vehicleType: 'Car', licensePlate: 'XYZ-9' })).rejects.toThrow(ConflictError);
+    });
+  });
+
+  describe('verification (#147)', () => {
+    const now = new Date('2026-10-07T12:00:00Z');
+
+    it('records when a driver is verified', async () => {
+      drivers.findById.mockResolvedValue(baseDriver as any);
+      drivers.updateVerification.mockResolvedValue({ ...baseDriver, verificationStatus: 'VERIFIED', verifiedAt: now } as any);
+
+      await service.setVerification('driver-1', { status: 'VERIFIED' }, now);
+
+      expect(drivers.updateVerification).toHaveBeenCalledWith('driver-1', { verificationStatus: 'VERIFIED', verificationNote: null, verifiedAt: now });
+    });
+
+    it('keeps the note and clears the time for a rejection', async () => {
+      drivers.findById.mockResolvedValue(baseDriver as any);
+      drivers.updateVerification.mockResolvedValue({ ...baseDriver, verificationStatus: 'REJECTED' } as any);
+
+      await service.setVerification('driver-1', { status: 'REJECTED', note: 'Plate photo unreadable' }, now);
+
+      expect(drivers.updateVerification).toHaveBeenCalledWith('driver-1', {
+        verificationStatus: 'REJECTED',
+        verificationNote: 'Plate photo unreadable',
+        verifiedAt: null,
+      });
+    });
+
+    it('404s for an unknown driver', async () => {
+      drivers.findById.mockResolvedValue(null);
+      await expect(service.setVerification('nope', { status: 'VERIFIED' })).rejects.toThrow(NotFoundError);
     });
   });
 });

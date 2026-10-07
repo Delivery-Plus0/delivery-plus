@@ -14,4 +14,11 @@ describe('DriversController', () => {
     expect(Reflect.getMetadata(GUARDS_METADATA, handler('getById'))).toEqual([JwtAuthGuard, RolesGuard]);
     expect(Reflect.getMetadata(ROLES_KEY, handler('getById'))).toEqual([UserRole.DRIVER, UserRole.ADMIN]);
   });
+
+  it('lets only the driver change their own vehicle, and only admins set verification (#147)', () => {
+    expect(Reflect.getMetadata(GUARDS_METADATA, handler('updateMyVehicle'))).toEqual([JwtAuthGuard, RolesGuard]);
+    expect(Reflect.getMetadata(ROLES_KEY, handler('updateMyVehicle'))).toEqual([UserRole.DRIVER]);
+    expect(Reflect.getMetadata(GUARDS_METADATA, handler('setVerification'))).toEqual([JwtAuthGuard, RolesGuard]);
+    expect(Reflect.getMetadata(ROLES_KEY, handler('setVerification'))).toEqual([UserRole.ADMIN]);
+  });
 });

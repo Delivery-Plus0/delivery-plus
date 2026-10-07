@@ -2827,6 +2827,41 @@
         ]
       }
     },
+    "/api/drivers/me/vehicle": {
+      "patch": {
+        "summary": "Change your vehicle (only while offline)",
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "drivers_patch_api_drivers_me_vehicle",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/drivers/me/online": {
       "post": {
         "summary": "Go online",
@@ -3019,6 +3054,51 @@
           "drivers"
         ],
         "operationId": "drivers_patch_api_drivers_id_status",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/drivers/{id}/verification": {
+      "patch": {
+        "summary": "Set a driver's verification status (admin only)",
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "drivers_patch_api_drivers_id_verification",
         "responses": {
           "200": {
             "description": "Successful response"

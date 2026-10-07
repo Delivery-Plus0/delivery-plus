@@ -18,6 +18,7 @@ From `services/driver-service/src/controllers/drivers.controller.ts`:
 ## Dependencies
 - Persists driver data in PostgreSQL
 - Used by `delivery-service` to assign drivers and by `tracking-service` to resolve current driver information
+- Reads the driver's own user-service profile when the phone verification gate is on
 
 ## Events published/consumed
 None. Driver availability is changed synchronously by `delivery-service` (BUSY on assignment, AVAILABLE on completion or cancellation). The service used to also release drivers from `delivery.completed`/`delivery.cancelled`; that consumer was removed because a late event could free a driver who is already on the next delivery.
@@ -27,8 +28,14 @@ From `services/driver-service/src/config/app-config.ts`:
 
 - `DATABASE_URL`
 - `JWT_SECRET`
+- `USER_SERVICE_URL` (default: `http://localhost:3002`)
+- `PHONE_VERIFICATION_REQUIRED` (default `false`), see the phone verification gate
 - `PORT` (default: `3009`)
 - `NODE_ENV` (default: `development`)
+
+## Phone verification gate (#153)
+
+With `PHONE_VERIFICATION_REQUIRED=true`, going online (`POST /drivers/me/online`, OFFLINE → AVAILABLE) needs a verified phone: the caller's user-service profile must have `phoneVerifiedAt`. Otherwise the answer is `403` with error code `PhoneNotVerified`, which the apps answer with the verification step. The gate is **off by default** everywhere, including production. Turn it on only together with a real SMS provider in user-service (`SMS_PROVIDER`); otherwise nobody could verify.
 
 ## Driver profile and verification (#147)
 

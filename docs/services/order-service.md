@@ -61,6 +61,10 @@ Migration 005 backfills only what the stored status proves: FAILED orders → `P
   - `orders`, `active`, `delivered`, `cancelled` (includes failed);
   - `revenue`: the items subtotal of orders that weren't cancelled or failed, in EGP. The delivery fee isn't the restaurant's.
 
+## Phone verification gate (#153)
+
+With `PHONE_VERIFICATION_REQUIRED=true`, placing an order (`POST /orders`) needs a verified phone: the caller's user-service profile must have `phoneVerifiedAt`. Otherwise the answer is `403` with error code `PhoneNotVerified`, which the apps answer with the verification step. The gate is **off by default** everywhere, including production. Turn it on only together with a real SMS provider in user-service (`SMS_PROVIDER`); otherwise nobody could verify.
+
 ## Dependencies
 - Reads the current cart from `cart-service`
 - Validates restaurant ownership through signed HMAC internal-auth requests and reads restaurant status from `restaurant-service`
@@ -91,6 +95,7 @@ From `services/order-service/src/config/app-config.ts`:
 - `INTERNAL_AUTH_SECRET` (required in production; shared with restaurant-service)
 - `INTERNAL_AUTH_SERVICE` (default: `order-service`)
 - `USER_SERVICE_URL` (default: `http://localhost:3002`), used to read the customer's profile address at checkout
+- `PHONE_VERIFICATION_REQUIRED` (default `false`), see the phone verification gate
 - `KAFKA_BROKER` (used in Docker Compose as `kafka:29092`)
 - `PORT` (default: `3006`)
 - `NODE_ENV` (default: `development`)

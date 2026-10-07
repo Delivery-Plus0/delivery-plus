@@ -6,6 +6,8 @@ export interface UserProfileDto {
   id: string;
   fullName?: string | null;
   address?: string | null;
+  /** Set once the phone was confirmed by a one-time code (#153). */
+  phoneVerifiedAt?: string | null;
 }
 
 /**

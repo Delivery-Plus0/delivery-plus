@@ -1,3 +1,4 @@
+import { phoneVerificationRequired } from '@food-delivery/shared';
 import { PricingPolicy, pricingFromEnv } from '../common/pricing';
 
 export const APP_CONFIG = Symbol('APP_CONFIG');
@@ -11,6 +12,8 @@ export interface AppConfig {
   cartServiceUrl: string;
   restaurantServiceUrl: string;
   userServiceUrl: string;
+  /** #153: placing an order needs a verified phone (off by default). */
+  phoneVerificationRequired: boolean;
   internalAuthService: string;
   internalAuthSecret: string;
   /** Delivery fee and its split (#145); see common/pricing.ts. */
@@ -33,6 +36,7 @@ export function loadConfig(): AppConfig {
     cartServiceUrl: process.env.CART_SERVICE_URL || 'http://localhost:3005',
     restaurantServiceUrl: process.env.RESTAURANT_SERVICE_URL || 'http://localhost:3003',
     userServiceUrl: process.env.USER_SERVICE_URL || 'http://localhost:3002',
+    phoneVerificationRequired: phoneVerificationRequired(),
     internalAuthService: process.env.INTERNAL_AUTH_SERVICE || 'order-service',
     internalAuthSecret: requireInternalAuthSecret(),
     pricing: pricingFromEnv(process.env),

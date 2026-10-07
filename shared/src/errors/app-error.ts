@@ -50,3 +50,18 @@ export class InvalidStateTransitionError extends AppError {
     super(409, 'InvalidStateTransition', `Cannot transition ${entity} from ${from} to ${to}`);
   }
 }
+
+/** #153: the action needs a verified phone; clients answer it by showing the verification step. */
+export class PhoneNotVerifiedError extends AppError {
+  constructor(message = 'Verify your phone number to continue.') {
+    super(403, 'PhoneNotVerified', message);
+  }
+}
+
+/**
+ * #153: whether ordering and going online need a verified phone. Off unless PHONE_VERIFICATION_REQUIRED=true;
+ * turn it on only together with a real SMS provider, or nobody could verify.
+ */
+export function phoneVerificationRequired(env: NodeJS.ProcessEnv = process.env): boolean {
+  return (env.PHONE_VERIFICATION_REQUIRED ?? '').trim().toLowerCase() === 'true';
+}

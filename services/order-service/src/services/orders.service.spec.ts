@@ -16,6 +16,7 @@ import {
   RestaurantStatus,
   UserRole,
   lifecycleEventId,
+  PhoneNotVerifiedError,
 } from '@food-delivery/shared';
 
 describe('OrdersService', () => {
@@ -106,6 +107,38 @@ describe('OrdersService', () => {
       userClient,
       { pricing: DEFAULT_PRICING } as any,
     );
+  });
+
+  describe('phone gate (#153)', () => {
+    function gated() {
+      return new OrdersService(
+        orders,
+        cartClient,
+        restaurantClient,
+        outbox as any,
+        kafkaConsumer as any,
+        userClient,
+        { pricing: DEFAULT_PRICING, phoneVerificationRequired: true } as any,
+      );
+    }
+
+    it('refuses an order from an unverified phone before touching the cart', async () => {
+      userClient.getOwnProfile.mockResolvedValue({ id: 'customer-1', phoneVerifiedAt: null });
+      await expect(gated().createFromCart('customer-1', 'Bearer x')).rejects.toBeInstanceOf(PhoneNotVerifiedError);
+      expect(cartClient.getCart).not.toHaveBeenCalled();
+    });
+
+    it('lets a verified customer through to the usual checks', async () => {
+      userClient.getOwnProfile.mockResolvedValue({ id: 'customer-1', phoneVerifiedAt: '2026-10-07T10:00:00.000Z' });
+      cartClient.getCart.mockResolvedValue({ userId: 'c1', restaurantId: null, items: [], total: 0 });
+      await expect(gated().createFromCart('customer-1', 'Bearer x')).rejects.toThrow('Cart is empty');
+    });
+
+    it('is off by default', async () => {
+      cartClient.getCart.mockResolvedValue({ userId: 'c1', restaurantId: null, items: [], total: 0 });
+      await expect(service.createFromCart('customer-1', 'Bearer x')).rejects.toThrow('Cart is empty');
+      expect(userClient.getOwnProfile).not.toHaveBeenCalled();
+    });
   });
 
   describe('createFromCart', () => {

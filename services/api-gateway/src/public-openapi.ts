@@ -34,6 +34,7 @@ export const SERVICE_DEFINITIONS = [
       { method: 'get', path: '/:id', summary: 'Get a user profile by id', auth: true, statusCode: 200 },
       { method: 'post', path: '/me/avatar/image-upload-url', summary: 'Create a presigned avatar upload URL', auth: true, statusCode: 201 },
       { method: 'post', path: '/me/avatar/confirm', summary: 'Confirm and save an uploaded avatar', auth: true, statusCode: 201 },
+      { method: 'delete', path: '/me/avatar', summary: 'Remove the current user avatar', auth: true, statusCode: 200 },
     ],
   },
   {

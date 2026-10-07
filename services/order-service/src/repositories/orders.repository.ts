@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { BaseEvent, OrderStatus, TOPICS, stageEvent } from '@food-delivery/shared';
 import { Order } from '../entities/order.entity';
 import { OrderItem } from '../entities/order-item.entity';
@@ -82,10 +82,16 @@ export class OrdersRepository {
    * event for the change in the same transaction (only the writer that wins stages it). Returns the
    * updated order, or null when another writer changed it first.
    */
-  async updateStatus(id: string, from: OrderStatus, to: OrderStatus, event: OrderEventBuilder): Promise<Order | null> {
+  async updateStatus(
+    id: string,
+    from: OrderStatus,
+    to: OrderStatus,
+    event: OrderEventBuilder,
+    outcome: Partial<Pick<Order, 'cancelledBy' | 'cancellationReason'>> = {},
+  ): Promise<Order | null> {
     return this.repo.manager.transaction(async (manager) => {
       const orders = manager.getRepository(Order);
-      const result = await orders.update({ id, status: from }, { status: to });
+      const result = await orders.update({ id, status: from }, { status: to, ...outcome });
       if (!result.affected) return null;
       const updated = await orders.findOne({ where: { id } });
       if (!updated) return null;
@@ -94,9 +100,25 @@ export class OrdersRepository {
     });
   }
 
-  async findByCustomer(customerId: string, page: number, limit: number): Promise<[Order[], number]> {
+  /**
+   * Records the payment status learnt from a payment event (#143). Never moves backwards: PENDING only
+   * fills an unknown status, and an outcome (COMPLETED / FAILED) only replaces unknown or PENDING, so
+   * redelivered or out-of-order events can't undo what is known. Independent of the order status, so
+   * a payment that completes after the order was cancelled is still recorded.
+   */
+  async recordPaymentStatus(id: string, status: string): Promise<void> {
+    const replaceable = status === 'PENDING' ? '"paymentStatus" IS NULL' : '("paymentStatus" IS NULL OR "paymentStatus" = \'PENDING\')';
+    await this.repo.query(`UPDATE "orders" SET "paymentStatus" = $1 WHERE "id" = $2 AND ${replaceable}`, [status, id]);
+  }
+
+  async findByCustomer(
+    customerId: string,
+    page: number,
+    limit: number,
+    statuses: OrderStatus[] | null = null,
+  ): Promise<[Order[], number]> {
     return this.repo.findAndCount({
-      where: { customerId },
+      where: statuses ? { customerId, status: In(statuses) } : { customerId },
       order: { createdAt: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,

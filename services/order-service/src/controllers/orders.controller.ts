@@ -48,7 +48,7 @@ export class OrdersController {
   @Get()
   @ApiOperation({ summary: "List the current customer's own orders (order history)" })
   listMine(@CurrentUser() user: JwtPayload, @Query() query: ListOrdersQueryDto) {
-    return this.ordersService.listByCustomer(user.sub, query.page, query.limit);
+    return this.ordersService.listByCustomer(user.sub, query.page, query.limit, query.status);
   }
 
   @Get('restaurant/:restaurantId')

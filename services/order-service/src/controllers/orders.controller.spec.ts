@@ -104,7 +104,7 @@ describe('OrdersController restaurant HTTP boundaries', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(ordersService.listByCustomer).toHaveBeenCalledWith(customerId, undefined, undefined);
+    expect(ordersService.listByCustomer).toHaveBeenCalledWith(customerId, undefined, undefined, undefined);
   });
 
   it('rejects a customer listing restaurant orders', async () => {

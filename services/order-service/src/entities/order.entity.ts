@@ -54,6 +54,18 @@ export class Order {
   @Column({ type: 'double precision', nullable: true })
   deliveryLongitude!: number | null;
 
+  /** Who ended the order (#143): set with the move to CANCELLED or FAILED, null otherwise. */
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  cancelledBy!: string | null;
+
+  /** The reason shown to the customer, recorded at the same moment; never derived by clients. */
+  @Column({ type: 'varchar', length: 300, nullable: true })
+  cancellationReason!: string | null;
+
+  /** PENDING / COMPLETED / FAILED, from the payment events this service consumes (#143). */
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  paymentStatus!: string | null;
+
   @OneToMany(() => OrderItem, (item) => item.order, { cascade: true, eager: true })
   items!: OrderItem[];
 

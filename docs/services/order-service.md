@@ -33,6 +33,23 @@ Every new order carries a drop-off address, **copied at checkout and never updat
 - Editing the profile later does not change placed orders. An idempotent retry returns the original order and its original address.
 - Orders created before migration `003-order-delivery-address` have `null` address columns.
 
+## Order outcomes and payment status (#143)
+
+Every order that ends unsuccessfully says who ended it and why, recorded **with** the status change (same compare-and-set), never worked out by clients:
+
+| End | `cancelledBy` | `cancellationReason` |
+| --- | --- | --- |
+| Declined payment → FAILED | `PAYMENT` | Your payment was declined, so the order was not placed. |
+| Customer cancels | `CUSTOMER` | You cancelled this order. |
+| Restaurant owner cancels | `RESTAURANT` | The restaurant cancelled this order. (+ `: <reason>` when the owner sends `reason`, ≤ 200 chars) |
+| Platform cancels (ADMIN-role callers: delivery-service, support) | `SYSTEM` | Delivery Plus cancelled this order. (+ optional reason) |
+
+`paymentStatus` (`PENDING` / `COMPLETED` / `FAILED`) is recorded from the payment events this service consumes. It never moves backwards and is independent of the order status, so a payment that completes after a cancellation is still visible (refunds: #53/#56).
+
+Migration 005 backfills only what the stored status proves: FAILED orders → `PAYMENT` and payment FAILED; PAYMENT_PENDING → payment PENDING; orders past CONFIRMED → payment COMPLETED. Older CANCELLED orders keep both unknown (null).
+
+`GET /orders?status=active|completed|cancelled` filters the customer's list: `cancelled` covers CANCELLED and FAILED.
+
 ## Dependencies
 - Reads the current cart from `cart-service`
 - Validates restaurant ownership through signed HMAC internal-auth requests and reads restaurant status from `restaurant-service`

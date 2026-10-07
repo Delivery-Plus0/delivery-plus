@@ -36,6 +36,9 @@ describe('OrdersService', () => {
     deliveryNotes: null,
     deliveryLatitude: null,
     deliveryLongitude: null,
+    cancelledBy: null,
+    cancellationReason: null,
+    paymentStatus: null,
     items: [],
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -68,6 +71,7 @@ describe('OrdersService', () => {
       create: jest.fn(),
       updateStatus: jest.fn(),
       findByCustomer: jest.fn(),
+      recordPaymentStatus: jest.fn(),
       findByRestaurant: jest.fn(),
       findByCustomerAndIdempotencyKey: jest.fn(),
     } as unknown as jest.Mocked<OrdersRepository>;
@@ -324,6 +328,31 @@ describe('OrdersService', () => {
         status: OrderStatus.CANCELLED,
       });
       expect(result.status).toBe(OrderStatus.CANCELLED);
+      expect(orders.updateStatus).toHaveBeenCalledWith('order-1', baseOrder.status, OrderStatus.CANCELLED, expect.any(Function), {
+        cancelledBy: 'CUSTOMER',
+        cancellationReason: 'You cancelled this order.',
+      });
+    });
+
+    it("records the restaurant's reason when it cancels (#143)", async () => {
+      orders.findById.mockResolvedValue({ ...baseOrder, status: OrderStatus.CONFIRMED });
+      orders.updateStatus.mockResolvedValue({ ...baseOrder, status: OrderStatus.CANCELLED });
+
+      await service.updateStatus('order-1', 'owner-1', UserRole.RESTAURANT_OWNER, { status: OrderStatus.CANCELLED, reason: 'Kitchen closed early' });
+
+      expect(orders.updateStatus).toHaveBeenCalledWith('order-1', OrderStatus.CONFIRMED, OrderStatus.CANCELLED, expect.any(Function), {
+        cancelledBy: 'RESTAURANT',
+        cancellationReason: 'The restaurant cancelled this order: Kitchen closed early',
+      });
+    });
+
+    it('records no outcome for a status that does not end the order', async () => {
+      orders.findById.mockResolvedValue({ ...baseOrder, status: OrderStatus.CONFIRMED });
+      orders.updateStatus.mockResolvedValue({ ...baseOrder, status: OrderStatus.PREPARING });
+
+      await service.updateStatus('order-1', 'owner-1', UserRole.RESTAURANT_OWNER, { status: OrderStatus.PREPARING });
+
+      expect(orders.updateStatus).toHaveBeenCalledWith('order-1', OrderStatus.CONFIRMED, OrderStatus.PREPARING, expect.any(Function), {});
     });
 
     it('rejects a customer cancelling someone else\'s order', async () => {
@@ -401,8 +430,23 @@ describe('OrdersService', () => {
 
       await (await handlerFor(PaymentEventType.FAILED))({ payload: { orderId: 'order-1' } });
 
-      expect(orders.updateStatus).toHaveBeenCalledWith('order-1', OrderStatus.PAYMENT_PENDING, OrderStatus.FAILED, expect.any(Function));
+      expect(orders.updateStatus).toHaveBeenCalledWith('order-1', OrderStatus.PAYMENT_PENDING, OrderStatus.FAILED, expect.any(Function), {
+        cancelledBy: 'PAYMENT',
+        cancellationReason: 'Your payment was declined, so the order was not placed.',
+      });
+      expect(orders.recordPaymentStatus).toHaveBeenCalledWith('order-1', 'FAILED');
       expect((await staged())[0].eventType).toBe(OrderEventType.FAILED);
+    });
+
+    it('records the payment status from each payment event, even when the order has moved on (#143)', async () => {
+      orders.findById.mockResolvedValue(withStatus(OrderStatus.CANCELLED) as any);
+
+      await (await handlerFor(PaymentEventType.CREATED))({ payload: { orderId: 'order-1' } });
+      await (await handlerFor(PaymentEventType.COMPLETED))({ payload: { orderId: 'order-1' } });
+
+      expect(orders.recordPaymentStatus).toHaveBeenNthCalledWith(1, 'order-1', 'PENDING');
+      expect(orders.recordPaymentStatus).toHaveBeenNthCalledWith(2, 'order-1', 'COMPLETED');
+      expect(orders.updateStatus).not.toHaveBeenCalled();
     });
 
     it('payment.completed confirms the order', async () => {
@@ -411,7 +455,7 @@ describe('OrdersService', () => {
 
       await (await handlerFor(PaymentEventType.COMPLETED))({ payload: { orderId: 'order-1' } });
 
-      expect(orders.updateStatus).toHaveBeenCalledWith('order-1', OrderStatus.PAYMENT_PENDING, OrderStatus.CONFIRMED, expect.any(Function));
+      expect(orders.updateStatus).toHaveBeenCalledWith('order-1', OrderStatus.PAYMENT_PENDING, OrderStatus.CONFIRMED, expect.any(Function), {});
       expect((await staged())[0].eventType).toBe(OrderEventType.CONFIRMED);
     });
 
@@ -503,7 +547,7 @@ describe('OrdersService', () => {
       expect(orders.updateStatus).toHaveBeenCalledWith(
         'order-1',
         OrderStatus.READY_FOR_PICKUP,
-        OrderStatus.DRIVER_ASSIGNED, expect.any(Function));
+        OrderStatus.DRIVER_ASSIGNED, expect.any(Function), {});
     });
 
     it('delivery.completed after the HTTP sync already delivered the order is a no-op', async () => {
@@ -557,6 +601,23 @@ describe('OrdersService', () => {
         ForbiddenError,
       );
       expect(orders.findByRestaurant).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('listByCustomer filters (#143)', () => {
+    it.each([
+      ['completed', [OrderStatus.DELIVERED]],
+      ['cancelled', [OrderStatus.CANCELLED, OrderStatus.FAILED]],
+    ] as const)('maps %s to order statuses', async (filter, statuses) => {
+      orders.findByCustomer.mockResolvedValue([[], 0]);
+      await service.listByCustomer('customer-1', 2, 10, filter);
+      expect(orders.findByCustomer).toHaveBeenCalledWith('customer-1', 2, 10, statuses);
+    });
+
+    it('lists every order without a filter', async () => {
+      orders.findByCustomer.mockResolvedValue([[], 0]);
+      await expect(service.listByCustomer('customer-1', 1, 20)).resolves.toMatchObject({ total: 0, totalPages: 1 });
+      expect(orders.findByCustomer).toHaveBeenCalledWith('customer-1', 1, 20, null);
     });
   });
 });

@@ -492,6 +492,29 @@ async function runE2E() {
     }
     console.log(`Driver history: ${done.restaurant?.name ?? '?'} delivered ${done.deliveredAt} (${history.data.total} completed); customer 403`);
 
+    // Ratings (#144): the order's customer rates the driver once; the driver's summary includes it.
+    const ratingUrl = `${API_URL}/api/deliveries/${deliveryId}/rating`;
+    const before = await axios.get(ratingUrl, customerAuth);
+    if (before.data.canRate !== true || before.data.rating !== null) {
+      throw new Error(`Rating: expected the customer to be able to rate, got ${JSON.stringify(before.data)}`);
+    }
+    const summaryBefore = (await axios.get(`${API_URL}/api/deliveries/me/rating-summary`, driverAuth)).data;
+    const rated = await axios.post(ratingUrl, { score: 5, comment: 'E2E: quick and careful' }, customerAuth);
+    const ratingReplay = await axios.post(ratingUrl, { score: 5, comment: 'E2E: quick and careful' }, customerAuth);
+    const duplicate = await statusOf(axios.post(ratingUrl, { score: 2 }, customerAuth));
+    const outsiderRating = await statusOf(axios.post(ratingUrl, { score: 1 }, outsiderAuth));
+    const driverRating = await statusOf(axios.post(ratingUrl, { score: 5 }, driverAuth));
+    if (rated.status !== 201 || ratingReplay.status !== 200 || duplicate !== 409 || outsiderRating !== 403 || driverRating !== 403) {
+      throw new Error(
+        `Rating: expected 201/200/409/403/403, got ${rated.status}/${ratingReplay.status}/${duplicate}/${outsiderRating}/${driverRating}`,
+      );
+    }
+    const summary = (await axios.get(`${API_URL}/api/deliveries/me/rating-summary`, driverAuth)).data;
+    if (summary.count !== summaryBefore.count + 1 || typeof summary.average !== 'number' || JSON.stringify(summary).includes('@')) {
+      throw new Error(`Rating summary: expected count ${summaryBefore.count + 1}, got ${JSON.stringify(summary)}`);
+    }
+    console.log(`Rating: 5★ stored (201), retry 200, change 409, other customer 403, driver 403; driver now ${summary.average} over ${summary.count}`);
+
     // #5: one notification per customer-visible stage of this order, and no duplicates.
     const stages = ['PAYMENT_COMPLETED', 'ORDER_CONFIRMED', 'DRIVER_ASSIGNED', 'PICKED_UP', 'DELIVERED'];
     const forThisOrder = async () => {

@@ -109,6 +109,9 @@ export const SERVICE_DEFINITIONS = [
       { method: 'post', path: '/:id/cancel', summary: 'Cancel a delivery', auth: true, statusCode: 201 },
       { method: 'get', path: '/me/current', summary: "Get the calling driver's active delivery (204 when none)", auth: true, statusCode: 200 },
       { method: 'get', path: '/me/history', summary: "List the calling driver's deliveries, newest first", auth: true, statusCode: 200 },
+      { method: 'get', path: '/me/rating-summary', summary: "Get the calling driver's rating summary", auth: true, statusCode: 200 },
+      { method: 'post', path: '/:id/rating', summary: 'Rate the driver who delivered this order', auth: true, statusCode: 201 },
+      { method: 'get', path: '/:id/rating', summary: "Get a delivery's rating, or whether it can still be rated", auth: true, statusCode: 200 },
       { method: 'get', path: '/by-order/:orderId', summary: 'Get the delivery for an order', auth: true, statusCode: 200 },
       { method: 'get', path: '/:id', summary: 'Get a delivery by id', auth: true, statusCode: 200 },
     ],
@@ -294,6 +297,42 @@ const baseSchemas = {
       totalPages: { type: 'integer', minimum: 1 },
     },
   },
+  CreateRatingRequest: {
+    type: 'object',
+    required: ['score'],
+    properties: {
+      score: { type: 'integer', minimum: 1, maximum: 5, example: 5 },
+      comment: { type: 'string', maxLength: 500 },
+    },
+  },
+  Rating: {
+    type: 'object',
+    required: ['score', 'comment', 'createdAt'],
+    properties: {
+      score: { type: 'integer', minimum: 1, maximum: 5 },
+      comment: { type: 'string', nullable: true },
+      createdAt: { type: 'string', format: 'date-time' },
+    },
+  },
+  DeliveryRatingStatus: {
+    type: 'object',
+    required: ['rating', 'canRate', 'reason', 'closesAt'],
+    properties: {
+      rating: { allOf: [{ $ref: '#/components/schemas/Rating' }], nullable: true },
+      canRate: { type: 'boolean' },
+      reason: { type: 'string', nullable: true },
+      closesAt: { type: 'string', format: 'date-time', nullable: true },
+    },
+  },
+  DriverRatingSummary: {
+    type: 'object',
+    required: ['average', 'count', 'recentComments'],
+    properties: {
+      average: { type: 'number', nullable: true, example: 4.7 },
+      count: { type: 'integer', minimum: 0 },
+      recentComments: { type: 'array', items: { $ref: '#/components/schemas/Rating' } },
+    },
+  },
   VerifyEmailRequest: {
     type: 'object',
     required: ['email', 'token'],
@@ -471,6 +510,37 @@ export function generatePublicOpenApiDocument() {
         operation.responses['200'] = {
           description: "The calling driver's deliveries, newest first (DRIVER role only; no customer identity)",
           content: { 'application/json': { schema: { $ref: '#/components/schemas/DriverHistoryPage' } } },
+        };
+      }
+
+      if (service.service === 'deliveries' && route.path === '/:id/rating') {
+        if (route.method === 'post') {
+          operation.requestBody = {
+            required: true,
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/CreateRatingRequest' } } },
+          };
+          operation.responses['201'] = {
+            description: "Rating stored (the order's customer, after delivery, within 14 days)",
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Rating' } } },
+          };
+          operation.responses['200'] = {
+            description: 'Identical retry: the stored rating',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Rating' } } },
+          };
+          operation.responses['409'] = { description: 'Already rated with a different score or comment' };
+          operation.responses['422'] = { description: 'Not delivered yet, or the 14-day window has closed' };
+        } else {
+          operation.responses['200'] = {
+            description: "The rating, or whether the order's customer can still rate",
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/DeliveryRatingStatus' } } },
+          };
+        }
+      }
+
+      if (route.method === 'get' && service.service === 'deliveries' && route.path === '/me/rating-summary') {
+        operation.responses['200'] = {
+          description: "The calling driver's average, count and recent comments (DRIVER role only; no customer identity)",
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/DriverRatingSummary' } } },
         };
       }
 

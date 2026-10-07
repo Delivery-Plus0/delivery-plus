@@ -8,6 +8,8 @@ import { CreateDeliveryDto } from '../dto/create-delivery.dto';
 import { DriverCurrentDeliveryDto } from '../dto/driver-current-delivery.dto';
 import { DriverHistoryPageDto, DriverHistoryQueryDto } from '../dto/driver-delivery-history.dto';
 import { DriverHistoryService } from '../services/driver-history.service';
+import { CreateRatingDto, DeliveryRatingStatusDto, DriverRatingSummaryDto, RatingDto } from '../dto/rating.dto';
+import { RatingsService } from '../services/ratings.service';
 
 @ApiTags('deliveries')
 @ApiBearerAuth()
@@ -18,6 +20,7 @@ export class DeliveriesController {
     private readonly deliveriesService: DeliveriesService,
     private readonly driverCards: DriverCardService,
     private readonly driverHistory: DriverHistoryService,
+    private readonly ratings: RatingsService,
   ) {}
 
   @Post()
@@ -89,6 +92,44 @@ export class DeliveriesController {
   @ApiOkResponse({ type: DriverHistoryPageDto })
   getMyHistory(@Headers('authorization') authHeader: string, @Query() query: DriverHistoryQueryDto): Promise<DriverHistoryPageDto> {
     return this.driverHistory.getForDriver(authHeader, query);
+  }
+
+  @Get('me/rating-summary')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.DRIVER)
+  @ApiOperation({ summary: "The calling driver's rating: average, count and recent comments, without customer identity (#144)" })
+  @ApiOkResponse({ type: DriverRatingSummaryDto })
+  getMyRatingSummary(@Headers('authorization') authHeader: string): Promise<DriverRatingSummaryDto> {
+    return this.ratings.getSummaryForDriver(authHeader);
+  }
+
+  @Post(':id/rating')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.CUSTOMER)
+  @ApiOperation({
+    summary: 'Rate the driver who delivered this order, 1-5 with an optional comment (#144)',
+    description:
+      "Only the order's customer, once the delivery is DELIVERED, within 14 days, once per delivery. 201 when stored; an identical retry returns the stored rating (200); a different second rating is 409; not delivered yet or window closed is 422.",
+  })
+  @ApiOkResponse({ type: RatingDto })
+  async rate(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: CreateRatingDto,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<RatingDto> {
+    const { rating, created } = await this.ratings.rate(id, { userId: user.sub, role: user.role }, dto);
+    res.status(created ? HttpStatus.CREATED : HttpStatus.OK);
+    return rating;
+  }
+
+  @Get(':id/rating')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.CUSTOMER, UserRole.ADMIN)
+  @ApiOperation({ summary: "This delivery's rating, or whether the order's customer can still rate it (#144)" })
+  @ApiOkResponse({ type: DeliveryRatingStatusDto })
+  getRating(@Param('id') id: string, @CurrentUser() user: JwtPayload): Promise<DeliveryRatingStatusDto> {
+    return this.ratings.getStatus(id, { userId: user.sub, role: user.role });
   }
 
   @Get('by-order/:orderId')

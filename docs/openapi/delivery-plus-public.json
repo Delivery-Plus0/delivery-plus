@@ -2241,6 +2241,176 @@
         ]
       }
     },
+    "/api/deliveries/me/rating-summary": {
+      "get": {
+        "summary": "Get the calling driver's rating summary",
+        "tags": [
+          "deliveries"
+        ],
+        "operationId": "deliveries_get_api_deliveries_me_rating_summary",
+        "responses": {
+          "200": {
+            "description": "The calling driver's average, count and recent comments (DRIVER role only; no customer identity)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DriverRatingSummary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/deliveries/{id}/rating": {
+      "post": {
+        "summary": "Rate the driver who delivered this order",
+        "tags": [
+          "deliveries"
+        ],
+        "operationId": "deliveries_post_api_deliveries_id_rating",
+        "responses": {
+          "200": {
+            "description": "Identical retry: the stored rating",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Rating"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Rating stored (the order's customer, after delivery, within 14 days)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Rating"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "409": {
+            "description": "Already rated with a different score or comment"
+          },
+          "422": {
+            "description": "Not delivered yet, or the 14-day window has closed"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRatingRequest"
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "Get a delivery's rating, or whether it can still be rated",
+        "tags": [
+          "deliveries"
+        ],
+        "operationId": "deliveries_get_api_deliveries_id_rating",
+        "responses": {
+          "200": {
+            "description": "The rating, or whether the order's customer can still rate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryRatingStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/deliveries/by-order/{orderId}": {
       "get": {
         "summary": "Get the delivery for an order",
@@ -3254,6 +3424,103 @@
           "totalPages": {
             "type": "integer",
             "minimum": 1
+          }
+        }
+      },
+      "CreateRatingRequest": {
+        "type": "object",
+        "required": [
+          "score"
+        ],
+        "properties": {
+          "score": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5,
+            "example": 5
+          },
+          "comment": {
+            "type": "string",
+            "maxLength": 500
+          }
+        }
+      },
+      "Rating": {
+        "type": "object",
+        "required": [
+          "score",
+          "comment",
+          "createdAt"
+        ],
+        "properties": {
+          "score": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "comment": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "DeliveryRatingStatus": {
+        "type": "object",
+        "required": [
+          "rating",
+          "canRate",
+          "reason",
+          "closesAt"
+        ],
+        "properties": {
+          "rating": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Rating"
+              }
+            ],
+            "nullable": true
+          },
+          "canRate": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true
+          },
+          "closesAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
+      "DriverRatingSummary": {
+        "type": "object",
+        "required": [
+          "average",
+          "count",
+          "recentComments"
+        ],
+        "properties": {
+          "average": {
+            "type": "number",
+            "nullable": true,
+            "example": 4.7
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "recentComments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Rating"
+            }
           }
         }
       },

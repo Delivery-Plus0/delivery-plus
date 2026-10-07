@@ -6,6 +6,8 @@ import { HealthController } from './controllers/health.controller';
 import { ConfigModule } from './config/config.module';
 import { loadConfig } from './config/app-config';
 import { Delivery } from './entities/delivery.entity';
+import { DeliveryRating } from './entities/delivery-rating.entity';
+import { DriverRatingSummary } from './entities/driver-rating-summary.entity';
 import { buildTypeOrmConfig } from './database/typeorm.config';
 
 const config = loadConfig();
@@ -13,7 +15,7 @@ const config = loadConfig();
 @Module({
   imports: [
     ConfigModule,
-    TypeOrmModule.forRoot(buildTypeOrmConfig(config.databaseUrl, [Delivery])),
+    TypeOrmModule.forRoot(buildTypeOrmConfig(config.databaseUrl, [Delivery, DeliveryRating, DriverRatingSummary])),
     RedisModule.register({ url: process.env.REDIS_URL || 'redis://localhost:6379' }),
     KafkaModule.register({
       clientId: 'delivery-service',

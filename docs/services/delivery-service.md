@@ -14,6 +14,8 @@ From `services/delivery-service/src/controllers/deliveries.controller.ts`:
 - `POST /deliveries/:id/cancel` – cancel a delivery
 - `GET /deliveries/me/current` – the calling driver's active delivery (DRIVER only; see below)
 - `GET /deliveries/me/history` – the calling driver's deliveries, newest first (DRIVER only; see below)
+- `GET /deliveries/me/rating-summary` – the calling driver's rating (DRIVER only; see below)
+- `POST /deliveries/:id/rating`, `GET /deliveries/:id/rating` – the customer rates the driver who delivered their order
 - `GET /deliveries/by-order/:orderId` – the delivery for an order (order owner, its restaurant owner, the assigned driver, admin)
 - `GET /deliveries/:id` – get a delivery by ID
 
@@ -101,6 +103,16 @@ Manual `POST /deliveries` and `/assign` stay available to admins and restaurant 
 4. **Partial outages.** Order and restaurant details come from their services, one lookup per restaurant per page. If one can't be reached, the row still comes back with that part `null` (logged as `delivery.history.order_unavailable` / `restaurant_unavailable`).
 5. **Stage times** are written by the server in the same compare-and-set as the status change (`pickedUpAt` with PICKED_UP, `deliveredAt` with DELIVERED, `cancelledAt` with CANCELLED). Migration 006 backfills `deliveredAt` / `cancelledAt` of older finished deliveries from `updatedAt` (a finished delivery is never updated again); their `pickedUpAt` stays null.
 6. **Earnings** are not part of history yet: they arrive with the earnings ledger (#145).
+
+## Driver ratings (#144)
+
+The customer rates the driver who delivered their order, 1–5 with an optional comment (trimmed, ≤ 500 characters). Restaurant and item ratings are out of scope.
+
+1. **Eligibility, enforced here:** only the order's customer (role CUSTOMER; others 403), only once the delivery is DELIVERED, only within 14 days of `deliveredAt` (422 with the reason otherwise), only once per delivery.
+2. **Retries:** an identical second request returns the stored rating with 200 (safe after a lost response); a different second rating is 409. Concurrent requests are settled by the unique `deliveryId` index.
+3. **Storage:** `delivery_ratings` (one row per delivery) and `driver_rating_summaries` (count and sum per driver). Both are written in one transaction, so the summary is updated immediately and can't drift.
+4. **`GET /deliveries/:id/rating`** (order's customer or admin): `{ rating, canRate, reason, closesAt }`, so apps show "Rate" only when the backend allows it.
+5. **`GET /deliveries/me/rating-summary`** (DRIVER, from the token): `{ average, count, recentComments }`. The average has one decimal and is null before the first rating. Comments carry score and date only, never who wrote them.
 
 ## Retry safety
 

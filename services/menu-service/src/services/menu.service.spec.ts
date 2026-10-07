@@ -2,7 +2,7 @@ import { MenuService } from './menu.service';
 import { CategoriesRepository } from '../repositories/categories.repository';
 import { MenuItemsRepository } from '../repositories/menu-items.repository';
 import { RestaurantServiceClient } from '../common/restaurant-service.client';
-import { BadRequestError, ForbiddenError, NotFoundError, S3StorageService } from '@food-delivery/shared';
+import { BadRequestError, ForbiddenError, NotFoundError, S3StorageService, ConflictError } from '@food-delivery/shared';
 
 describe('MenuService', () => {
   let service: MenuService;
@@ -30,6 +30,9 @@ describe('MenuService', () => {
       findById: jest.fn(),
       findByRestaurant: jest.fn(),
       create: jest.fn(),
+      update: jest.fn(),
+      delete: jest.fn(),
+      reorder: jest.fn(),
     } as unknown as jest.Mocked<CategoriesRepository>;
 
     menuItems = {
@@ -38,6 +41,9 @@ describe('MenuService', () => {
       create: jest.fn(),
       update: jest.fn(),
       delete: jest.fn(),
+      archive: jest.fn(),
+      countLiveInCategory: jest.fn(),
+      detachArchivedFromCategory: jest.fn(),
     } as unknown as jest.Mocked<MenuItemsRepository>;
 
     restaurantClient = {
@@ -156,14 +162,112 @@ describe('MenuService', () => {
     });
   });
 
-  describe('deleteItem', () => {
-    it('deletes only after ownership passes', async () => {
+  describe('archiveItem (#148: DELETE archives)', () => {
+    const now = new Date('2026-10-07T12:00:00Z');
+
+    it('archives only after ownership passes, never hard-deletes', async () => {
       menuItems.findById.mockResolvedValue(item);
       restaurantClient.assertOwnership.mockResolvedValue(undefined);
+      menuItems.archive.mockResolvedValue({ ...item, archivedAt: now, available: false } as any);
 
-      await service.deleteItem('item-1', 'owner-1');
+      const result = await service.archiveItem('item-1', 'owner-1', now);
 
-      expect(menuItems.delete).toHaveBeenCalledWith('item-1');
+      expect(restaurantClient.assertOwnership).toHaveBeenCalledWith(item.restaurantId, 'owner-1');
+      expect(menuItems.archive).toHaveBeenCalledWith('item-1', now);
+      expect(menuItems.delete).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ archivedAt: now, available: false });
+      expect(cache.del).toHaveBeenCalledWith(`menu:${item.restaurantId}`);
+    });
+
+    it('is a no-op for an item that is already archived', async () => {
+      menuItems.findById.mockResolvedValue({ ...item, archivedAt: now } as any);
+      restaurantClient.assertOwnership.mockResolvedValue(undefined);
+
+      await service.archiveItem('item-1', 'owner-1');
+
+      expect(menuItems.archive).not.toHaveBeenCalled();
+    });
+
+    it("stops another owner (403 from the ownership check)", async () => {
+      menuItems.findById.mockResolvedValue(item);
+      restaurantClient.assertOwnership.mockRejectedValue(new ForbiddenError('not yours'));
+
+      await expect(service.archiveItem('item-1', 'other-owner')).rejects.toThrow(ForbiddenError);
+      expect(menuItems.archive).not.toHaveBeenCalled();
+    });
+
+    it('refuses to edit or toggle an archived item', async () => {
+      menuItems.findById.mockResolvedValue({ ...item, archivedAt: now } as any);
+      restaurantClient.assertOwnership.mockResolvedValue(undefined);
+
+      await expect(service.updateItem('item-1', 'owner-1', { name: 'New' })).rejects.toThrow(ConflictError);
+      await expect(service.updateAvailability('item-1', 'owner-1', { available: true })).rejects.toThrow(ConflictError);
+      expect(menuItems.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('updateItem category check (#148)', () => {
+    it("rejects moving an item into another restaurant's category", async () => {
+      menuItems.findById.mockResolvedValue(item);
+      restaurantClient.assertOwnership.mockResolvedValue(undefined);
+      categories.findById.mockResolvedValue({ id: 'cat-x', restaurantId: 'someone-else' } as any);
+
+      await expect(service.updateItem('item-1', 'owner-1', { categoryId: 'cat-x' })).rejects.toThrow(BadRequestError);
+      expect(menuItems.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('categories (#148)', () => {
+    const category = { id: 'cat-1', restaurantId: item.restaurantId, name: 'Burgers', displayOrder: 0 };
+
+    it('renames a category after ownership passes', async () => {
+      categories.findById.mockResolvedValue(category as any);
+      categories.update.mockResolvedValue({ ...category, name: 'Mains' } as any);
+
+      await expect(service.updateCategory('cat-1', 'owner-1', { name: 'Mains' })).resolves.toMatchObject({ name: 'Mains' });
+      expect(restaurantClient.assertOwnership).toHaveBeenCalledWith(item.restaurantId, 'owner-1');
+      expect(categories.update).toHaveBeenCalledWith('cat-1', { name: 'Mains' });
+    });
+
+    it('404s for an unknown category', async () => {
+      categories.findById.mockResolvedValue(null);
+      await expect(service.updateCategory('nope', 'owner-1', { name: 'X' })).rejects.toThrow(NotFoundError);
+    });
+
+    it('deletes an empty category, detaching archived items', async () => {
+      categories.findById.mockResolvedValue(category as any);
+      menuItems.countLiveInCategory.mockResolvedValue(0);
+
+      await service.deleteCategory('cat-1', 'owner-1');
+
+      expect(menuItems.detachArchivedFromCategory).toHaveBeenCalledWith('cat-1');
+      expect(categories.delete).toHaveBeenCalledWith('cat-1');
+    });
+
+    it('409s while the category still has items on the menu', async () => {
+      categories.findById.mockResolvedValue(category as any);
+      menuItems.countLiveInCategory.mockResolvedValue(2);
+
+      await expect(service.deleteCategory('cat-1', 'owner-1')).rejects.toThrow('Move or archive the 2 items in this category first.');
+      expect(categories.delete).not.toHaveBeenCalled();
+    });
+
+    it('reorders when the list names every category exactly once', async () => {
+      categories.findByRestaurant.mockResolvedValue([category, { ...category, id: 'cat-2' }] as any);
+
+      await service.reorderCategories(item.restaurantId, 'owner-1', { categoryIds: ['cat-2', 'cat-1'] });
+
+      expect(categories.reorder).toHaveBeenCalledWith(['cat-2', 'cat-1']);
+    });
+
+    it('rejects a partial or foreign order', async () => {
+      categories.findByRestaurant.mockResolvedValue([category, { ...category, id: 'cat-2' }] as any);
+
+      await expect(service.reorderCategories(item.restaurantId, 'owner-1', { categoryIds: ['cat-1'] })).rejects.toThrow(BadRequestError);
+      await expect(service.reorderCategories(item.restaurantId, 'owner-1', { categoryIds: ['cat-1', 'cat-9'] })).rejects.toThrow(
+        BadRequestError,
+      );
+      expect(categories.reorder).not.toHaveBeenCalled();
     });
   });
 

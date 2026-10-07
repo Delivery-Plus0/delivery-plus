@@ -6,6 +6,7 @@ import { CreateCategoryDto } from '../dto/create-category.dto';
 import { CreateMenuItemDto } from '../dto/create-menu-item.dto';
 import { UpdateMenuItemDto } from '../dto/update-menu-item.dto';
 import { UpdateAvailabilityDto } from '../dto/update-availability.dto';
+import { ReorderCategoriesDto, UpdateCategoryDto } from '../dto/manage-categories.dto';
 import { CreateItemImageUploadUrlDto } from '../dto/create-item-image-upload-url.dto';
 import { ConfirmItemImageUploadDto } from '../dto/confirm-item-image-upload.dto';
 
@@ -21,6 +22,33 @@ export class MenuController {
   @ApiOperation({ summary: 'Create a menu category (owner only)' })
   createCategory(@CurrentUser() user: JwtPayload, @Body() dto: CreateCategoryDto) {
     return this.menuService.createCategory(user.sub, dto);
+  }
+
+  @Patch('categories/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.RESTAURANT_OWNER)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Rename or move a category (owner only, #148)' })
+  updateCategory(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: UpdateCategoryDto) {
+    return this.menuService.updateCategory(id, user.sub, dto);
+  }
+
+  @Delete('categories/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.RESTAURANT_OWNER)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Delete an empty category (owner only, #148; 409 while it still has items)' })
+  deleteCategory(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.menuService.deleteCategory(id, user.sub);
+  }
+
+  @Patch('restaurants/:restaurantId/categories/order')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.RESTAURANT_OWNER)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Reorder all categories of a restaurant (owner only, #148)' })
+  reorderCategories(@Param('restaurantId') restaurantId: string, @CurrentUser() user: JwtPayload, @Body() dto: ReorderCategoriesDto) {
+    return this.menuService.reorderCategories(restaurantId, user.sub, dto);
   }
 
   @Get('restaurants/:restaurantId/menu')
@@ -61,9 +89,9 @@ export class MenuController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.RESTAURANT_OWNER)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Delete a menu item (owner only)' })
+  @ApiOperation({ summary: 'Archive a menu item (owner only, #148): it leaves the menu but stays valid for past orders' })
   deleteItem(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
-    return this.menuService.deleteItem(id, user.sub);
+    return this.menuService.archiveItem(id, user.sub);
   }
 
   @Patch('menu-items/:id/availability')

@@ -919,6 +919,139 @@
         ]
       }
     },
+    "/api/menus/categories/{id}": {
+      "patch": {
+        "summary": "Rename or move a menu category",
+        "tags": [
+          "menus"
+        ],
+        "operationId": "menus_patch_api_menus_categories_id",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "summary": "Delete an empty menu category (409 while it has items)",
+        "tags": [
+          "menus"
+        ],
+        "operationId": "menus_delete_api_menus_categories_id",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/menus/restaurants/{restaurantId}/categories/order": {
+      "patch": {
+        "summary": "Reorder all menu categories of a restaurant",
+        "tags": [
+          "menus"
+        ],
+        "operationId": "menus_patch_api_menus_restaurants_restaurantId_categories_order",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "parameters": [
+          {
+            "name": "restaurantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/menus/restaurants/{restaurantId}/menu": {
       "get": {
         "summary": "List menu categories and items for a restaurant",
@@ -1044,7 +1177,7 @@
         ]
       },
       "delete": {
-        "summary": "Delete a menu item",
+        "summary": "Archive a menu item (leaves the menu, stays valid for past orders)",
         "tags": [
           "menus"
         ],

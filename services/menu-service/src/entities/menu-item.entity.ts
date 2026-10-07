@@ -35,6 +35,13 @@ export class MenuItem {
   @Column({ default: true })
   available!: boolean;
 
+  /**
+   * Set when the owner archives the item (#148) instead of deleting it: it disappears from the menu and
+   * can't be bought (available is false too), but stays a valid reference for past orders and carts.
+   */
+  @Column({ type: 'timestamptz', nullable: true })
+  archivedAt?: Date | null;
+
   @CreateDateColumn()
   createdAt!: Date;
 

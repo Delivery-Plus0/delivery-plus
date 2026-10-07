@@ -66,6 +66,12 @@ describe('@EgyptianMobile()', () => {
     expect(dto.phone).toBe('0223456789');
   });
 
+  it('treats a blank value as no phone (clears it on update)', async () => {
+    const dto = plainToInstance(Profile, { phone: '   ' });
+    expect(await validate(dto)).toEqual([]);
+    expect(dto.phone).toBeNull();
+  });
+
   it('leaves the field optional', async () => {
     expect(await validate(plainToInstance(Profile, {}))).toEqual([]);
   });

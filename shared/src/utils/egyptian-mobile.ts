@@ -36,7 +36,11 @@ export const EGYPTIAN_MOBILE_MESSAGE =
  */
 export function EgyptianMobile(options?: ValidationOptions): PropertyDecorator {
   return (target: object, propertyKey: string | symbol) => {
-    Transform(({ value }) => normalizeEgyptianMobile(value) ?? value)(target, propertyKey);
+    // A blank value means "no phone" (clears it on update); @IsOptional() then skips validation.
+    Transform(({ value }) => (typeof value === 'string' && value.trim() === '' ? null : (normalizeEgyptianMobile(value) ?? value)))(
+      target,
+      propertyKey,
+    );
     registerDecorator({
       name: 'isEgyptianMobile',
       target: target.constructor,

@@ -476,6 +476,22 @@ async function runE2E() {
       throw new Error(`Expected order to be DELIVERED, got ${deliveredOrder.status}`);
     }
 
+    // Driver history (#142): the delivery just completed is the newest completed one, with its stage
+    // times and no customer identity; only DRIVER accounts may ask, and only about themselves.
+    const history = await axios.get(`${API_URL}/api/deliveries/me/history?status=completed&limit=5`, driverAuth);
+    const done = history.data.items[0];
+    if (done?.id !== deliveryId || done.status !== 'DELIVERED' || !done.assignedAt || !done.pickedUpAt || !done.deliveredAt) {
+      throw new Error(`Driver history: expected ${deliveryId} first with stage times, got ${JSON.stringify(done)}`);
+    }
+    if ('customerId' in done || JSON.stringify(done).includes('@') || 'deliveryNotes' in (done.order ?? {})) {
+      throw new Error(`Driver history must not expose the customer: ${JSON.stringify(done)}`);
+    }
+    const customerHistory = await statusOf(axios.get(`${API_URL}/api/deliveries/me/history`, customerAuth));
+    if (customerHistory !== 403) {
+      throw new Error(`A customer got ${customerHistory} on the driver history, expected 403`);
+    }
+    console.log(`Driver history: ${done.restaurant?.name ?? '?'} delivered ${done.deliveredAt} (${history.data.total} completed); customer 403`);
+
     // #5: one notification per customer-visible stage of this order, and no duplicates.
     const stages = ['PAYMENT_COMPLETED', 'ORDER_CONFIRMED', 'DRIVER_ASSIGNED', 'PICKED_UP', 'DELIVERED'];
     const forThisOrder = async () => {

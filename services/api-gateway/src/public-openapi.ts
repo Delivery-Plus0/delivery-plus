@@ -108,6 +108,7 @@ export const SERVICE_DEFINITIONS = [
       { method: 'post', path: '/:id/complete', summary: 'Complete a delivery', auth: true, statusCode: 201 },
       { method: 'post', path: '/:id/cancel', summary: 'Cancel a delivery', auth: true, statusCode: 201 },
       { method: 'get', path: '/me/current', summary: "Get the calling driver's active delivery (204 when none)", auth: true, statusCode: 200 },
+      { method: 'get', path: '/me/history', summary: "List the calling driver's deliveries, newest first", auth: true, statusCode: 200 },
       { method: 'get', path: '/by-order/:orderId', summary: 'Get the delivery for an order', auth: true, statusCode: 200 },
       { method: 'get', path: '/:id', summary: 'Get a delivery by id', auth: true, statusCode: 200 },
     ],
@@ -250,6 +251,47 @@ const baseSchemas = {
         },
       },
       nextActions: { type: 'array', items: { type: 'string', enum: ['pickup', 'start', 'complete'] } },
+    },
+  },
+  DriverHistoryPage: {
+    type: 'object',
+    required: ['items', 'page', 'limit', 'total', 'totalPages'],
+    properties: {
+      items: {
+        type: 'array',
+        items: {
+          type: 'object',
+          required: ['id', 'orderId', 'status', 'updatedAt'],
+          properties: {
+            id: { type: 'string', format: 'uuid' },
+            orderId: { type: 'string', format: 'uuid' },
+            status: { type: 'string', enum: ['DRIVER_ASSIGNED', 'PICKED_UP', 'IN_TRANSIT', 'DELIVERED', 'CANCELLED'] },
+            assignedAt: { type: 'string', format: 'date-time', nullable: true },
+            pickedUpAt: { type: 'string', format: 'date-time', nullable: true },
+            deliveredAt: { type: 'string', format: 'date-time', nullable: true },
+            cancelledAt: { type: 'string', format: 'date-time', nullable: true },
+            updatedAt: { type: 'string', format: 'date-time' },
+            restaurant: {
+              type: 'object',
+              nullable: true,
+              properties: { id: { type: 'string', format: 'uuid' }, name: { type: 'string' } },
+            },
+            order: {
+              type: 'object',
+              nullable: true,
+              properties: {
+                items: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, quantity: { type: 'integer' } } } },
+                totalAmount: { type: 'string', example: '19.98' },
+                dropOffAddress: { type: 'string', nullable: true },
+              },
+            },
+          },
+        },
+      },
+      page: { type: 'integer', minimum: 1 },
+      limit: { type: 'integer', minimum: 1, maximum: 50 },
+      total: { type: 'integer', minimum: 0 },
+      totalPages: { type: 'integer', minimum: 1 },
     },
   },
   VerifyEmailRequest: {
@@ -417,6 +459,19 @@ export function generatePublicOpenApiDocument() {
           content: { 'application/json': { schema: { $ref: '#/components/schemas/DriverCurrentDelivery' } } },
         };
         operation.responses['204'] = { description: 'No active delivery (or no driver profile yet)' };
+      }
+
+      if (route.method === 'get' && service.service === 'deliveries' && route.path === '/me/history') {
+        operation.parameters = [
+          ...(operation.parameters ?? []),
+          { name: 'status', in: 'query', required: false, schema: { type: 'string', enum: ['active', 'completed', 'cancelled'] } },
+          { name: 'page', in: 'query', required: false, schema: { type: 'integer', minimum: 1, default: 1 } },
+          { name: 'limit', in: 'query', required: false, schema: { type: 'integer', minimum: 1, maximum: 50, default: 20 } },
+        ];
+        operation.responses['200'] = {
+          description: "The calling driver's deliveries, newest first (DRIVER role only; no customer identity)",
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/DriverHistoryPage' } } },
+        };
       }
 
       if (route.method === 'post' && service.service === 'orders' && route.path === '') {

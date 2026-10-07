@@ -13,6 +13,7 @@ From `services/delivery-service/src/controllers/deliveries.controller.ts`:
 - `POST /deliveries/:id/complete` – mark the delivery as completed
 - `POST /deliveries/:id/cancel` – cancel a delivery
 - `GET /deliveries/me/current` – the calling driver's active delivery (DRIVER only; see below)
+- `GET /deliveries/me/history` – the calling driver's deliveries, newest first (DRIVER only; see below)
 - `GET /deliveries/by-order/:orderId` – the delivery for an order (order owner, its restaurant owner, the assigned driver, admin)
 - `GET /deliveries/:id` – get a delivery by ID
 
@@ -89,6 +90,17 @@ Manual `POST /deliveries` and `/assign` stay available to admins and restaurant 
    - `nextActions`: `pickup` when DRIVER_ASSIGNED, `start` when PICKED_UP, `complete` when IN_TRANSIT. Each maps to `POST /deliveries/:id/<action>`.
 4. **204 No Content** when the driver has no active delivery, or no driver profile yet.
 5. **Other roles get 403**, so the route can't be used to read someone else's delivery.
+
+## Driver's delivery history (#142)
+
+`GET /deliveries/me/history?status=active|completed|cancelled&page=1&limit=20` (role DRIVER; `limit` ≤ 50):
+
+1. **Identity.** Same as `me/current`: the driver comes from the caller's own token, so a driver can only page through their own deliveries. No driver profile yet → an empty page. Other roles get 403.
+2. **Filters.** `active` = DRIVER_ASSIGNED, PICKED_UP, IN_TRANSIT; `completed` = DELIVERED; `cancelled` = CANCELLED; omitted = all. Newest first by `updatedAt` (index `IDX_deliveries_driver_updated` on `(driverId, updatedAt)`).
+3. **Rows:** `id`, `orderId`, `status`, the stage times `assignedAt`, `pickedUpAt`, `deliveredAt`, `cancelledAt`, `updatedAt`; `restaurant` (id, name); `order` (items, total, drop-off address). No customer id, name, phone, delivery notes or coordinates.
+4. **Partial outages.** Order and restaurant details come from their services, one lookup per restaurant per page. If one can't be reached, the row still comes back with that part `null` (logged as `delivery.history.order_unavailable` / `restaurant_unavailable`).
+5. **Stage times** are written by the server in the same compare-and-set as the status change (`pickedUpAt` with PICKED_UP, `deliveredAt` with DELIVERED, `cancelledAt` with CANCELLED). Migration 006 backfills `deliveredAt` / `cancelledAt` of older finished deliveries from `updatedAt` (a finished delivery is never updated again); their `pickedUpAt` stays null.
+6. **Earnings** are not part of history yet: they arrive with the earnings ledger (#145).
 
 ## Retry safety
 

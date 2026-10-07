@@ -25,6 +25,20 @@ Owner-only writes, each checked against restaurant ownership (another owner gets
 - **Categories:** `PATCH /categories/:id` renames or moves one. `PATCH /restaurants/:restaurantId/categories/order` sets the order of all of them; the list must name each category exactly once. `DELETE /categories/:id` only works when no item on the menu is in it (409 with how many are left); archived items in it just lose the category.
 - Migration 003 adds `menu_items.archivedAt` and an index on `(restaurantId, archivedAt)`.
 
+## Item images (#149)
+
+- Each item has an **ordered list of images** (`menu_item_images`: `menuItemId`, `url`, `position`). The first one is the primary and is mirrored into `menu_items.imageUrl`, which customers and older clients keep reading.
+- Uploading takes three steps, using the existing presigned POST policy:
+  1. `POST /menu-items/:id/image-upload-url` (JPEG, PNG or WebP, at most 10 MB; anything else is a 400 with the reason);
+  2. a direct upload to storage;
+  3. `POST /menu-items/:id/image-confirm`, which verifies the object and **appends** it.
+- `DELETE /menu-items/:id/images/:imageId` removes one image. The rest are renumbered from 0 and the next one becomes the primary; with none left, `imageUrl` is null.
+- "Replace" in the apps is upload-then-remove.
+- Limits:
+  - an item holds at most 10 images (409 beyond);
+  - archived items can't get or lose images (409).
+- Menu reads (`GET /restaurants/:id/menu`) return each item with its `images`. Migration 004 seeds every existing `imageUrl` as its item's first image.
+
 ## Dependencies
 - Calls `restaurant-service` to validate ownership via `src/common/restaurant-service.client.ts`; these checks use the shared HMAC internal-auth contract
 - Uses the shared S3 storage service for menu item image objects

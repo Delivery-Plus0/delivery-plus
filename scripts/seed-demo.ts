@@ -276,7 +276,7 @@ const DRIVER = {
 const CUSTOMER = {
   email: 'demo.customer@example.com',
   fullName: 'Sara Demo',
-  phone: '+1 555 010 2030',
+  phone: '+20 101 234 5678',
   address: '742 Evergreen Terrace, Apt 3B',
 };
 

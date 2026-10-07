@@ -1,3 +1,4 @@
+import { EgyptianMobile } from '@food-delivery/shared';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEmail, IsOptional, IsString, IsUUID } from 'class-validator';
 
@@ -34,10 +35,10 @@ export class CreateProfileDto {
   fullName!: string;
 
   @ApiPropertyOptional({
-    description: 'Optional phone number for the profile.',
-    example: '+1-555-0123',
+    description: 'Optional Egyptian mobile number (010/011/012/015), any common form; stored as E.164 +201XXXXXXXXX (#152).',
+    example: '+201012345678',
   })
   @IsOptional()
-  @IsString()
+  @EgyptianMobile()
   phone?: string;
 }

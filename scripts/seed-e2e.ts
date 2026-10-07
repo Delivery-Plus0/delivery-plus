@@ -40,7 +40,7 @@ export const QA = {
   customer: {
     email: 'qa.customer@delivery-plus.test',
     fullName: 'QA Customer',
-    phone: '+1 555 000 0001',
+    phone: '+20 100 000 0001',
     address: '1 Test Street, Apt 1',
   },
   otherCustomer: {

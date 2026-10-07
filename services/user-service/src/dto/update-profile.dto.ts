@@ -1,3 +1,4 @@
+import { EgyptianMobile } from '@food-delivery/shared';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsOptional, IsString } from 'class-validator';
 
@@ -11,11 +12,11 @@ export class UpdateProfileDto {
   fullName?: string;
 
   @ApiPropertyOptional({
-    description: 'Updated phone number for the profile.',
-    example: '+1-555-0199',
+    description: 'Updated Egyptian mobile number (010/011/012/015), any common form; stored as E.164 +201XXXXXXXXX (#152).',
+    example: '+201112345678',
   })
   @IsOptional()
-  @IsString()
+  @EgyptianMobile()
   phone?: string;
 
   @ApiPropertyOptional({

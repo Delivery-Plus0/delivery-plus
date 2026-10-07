@@ -4,6 +4,7 @@ export * from './errors/app-error';
 export * from './logging/logger';
 export * from './events/base-event';
 export * from './utils/id';
+export * from './utils/egyptian-mobile';
 export * from './nest/auth/jwt-payload.interface';
 export * from './nest/auth/jwt-auth.guard';
 export * from './nest/auth/roles.guard';

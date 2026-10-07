@@ -10,11 +10,18 @@ import { UpdateMenuItemDto } from '../dto/update-menu-item.dto';
 import { UpdateAvailabilityDto } from '../dto/update-availability.dto';
 import { Category } from '../entities/category.entity';
 import { MenuItem } from '../entities/menu-item.entity';
+import { MenuItemImage } from '../entities/menu-item-image.entity';
+import { MenuItemImagesRepository } from '../repositories/menu-item-images.repository';
+
+/** An item as menus return it (#149): its ordered images, the first mirrored into imageUrl. */
+export type MenuItemWithImages = MenuItem & { images: Pick<MenuItemImage, 'id' | 'url' | 'position'>[] };
+
+export const MAX_ITEM_IMAGES = 10;
 
 export interface MenuResponse {
   restaurantId: string;
   categories: Category[];
-  items: MenuItem[];
+  items: MenuItemWithImages[];
 }
 
 @Injectable()
@@ -26,6 +33,7 @@ export class MenuService {
     private readonly restaurantClient: RestaurantServiceClient,
     private readonly cache: CacheService,
     private readonly storage: S3StorageService,
+    private readonly images: MenuItemImagesRepository,
   ) {}
 
   async createCategory(requesterId: string, dto: CreateCategoryDto): Promise<Category> {
@@ -79,7 +87,7 @@ export class MenuService {
         this.categories.findByRestaurant(restaurantId),
         this.menuItems.findByRestaurant(restaurantId),
       ]);
-      return { restaurantId, categories, items };
+      return { restaurantId, categories, items: await this.withImages(items) };
     }, 60);
   }
 
@@ -150,6 +158,11 @@ export class MenuService {
   async createItemImageUploadUrl(id: string, requesterId: string, contentType: string) {
     const item = await this.getItem(id);
     await this.restaurantClient.assertOwnership(item.restaurantId, requesterId);
+    this.assertNotArchived(item);
+    const existing = await this.images.findByItems([id]);
+    if (existing.length >= MAX_ITEM_IMAGES) {
+      throw new ConflictError(`An item can have at most ${MAX_ITEM_IMAGES} images. Remove one first.`);
+    }
     return this.storage.generateUploadUrl(
       `restaurants/${item.restaurantId}/menu-items/${item.id}/`,
       contentType,
@@ -157,7 +170,7 @@ export class MenuService {
     );
   }
 
-  async confirmItemImageUpload(id: string, requesterId: string, objectKey: string): Promise<MenuItem> {
+  async confirmItemImageUpload(id: string, requesterId: string, objectKey: string): Promise<MenuItemWithImages> {
     const item = await this.getItem(id);
     await this.restaurantClient.assertOwnership(item.restaurantId, requesterId);
     const verifiedUpload = await this.storage.verifyUploadedObject(
@@ -165,10 +178,41 @@ export class MenuService {
       `restaurants/${item.restaurantId}/menu-items/${item.id}/`,
       this.imageMaxSizeBytes,
     );
-    const updated = await this.menuItems.update(id, { imageUrl: verifiedUpload.publicUrl });
+    // Appended after the existing images; the first stays the primary mirrored into imageUrl (#149).
+    const images = await this.images.append(id, verifiedUpload.publicUrl);
     await this.cache.del(`menu:${item.restaurantId}`);
     await this.cache.del(`menuitem:${id}`);
-    return updated as MenuItem;
+    return this.itemWithImages(id, images);
+  }
+
+  /** Removes one image (#149); the next one becomes the primary, or the item has none. */
+  async removeItemImage(id: string, imageId: string, requesterId: string): Promise<MenuItemWithImages> {
+    const item = await this.getItem(id);
+    await this.restaurantClient.assertOwnership(item.restaurantId, requesterId);
+    this.assertNotArchived(item);
+    const image = await this.images.findOne(id, imageId);
+    if (!image) throw new NotFoundError(`Image ${imageId} not found on this item`);
+    const images = await this.images.remove(id, imageId);
+    await this.cache.del(`menu:${item.restaurantId}`);
+    await this.cache.del(`menuitem:${id}`);
+    return this.itemWithImages(id, images);
+  }
+
+  private async withImages(items: MenuItem[]): Promise<MenuItemWithImages[]> {
+    const images = await this.images.findByItems(items.map((item) => item.id));
+    const byItem = new Map<string, Pick<MenuItemImage, 'id' | 'url' | 'position'>[]>();
+    for (const image of images) {
+      const list = byItem.get(image.menuItemId) ?? [];
+      list.push({ id: image.id, url: image.url, position: image.position });
+      byItem.set(image.menuItemId, list);
+    }
+    return items.map((item) => ({ ...item, images: byItem.get(item.id) ?? [] }));
+  }
+
+  private async itemWithImages(id: string, images: MenuItemImage[]): Promise<MenuItemWithImages> {
+    const item = await this.menuItems.findById(id);
+    if (!item) throw new NotFoundError(`Menu item ${id} not found`);
+    return { ...item, images: images.map(({ id: imageId, url, position }) => ({ id: imageId, url, position })) };
   }
 
   private async findCategoryOrThrow(id: string): Promise<Category> {

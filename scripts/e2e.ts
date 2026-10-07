@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { uploadImage } from './lib/gateway-seed';
 
 const API_URL = process.env.API_URL || 'http://localhost:3000';
 
@@ -660,6 +661,43 @@ async function runE2E() {
       );
     }
     console.log('Menu management: create → edit → archive; hidden from customers, not addable (400), not editable (409); other owner 403');
+
+    // Item images (#149): ordered images with the first mirrored into imageUrl; remove promotes the next.
+    const photoItem = (
+      await axios.post(`${API_URL}/api/menus/menu-items`, { restaurantId, name: 'E2E Photo Dish', price: 30 }, ownerAuth)
+    ).data;
+    const addPhoto = async () => {
+      const presigned = (
+        await axios.post(`${API_URL}/api/menus/menu-items/${photoItem.id}/image-upload-url`, { contentType: 'image/jpeg' }, ownerAuth)
+      ).data;
+      await uploadImage('restaurant-cover.jpg', presigned);
+      return (await axios.post(`${API_URL}/api/menus/menu-items/${photoItem.id}/image-confirm`, { objectKey: presigned.objectKey }, ownerAuth)).data;
+    };
+    const first = await addPhoto();
+    const second = await addPhoto();
+    const badType = await statusOf(
+      axios.post(`${API_URL}/api/menus/menu-items/${photoItem.id}/image-upload-url`, { contentType: 'image/gif' }, ownerAuth),
+    );
+    const afterRemove = (
+      await axios.delete(`${API_URL}/api/menus/menu-items/${photoItem.id}/images/${second.images[0].id}`, ownerAuth)
+    ).data;
+    const shown = (await axios.get(`${API_URL}/api/menus/restaurants/${restaurantId}/menu`, customerAuth)).data.items.find(
+      (menuItem: { id: string }) => menuItem.id === photoItem.id,
+    );
+    await axios.delete(`${API_URL}/api/menus/menu-items/${photoItem.id}`, ownerAuth);
+    if (
+      first.images.length !== 1 ||
+      first.imageUrl !== first.images[0].url ||
+      second.images.length !== 2 ||
+      second.imageUrl !== first.images[0].url ||
+      afterRemove.images.length !== 1 ||
+      afterRemove.imageUrl !== second.images[1].url ||
+      shown?.imageUrl !== afterRemove.imageUrl ||
+      badType !== 400
+    ) {
+      throw new Error(`Item images: ${JSON.stringify({ first: first.images, second: second.images, afterRemove: afterRemove.images, shown: shown?.imageUrl, badType })}`);
+    }
+    console.log('Item images: two uploads ordered, first is the primary; removing it promotes the next; customers see it; GIF 400');
 
     console.log('E2E critical-path flow completed successfully!');
   } catch (error: any) {

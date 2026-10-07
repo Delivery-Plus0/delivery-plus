@@ -65,6 +65,7 @@ export const SERVICE_DEFINITIONS = [
       { method: 'delete', path: '/menu-items/:id', summary: 'Archive a menu item (leaves the menu, stays valid for past orders)', auth: true, statusCode: 200 },
       { method: 'patch', path: '/menu-items/:id/availability', summary: 'Update menu item availability', auth: true, statusCode: 200 },
       { method: 'post', path: '/menu-items/:id/image-upload-url', summary: 'Create a presigned menu item image upload URL', auth: true, statusCode: 201 },
+      { method: 'delete', path: '/menu-items/:id/images/:imageId', summary: 'Remove one image of a menu item', auth: true, statusCode: 200 },
       { method: 'post', path: '/menu-items/:id/image-confirm', summary: 'Confirm and save a menu item image', auth: true, statusCode: 201 },
     ],
   },

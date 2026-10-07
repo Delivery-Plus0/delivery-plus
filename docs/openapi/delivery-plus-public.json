@@ -1362,6 +1362,59 @@
         }
       }
     },
+    "/api/menus/menu-items/{id}/images/{imageId}": {
+      "delete": {
+        "summary": "Remove one image of a menu item",
+        "tags": [
+          "menus"
+        ],
+        "operationId": "menus_delete_api_menus_menu_items_id_images_imageId",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "imageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/menus/menu-items/{id}/image-confirm": {
       "post": {
         "summary": "Confirm and save a menu item image",

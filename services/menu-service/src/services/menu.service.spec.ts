@@ -1,3 +1,4 @@
+import { MenuItemImagesRepository } from '../repositories/menu-item-images.repository';
 import { MenuService } from './menu.service';
 import { CategoriesRepository } from '../repositories/categories.repository';
 import { MenuItemsRepository } from '../repositories/menu-items.repository';
@@ -5,6 +6,7 @@ import { RestaurantServiceClient } from '../common/restaurant-service.client';
 import { BadRequestError, ForbiddenError, NotFoundError, S3StorageService, ConflictError } from '@food-delivery/shared';
 
 describe('MenuService', () => {
+  let images: { findByItems: jest.Mock; findOne: jest.Mock; append: jest.Mock; remove: jest.Mock };
   let service: MenuService;
   let categories: jest.Mocked<CategoriesRepository>;
   let menuItems: jest.Mocked<MenuItemsRepository>;
@@ -57,7 +59,13 @@ describe('MenuService', () => {
     } as unknown as jest.Mocked<S3StorageService>;
     cache = { getOrSet: jest.fn((_key, callback) => callback()), del: jest.fn() };
 
-    service = new MenuService(categories, menuItems, restaurantClient, cache as any, storage);
+    images = {
+      findByItems: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn(),
+      append: jest.fn(),
+      remove: jest.fn(),
+    };
+    service = new MenuService(categories, menuItems, restaurantClient, cache as any, storage, images as unknown as MenuItemImagesRepository);
   });
 
   describe('createItem', () => {
@@ -313,6 +321,72 @@ describe('MenuService', () => {
       );
 
       expect(storage.generateUploadUrl).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('item images (#149)', () => {
+    const stored = [{ id: 'img-1', menuItemId: 'item-1', url: 'https://cdn/a.png', position: 0, createdAt: new Date() }];
+
+    it('appends a verified upload and returns the item with its ordered images', async () => {
+      menuItems.findById.mockResolvedValue(item);
+      restaurantClient.assertOwnership.mockResolvedValue(undefined);
+      storage.verifyUploadedObject.mockResolvedValue({ publicUrl: 'https://cdn/a.png', contentType: 'image/png', contentLength: 10 });
+      images.append.mockResolvedValue(stored);
+
+      const result = await service.confirmItemImageUpload('item-1', 'owner-1', 'restaurants/r/menu-items/item-1/a.png');
+
+      expect(images.append).toHaveBeenCalledWith('item-1', 'https://cdn/a.png');
+      expect(result.images).toEqual([{ id: 'img-1', url: 'https://cdn/a.png', position: 0 }]);
+    });
+
+    it('caps an item at 10 images before issuing an upload URL', async () => {
+      menuItems.findById.mockResolvedValue(item);
+      restaurantClient.assertOwnership.mockResolvedValue(undefined);
+      images.findByItems.mockResolvedValue(Array.from({ length: 10 }, (_, n) => ({ ...stored[0], id: `img-${n}` })));
+
+      await expect(service.createItemImageUploadUrl('item-1', 'owner-1', 'image/png')).rejects.toThrow(ConflictError);
+      expect(storage.generateUploadUrl).not.toHaveBeenCalled();
+    });
+
+    it('removes an image after ownership passes', async () => {
+      menuItems.findById.mockResolvedValue(item);
+      restaurantClient.assertOwnership.mockResolvedValue(undefined);
+      images.findOne.mockResolvedValue(stored[0]);
+      images.remove.mockResolvedValue([]);
+
+      const result = await service.removeItemImage('item-1', 'img-1', 'owner-1');
+
+      expect(images.remove).toHaveBeenCalledWith('item-1', 'img-1');
+      expect(result.images).toEqual([]);
+    });
+
+    it('404s for an image of another item and stops other owners and archived items', async () => {
+      menuItems.findById.mockResolvedValue(item);
+      restaurantClient.assertOwnership.mockResolvedValue(undefined);
+      images.findOne.mockResolvedValue(null);
+      await expect(service.removeItemImage('item-1', 'img-x', 'owner-1')).rejects.toThrow(NotFoundError);
+
+      restaurantClient.assertOwnership.mockRejectedValue(new ForbiddenError('not yours'));
+      await expect(service.removeItemImage('item-1', 'img-1', 'other')).rejects.toThrow(ForbiddenError);
+
+      restaurantClient.assertOwnership.mockResolvedValue(undefined);
+      menuItems.findById.mockResolvedValue({ ...item, archivedAt: new Date() } as any);
+      await expect(service.removeItemImage('item-1', 'img-1', 'owner-1')).rejects.toThrow(ConflictError);
+      expect(images.remove).not.toHaveBeenCalled();
+    });
+
+    it('attaches each item its ordered images on the menu', async () => {
+      categories.findByRestaurant.mockResolvedValue([]);
+      menuItems.findByRestaurant.mockResolvedValue([item, { ...item, id: 'item-2' }] as any);
+      images.findByItems.mockResolvedValue(stored);
+
+      const menu = await service.getMenu(item.restaurantId);
+
+      expect(images.findByItems).toHaveBeenCalledWith(['item-1', 'item-2']);
+      expect(menu.items.map((i) => [i.id, i.images.length])).toEqual([
+        ['item-1', 1],
+        ['item-2', 0],
+      ]);
     });
   });
 });

@@ -7,6 +7,7 @@ import { ConfigModule } from './config/config.module';
 import { loadConfig } from './config/app-config';
 import { Category } from './entities/category.entity';
 import { MenuItem } from './entities/menu-item.entity';
+import { MenuItemImage } from './entities/menu-item-image.entity';
 import { buildTypeOrmConfig } from './database/typeorm.config';
 
 const config = loadConfig();
@@ -14,7 +15,7 @@ const config = loadConfig();
 @Module({
   imports: [
     ConfigModule,
-    TypeOrmModule.forRoot(buildTypeOrmConfig(config.databaseUrl, [Category, MenuItem])),
+    TypeOrmModule.forRoot(buildTypeOrmConfig(config.databaseUrl, [Category, MenuItem, MenuItemImage])),
     RedisModule.register({ url: process.env.REDIS_URL || 'redis://localhost:6379' }),
     MenuModule,
   ],

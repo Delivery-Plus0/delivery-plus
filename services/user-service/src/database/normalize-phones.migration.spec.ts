@@ -1,5 +1,5 @@
 import { QueryRunner } from 'typeorm';
-import { NormalizePhones1700000000003 } from './004-normalize-phones';
+import { NormalizePhones1700000000003 } from './migrations/004-normalize-phones';
 
 describe('NormalizePhones migration', () => {
   it('stores Egyptian mobiles as E.164, clears what is not one, and leaves normalized values alone', async () => {

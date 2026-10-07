@@ -50,6 +50,19 @@ export class NotificationsService implements OnModuleInit {
       });
     }
 
+    // #154: the restaurant (or the platform) cancelled: say so, with the reason it recorded. A
+    // customer's own cancellation needs no notification.
+    await this.kafkaConsumer.subscribe<OrderEvent['payload']>(TOPICS.ORDER_EVENTS, OrderEventType.CANCELLED, async (event) => {
+      if (event.payload.cancelledBy === 'CUSTOMER') return;
+      await this.notifyCustomer(
+        event.payload.customerId,
+        event,
+        NotificationType.ORDER_CANCELLED,
+        'Order cancelled',
+        event.payload.cancellationReason ?? `Your order ${event.payload.orderId} was cancelled.`,
+      );
+    });
+
     await this.kafkaConsumer.start();
   }
 

@@ -1819,6 +1819,51 @@
         ]
       }
     },
+    "/api/orders/restaurant/{restaurantId}/summary": {
+      "get": {
+        "summary": "Today's orders and item revenue for a restaurant (owner)",
+        "tags": [
+          "orders"
+        ],
+        "operationId": "orders_get_api_orders_restaurant_restaurantId_summary",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "parameters": [
+          {
+            "name": "restaurantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/orders/quote": {
       "get": {
         "summary": "Price the current cart: subtotal, delivery fee and total (EGP)",

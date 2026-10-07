@@ -20,6 +20,9 @@ export interface OrderPayload {
   restaurantId: string;
   total: number;
   status: OrderStatus;
+  /** Set on order.cancelled / order.failed (#143, #154): who ended it and the customer-facing reason. */
+  cancelledBy?: 'CUSTOMER' | 'RESTAURANT' | 'SYSTEM' | 'PAYMENT';
+  cancellationReason?: string;
 }
 
 export interface OrderEvent extends BaseEvent<OrderPayload> {

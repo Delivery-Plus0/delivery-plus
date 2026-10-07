@@ -50,6 +50,17 @@ Migration 005 backfills only what the stored status proves: FAILED orders → `P
 
 `GET /orders?status=active|completed|cancelled` filters the customer's list: `cancelled` covers CANCELLED and FAILED.
 
+## Restaurant operations (#154)
+
+- **Rejecting an order:** a restaurant owner may cancel (reject) an order only while it is **CONFIRMED**, before preparing starts. From PREPARING on, it's a 409: "An order can only be rejected before you start preparing it."
+  - The optional `reason` is recorded as "The restaurant cancelled this order: <reason>" (#143).
+  - The reason travels on `order.cancelled` (`cancelledBy`, `cancellationReason`), and notification-service tells the customer.
+  - The money isn't returned automatically yet: refunds are #53. The order keeps showing the payment as Paid.
+- **Customer first name:** copied at checkout from the customer's profile (`customerFirstName`) so the kitchen can call the order out. Only the first name, never the surname or contact data. A profile outage never blocks checkout (null).
+- **Today summary:** `GET /orders/restaurant/:restaurantId/summary` (owner only) returns today's (Africa/Cairo calendar day):
+  - `orders`, `active`, `delivered`, `cancelled` (includes failed);
+  - `revenue`: the items subtotal of orders that weren't cancelled or failed, in EGP. The delivery fee isn't the restaurant's.
+
 ## Dependencies
 - Reads the current cart from `cart-service`
 - Validates restaurant ownership through signed HMAC internal-auth requests and reads restaurant status from `restaurant-service`

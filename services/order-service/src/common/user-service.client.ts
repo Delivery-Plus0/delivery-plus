@@ -4,6 +4,7 @@ import { APP_CONFIG, AppConfig } from '../config/app-config';
 
 export interface UserProfileDto {
   id: string;
+  fullName?: string | null;
   address?: string | null;
 }
 

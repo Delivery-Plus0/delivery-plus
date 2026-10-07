@@ -76,6 +76,10 @@ export class Order {
   @Column({ type: 'double precision', nullable: true })
   deliveryLongitude!: number | null;
 
+  /** The customer's first name at checkout (#154), for the kitchen. Never the full name or contact data. */
+  @Column({ type: 'varchar', length: 60, nullable: true })
+  customerFirstName!: string | null;
+
   /** Who ended the order (#143): set with the move to CANCELLED or FAILED, null otherwise. */
   @Column({ type: 'varchar', length: 20, nullable: true })
   cancelledBy!: string | null;

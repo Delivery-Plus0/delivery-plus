@@ -500,13 +500,13 @@ async function runE2E() {
     }
     const summaryBefore = (await axios.get(`${API_URL}/api/deliveries/me/rating-summary`, driverAuth)).data;
     const rated = await axios.post(ratingUrl, { score: 5, comment: 'E2E: quick and careful' }, customerAuth);
-    const replay = await axios.post(ratingUrl, { score: 5, comment: 'E2E: quick and careful' }, customerAuth);
+    const ratingReplay = await axios.post(ratingUrl, { score: 5, comment: 'E2E: quick and careful' }, customerAuth);
     const duplicate = await statusOf(axios.post(ratingUrl, { score: 2 }, customerAuth));
     const outsiderRating = await statusOf(axios.post(ratingUrl, { score: 1 }, outsiderAuth));
     const driverRating = await statusOf(axios.post(ratingUrl, { score: 5 }, driverAuth));
-    if (rated.status !== 201 || replay.status !== 200 || duplicate !== 409 || outsiderRating !== 403 || driverRating !== 403) {
+    if (rated.status !== 201 || ratingReplay.status !== 200 || duplicate !== 409 || outsiderRating !== 403 || driverRating !== 403) {
       throw new Error(
-        `Rating: expected 201/200/409/403/403, got ${rated.status}/${replay.status}/${duplicate}/${outsiderRating}/${driverRating}`,
+        `Rating: expected 201/200/409/403/403, got ${rated.status}/${ratingReplay.status}/${duplicate}/${outsiderRating}/${driverRating}`,
       );
     }
     const summary = (await axios.get(`${API_URL}/api/deliveries/me/rating-summary`, driverAuth)).data;

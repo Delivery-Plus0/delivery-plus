@@ -10,7 +10,7 @@ import { UsersService } from './users.service';
 /** The rules for one-time phone codes (#153). */
 export const PHONE_OTP_POLICY = {
   codeLength: 6,
-  ttlSeconds: 10 * 60,
+  ttlSeconds: 5 * 60,
   maxAttempts: 5,
   resendCooldownSeconds: 60,
   /** Per user and, separately, per number, so one account can't flood a number and many accounts can't either. */

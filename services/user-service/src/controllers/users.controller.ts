@@ -78,7 +78,7 @@ export class UsersController {
   @ApiOperation({
     summary: 'Text a one-time code to verify the current phone, or a new one (#153)',
     description:
-      '429 during the resend cooldown or past the hourly limit; 503 while no SMS provider is configured. The code expires after 10 minutes.',
+      '429 during the resend cooldown or past the hourly limit; 503 while no SMS provider is configured. The code expires after 5 minutes.',
   })
   startPhoneVerification(@CurrentUser() user: JwtPayload, @Body() dto: StartPhoneVerificationDto) {
     return this.phoneVerification.start(user, dto.phone);

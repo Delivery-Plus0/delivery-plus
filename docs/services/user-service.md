@@ -28,7 +28,7 @@ A profile's phone is **verified** when `phoneVerifiedAt` is set, and only a conf
 How a code works:
 
 - **Code:** six digits from `crypto.randomInt`. Only an HMAC-SHA256 of it is stored (`phone_verifications.codeHash`), keyed with `OTP_HASH_SECRET` and bound to the row id. It is never logged.
-- **Expiry:** 10 minutes.
+- **Expiry:** 5 minutes.
 - **Attempts:** at most 5 wrong codes. Each attempt is counted atomically, and once they run out even the right code is refused.
 - **Single use:** a correct code is consumed and the profile updated in one transaction (compare-and-set on `consumedAt`). Only the latest code sent to a user can be verified.
 

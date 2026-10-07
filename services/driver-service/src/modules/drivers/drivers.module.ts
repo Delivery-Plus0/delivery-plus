@@ -6,6 +6,7 @@ import { DriversRepository } from '../../repositories/drivers.repository';
 import { DriversService } from '../../services/drivers.service';
 import { DriversController } from '../../controllers/drivers.controller';
 import { APP_CONFIG, AppConfig } from '../../config/app-config';
+import { UserServiceClient } from '../../common/user-service.client';
 
 @Module({
   imports: [
@@ -16,6 +17,6 @@ import { APP_CONFIG, AppConfig } from '../../config/app-config';
     }),
   ],
   controllers: [DriversController],
-  providers: [DriversService, DriversRepository],
+  providers: [DriversService, DriversRepository, UserServiceClient],
 })
 export class DriversModule {}

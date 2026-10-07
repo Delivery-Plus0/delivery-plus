@@ -221,6 +221,8 @@ services:
       CART_SERVICE_URL: http://cart-service:3005
       RESTAURANT_SERVICE_URL: http://restaurant-service:3003
       USER_SERVICE_URL: http://user-service:3002
+      # Phone verification gate (#153): on only together with a real SMS provider.
+      PHONE_VERIFICATION_REQUIRED: ${PHONE_VERIFICATION_REQUIRED:-false}
       INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:?INTERNAL_AUTH_SECRET must be set}
       INTERNAL_AUTH_SERVICE: order-service
     healthcheck:
@@ -306,6 +308,9 @@ services:
       NODE_ENV: production
       DATABASE_URL: postgres://${POSTGRES_USER_URLENCODED:?POSTGRES_USER_URLENCODED must be set}:${POSTGRES_PASSWORD_URLENCODED:?POSTGRES_PASSWORD_URLENCODED must be set}@postgres:5432/driver_service
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+      USER_SERVICE_URL: http://user-service:3002
+      # Phone verification gate (#153): on only together with a real SMS provider.
+      PHONE_VERIFICATION_REQUIRED: ${PHONE_VERIFICATION_REQUIRED:-false}
       KAFKA_BROKER: kafka:29092
     healthcheck:
       test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3009/health']

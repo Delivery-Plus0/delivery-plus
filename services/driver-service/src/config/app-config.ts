@@ -1,3 +1,5 @@
+import { phoneVerificationRequired } from '@food-delivery/shared';
+
 export const APP_CONFIG = Symbol('APP_CONFIG');
 
 export interface AppConfig {
@@ -6,6 +8,9 @@ export interface AppConfig {
   nodeEnv: string;
   databaseUrl: string;
   jwtSecret: string;
+  userServiceUrl: string;
+  /** #153: going online needs a verified phone (off by default). */
+  phoneVerificationRequired: boolean;
 }
 
 export function loadConfig(): AppConfig {
@@ -21,5 +26,7 @@ export function loadConfig(): AppConfig {
     nodeEnv: process.env.NODE_ENV || 'development',
     databaseUrl: process.env.DATABASE_URL as string,
     jwtSecret: process.env.JWT_SECRET as string,
+    userServiceUrl: process.env.USER_SERVICE_URL || 'http://localhost:3002',
+    phoneVerificationRequired: phoneVerificationRequired(),
   };
 }

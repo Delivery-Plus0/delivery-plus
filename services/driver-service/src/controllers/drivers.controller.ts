@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards, Headers } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, UserRole, DriverStatus } from '@food-delivery/shared';
 import { DriversService } from '../services/drivers.service';
@@ -53,8 +53,8 @@ export class DriversController {
   @Roles(UserRole.DRIVER)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Go online (OFFLINE -> AVAILABLE; no-op if already AVAILABLE; 403 while BUSY)' })
-  goOnline(@CurrentUser() user: JwtPayload) {
-    return this.driversService.updateStatus(user.sub, user.role, { status: DriverStatus.AVAILABLE });
+  goOnline(@CurrentUser() user: JwtPayload, @Headers('authorization') authHeader: string) {
+    return this.driversService.goOnline(user.sub, user.role, authHeader);
   }
 
   @Post('me/offline')

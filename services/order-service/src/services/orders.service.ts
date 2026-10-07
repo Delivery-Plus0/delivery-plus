@@ -22,6 +22,7 @@ import {
   lifecycleEventId,
   ConflictError,
   OrderPayload,
+  PhoneNotVerifiedError,
 } from '@food-delivery/shared';
 import { DeliveryAddress, OrdersRepository } from '../repositories/orders.repository';
 import { OrderPaymentStatus, outcomeFor } from '../common/order-outcome';
@@ -180,6 +181,10 @@ export class OrdersService implements OnModuleInit {
       }
     }
 
+    if (this.config.phoneVerificationRequired) {
+      await this.assertVerifiedPhone(authHeader);
+    }
+
     const cart = await this.cartClient.getCart(authHeader);
 
     if (cart.items.length === 0 || !cart.restaurantId) {
@@ -294,6 +299,14 @@ export class OrdersService implements OnModuleInit {
   async todaySummary(restaurantId: string, requesterId: string) {
     await this.restaurantClient.assertOwnership(restaurantId, requesterId);
     return { restaurantId, timezone: 'Africa/Cairo', currency: 'EGP', ...(await this.orders.todaySummary(restaurantId)) };
+  }
+
+  /** #153: ordering needs a verified phone when the gate is on; the app answers with the verification step. */
+  private async assertVerifiedPhone(authHeader: string): Promise<void> {
+    const profile = await this.userClient.getOwnProfile(authHeader);
+    if (!profile.phoneVerifiedAt) {
+      throw new PhoneNotVerifiedError('Verify your phone number to place orders.');
+    }
   }
 
   /** The customer's first name for the kitchen (#154); best effort, checkout never fails over it. */

@@ -1,3 +1,6 @@
+import { PhoneNotVerifiedError } from '@food-delivery/shared';
+import { UserServiceClient } from '../common/user-service.client';
+import { AppConfig } from '../config/app-config';
 import { DriversService } from './drivers.service';
 import { DriversRepository } from '../repositories/drivers.repository';
 import { ConflictError, DriverStatus, ForbiddenError, InvalidStateTransitionError, NotFoundError, UserRole } from '@food-delivery/shared';
@@ -5,6 +8,8 @@ import { ConflictError, DriverStatus, ForbiddenError, InvalidStateTransitionErro
 describe('DriversService', () => {
   let service: DriversService;
   let drivers: jest.Mocked<DriversRepository>;
+  let userClient: jest.Mocked<UserServiceClient>;
+  const gateOff = { phoneVerificationRequired: false } as AppConfig;
 
   const baseDriver = {
     id: 'driver-1',
@@ -30,7 +35,8 @@ describe('DriversService', () => {
       updateVerification: jest.fn(),
     } as unknown as jest.Mocked<DriversRepository>;
 
-    service = new DriversService(drivers);
+    userClient = { getOwnProfile: jest.fn() } as unknown as jest.Mocked<UserServiceClient>;
+    service = new DriversService(drivers, userClient, gateOff);
   });
 
   describe('register', () => {
@@ -282,7 +288,7 @@ describe('DriversService', () => {
 
     it('lets exactly one of two simultaneous assignments claim the same driver', async () => {
       const { row, repo } = inMemoryRepository(DriverStatus.AVAILABLE);
-      const racing = new DriversService(repo);
+      const racing = new DriversService(repo, userClient, gateOff);
 
       const results = await Promise.allSettled([
         racing.updateStatusById('driver-1', UserRole.ADMIN, { status: DriverStatus.BUSY }),
@@ -299,7 +305,7 @@ describe('DriversService', () => {
     it('lets either a claim or a go-offline win, never both', async () => {
       const { row, repo } = inMemoryRepository(DriverStatus.AVAILABLE);
       repo.findByUserId = jest.fn(async () => ({ ...row })) as never;
-      const racing = new DriversService(repo);
+      const racing = new DriversService(repo, userClient, gateOff);
 
       const [claim, offline] = await Promise.allSettled([
         racing.updateStatusById('driver-1', UserRole.ADMIN, { status: DriverStatus.BUSY }),
@@ -308,6 +314,39 @@ describe('DriversService', () => {
 
       expect([claim.status, offline.status].filter((s) => s === 'fulfilled')).toHaveLength(1);
       expect(row.status).toBe(claim.status === 'fulfilled' ? DriverStatus.BUSY : DriverStatus.OFFLINE);
+    });
+  });
+
+  describe('goOnline phone gate (#153)', () => {
+    const gateOn = { phoneVerificationRequired: true } as AppConfig;
+
+    it('needs a verified phone to start a shift when the gate is on', async () => {
+      drivers.findByUserId.mockResolvedValue({ ...baseDriver, status: DriverStatus.OFFLINE });
+      userClient.getOwnProfile.mockResolvedValue({ id: 'user-1', phoneVerifiedAt: null });
+      const gated = new DriversService(drivers, userClient, gateOn);
+
+      await expect(gated.goOnline('user-1', UserRole.DRIVER, 'Bearer d')).rejects.toBeInstanceOf(PhoneNotVerifiedError);
+      expect(userClient.getOwnProfile).toHaveBeenCalledWith('Bearer d');
+      expect(drivers.transitionStatus).not.toHaveBeenCalled();
+    });
+
+    it('lets a verified driver go online', async () => {
+      drivers.findByUserId.mockResolvedValue({ ...baseDriver, status: DriverStatus.OFFLINE });
+      drivers.transitionStatus.mockResolvedValue({ ...baseDriver, status: DriverStatus.AVAILABLE });
+      userClient.getOwnProfile.mockResolvedValue({ id: 'user-1', phoneVerifiedAt: '2026-10-07T10:00:00.000Z' });
+
+      const result = await new DriversService(drivers, userClient, gateOn).goOnline('user-1', UserRole.DRIVER, 'Bearer d');
+      expect(result.status).toBe(DriverStatus.AVAILABLE);
+    });
+
+    it('does not check anything when the gate is off, or when the driver is already online', async () => {
+      drivers.findByUserId.mockResolvedValue({ ...baseDriver, status: DriverStatus.OFFLINE });
+      drivers.transitionStatus.mockResolvedValue({ ...baseDriver, status: DriverStatus.AVAILABLE });
+      await service.goOnline('user-1', UserRole.DRIVER, 'Bearer d');
+
+      drivers.findByUserId.mockResolvedValue({ ...baseDriver, status: DriverStatus.AVAILABLE });
+      await new DriversService(drivers, userClient, gateOn).goOnline('user-1', UserRole.DRIVER, 'Bearer d');
+      expect(userClient.getOwnProfile).not.toHaveBeenCalled();
     });
   });
 

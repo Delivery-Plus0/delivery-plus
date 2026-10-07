@@ -47,7 +47,7 @@ SMS goes through the `SmsSender` port (`src/sms/sms-sender.ts`). No real provide
 - `disabled` (the default, including production): verification answers `503`. Nothing pretends a code was sent.
 - `test`: for isolated test stacks only (`docker-compose.test.yml`), and refused at startup in production. Each message is kept in Redis under `test:sms:<E.164>` for 15 minutes, so E2E suites can read the code. `scripts/e2e.ts` covers the whole flow this way.
 
-If the message can't be sent, its row is deleted, so the attempt neither counts against the limits nor blocks a retry. Adding a real provider means a new `SmsSender` implementation, an `SMS_PROVIDER` value, and credentials from the environment.
+If the message can't be sent, its row is deleted, so the attempt neither counts against the limits nor blocks a retry. Ordering and going online can then require a verified phone: see the `PHONE_VERIFICATION_REQUIRED` gate in order-service and driver-service. Adding a real provider means a new `SmsSender` implementation, an `SMS_PROVIDER` value, and credentials from the environment.
 
 ## Dependencies
 - Calls `order-service` to fetch order history via `src/common/order-service.client.ts`

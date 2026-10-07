@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import {
   ConflictError,
+  PhoneNotVerifiedError,
   DRIVER_TRANSITIONS,
   DriverStatus,
   ForbiddenError,
@@ -16,6 +17,8 @@ import { RegisterDriverDto } from '../dto/register-driver.dto';
 import { UpdateDriverStatusDto } from '../dto/update-driver-status.dto';
 import { IDEMPOTENT_STATUSES, isRoleAllowedForTransition } from '../common/driver-transition-rules';
 import { Driver } from '../entities/driver.entity';
+import { UserServiceClient } from '../common/user-service.client';
+import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { UpdateVehicleDto, UpdateVerificationDto } from '../dto/driver-profile.dto';
 
 /**
@@ -27,7 +30,11 @@ import { UpdateVehicleDto, UpdateVerificationDto } from '../dto/driver-profile.d
  */
 @Injectable()
 export class DriversService {
-  constructor(private readonly drivers: DriversRepository) {}
+  constructor(
+    private readonly drivers: DriversRepository,
+    private readonly userClient: UserServiceClient,
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
+  ) {}
 
   async register(userId: string, dto: RegisterDriverDto): Promise<Driver> {
     const existing = await this.drivers.findByUserId(userId);
@@ -114,6 +121,19 @@ export class DriversService {
   async listAvailable(page: number, limit: number): Promise<PaginatedResult<Driver>> {
     const [items, total] = await this.drivers.findAvailable(page, limit);
     return { items, page, limit, total, totalPages: Math.ceil(total / limit) || 1 };
+  }
+
+  /**
+   * OFFLINE → AVAILABLE for the driver. With the #153 gate on, only a driver with a verified phone can
+   * start a shift; one already online stays online (the check guards the transition, not the state).
+   */
+  async goOnline(userId: string, requesterRole: UserRole, authHeader: string): Promise<Driver> {
+    const driver = await this.getByUserId(userId);
+    if (this.config.phoneVerificationRequired && driver.status !== DriverStatus.AVAILABLE) {
+      const profile = await this.userClient.getOwnProfile(authHeader);
+      if (!profile.phoneVerifiedAt) throw new PhoneNotVerifiedError('Verify your phone number to go online.');
+    }
+    return this.transition(driver, DriverStatus.AVAILABLE, requesterRole);
   }
 
   async updateStatus(

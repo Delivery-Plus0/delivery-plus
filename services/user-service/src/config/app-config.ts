@@ -10,7 +10,13 @@ export interface AppConfig {
   redisUrl: string;
   internalAuthSecret: string;
   internalAuthAllowedService: string;
+  /** Phone verification (#153): `disabled` (default) until a real provider exists; `test` only outside production. */
+  smsProvider: SmsProvider;
+  /** Keys the stored code hashes; required in production once a provider is on. */
+  otpHashSecret: string;
 }
+
+export type SmsProvider = 'disabled' | 'test';
 
 export function loadConfig(): AppConfig {
   const required = ['DATABASE_URL', 'JWT_SECRET'];
@@ -29,7 +35,23 @@ export function loadConfig(): AppConfig {
     redisUrl: process.env.REDIS_URL || 'redis://localhost:6379',
     internalAuthSecret: requireInternalAuthSecret(),
     internalAuthAllowedService: process.env.INTERNAL_AUTH_ALLOWED_SERVICE || 'auth-service',
+    ...loadSmsConfig(process.env.NODE_ENV || 'development'),
   };
+}
+
+export function loadSmsConfig(nodeEnv: string): Pick<AppConfig, 'smsProvider' | 'otpHashSecret'> {
+  const provider = (process.env.SMS_PROVIDER || 'disabled').trim().toLowerCase();
+  if (provider !== 'disabled' && provider !== 'test') {
+    throw new Error(`Unsupported SMS_PROVIDER "${provider}": use "disabled" until a real provider is added`);
+  }
+  if (provider === 'test' && nodeEnv === 'production') {
+    throw new Error('SMS_PROVIDER=test is for isolated test environments and cannot run in production');
+  }
+  const secret = process.env.OTP_HASH_SECRET;
+  if (!secret && nodeEnv === 'production' && provider !== 'disabled') {
+    throw new Error('Missing required environment variables: OTP_HASH_SECRET');
+  }
+  return { smsProvider: provider, otpHashSecret: secret || 'local-otp-development-only' };
 }
 
 function requireInternalAuthSecret(): string {

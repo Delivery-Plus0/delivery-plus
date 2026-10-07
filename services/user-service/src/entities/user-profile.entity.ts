@@ -20,6 +20,10 @@ export class UserProfile {
   @Column({ nullable: true })
   phone?: string;
 
+  /** Set when the current phone was confirmed by a one-time code (#153); cleared when the phone changes. */
+  @Column({ type: 'timestamptz', nullable: true })
+  phoneVerifiedAt?: Date | null;
+
   @Column({ nullable: true })
   address?: string;
 

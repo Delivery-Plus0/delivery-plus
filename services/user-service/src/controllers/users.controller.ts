@@ -1,7 +1,9 @@
-import { Body, Controller, Get, Headers, Param, Patch, Post, Query, Req, UseGuards, Delete } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, Param, Patch, Post, Query, Req, UseGuards, Delete } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser, JwtPayload } from '@food-delivery/shared';
 import { UsersService } from '../services/users.service';
+import { PhoneVerificationService } from '../services/phone-verification.service';
+import { StartPhoneVerificationDto, VerifyPhoneDto } from '../dto/phone-verification.dto';
 import { CreateProfileDto } from '../dto/create-profile.dto';
 import { CreateAvatarUploadUrlDto } from '../dto/create-avatar-upload-url.dto';
 import { ConfirmAvatarUploadDto } from '../dto/confirm-avatar-upload.dto';
@@ -12,7 +14,10 @@ import { InternalAuthGuard } from '../guards/internal-auth.guard';
 @ApiTags('users')
 @Controller()
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly phoneVerification: PhoneVerificationService,
+  ) {}
 
   @Post('internal/users')
   @UseGuards(InternalAuthGuard)
@@ -64,6 +69,28 @@ export class UsersController {
   @ApiOperation({ summary: "Remove the current user's avatar (#150)" })
   removeAvatar(@CurrentUser() user: JwtPayload): Promise<UserProfile> {
     return this.usersService.removeAvatar(user);
+  }
+
+  @Post('users/me/phone/verification')
+  @HttpCode(202)
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Text a one-time code to verify the current phone, or a new one (#153)',
+    description:
+      '429 during the resend cooldown or past the hourly limit; 503 while no SMS provider is configured. The code expires after 10 minutes.',
+  })
+  startPhoneVerification(@CurrentUser() user: JwtPayload, @Body() dto: StartPhoneVerificationDto) {
+    return this.phoneVerification.start(user, dto.phone);
+  }
+
+  @Post('users/me/phone/verify')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Confirm the code; the number becomes the verified profile phone (#153)' })
+  verifyPhone(@CurrentUser() user: JwtPayload, @Body() dto: VerifyPhoneDto): Promise<UserProfile> {
+    return this.phoneVerification.verify(user, dto.code);
   }
 
   @Get('users/me/orders')

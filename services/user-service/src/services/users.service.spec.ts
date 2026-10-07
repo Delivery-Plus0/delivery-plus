@@ -179,6 +179,18 @@ describe('UsersService', () => {
       expect(profiles.update).toHaveBeenCalledWith('u-owner', { fullName: 'New Name' });
     });
 
+    it('clears phone verification when the phone changes, and only then (#153)', async () => {
+      const verifiedAt = new Date();
+      profiles.findById.mockResolvedValue(profile({ phone: '+201012345678', phoneVerifiedAt: verifiedAt }));
+      profiles.update.mockResolvedValue(profile());
+
+      await service.updateOwnProfile(owner, { phone: '+201198765432' });
+      expect(profiles.update).toHaveBeenLastCalledWith('u-owner', { phone: '+201198765432', phoneVerifiedAt: null });
+
+      await service.updateOwnProfile(owner, { phone: '+201012345678', fullName: 'Same Phone' });
+      expect(profiles.update).toHaveBeenLastCalledWith('u-owner', { phone: '+201012345678', fullName: 'Same Phone' });
+    });
+
     it('does not update when auth/profile emails diverge', async () => {
       profiles.findById.mockResolvedValue(profile());
       await expect(

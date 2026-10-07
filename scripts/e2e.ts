@@ -1,7 +1,10 @@
 import axios from 'axios';
+import { Redis } from 'ioredis';
 import { uploadImage } from './lib/gateway-seed';
 
 const API_URL = process.env.API_URL || 'http://localhost:3000';
+// docker-compose.test.yml publishes Redis; its user-service keeps texted codes there (SMS_PROVIDER=test, #153).
+const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 
 // NOTE (CI tooling fix): this script previously could not get past the second
 // or third step against the current API. Every service runs a global
@@ -248,6 +251,35 @@ async function runE2E() {
       throw new Error(`Phone normalization: expected +201092784342 and 400 for a landline, got ${phoneUpdate.data.phone} / ${landline}`);
     }
     console.log('Phone: 0020-109-278-4342 stored as +201092784342; landline 400');
+
+    // Phone verification (#153): a code is texted (kept in Redis by the test sender), resending waits for
+    // the cooldown, a wrong code is refused, the right one verifies, and changing the phone un-verifies it.
+    const otpStart = await axios.post(`${API_URL}/api/users/me/phone/verification`, {}, customerAuth);
+    const redis = new Redis(REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 2 });
+    const smsText = await redis.connect().then(() => redis.get(`test:sms:${otpStart.data.phone}`)).finally(() => redis.disconnect());
+    const otpCode = /(\d{6})/.exec(smsText ?? '')?.[1];
+    const resendTooSoon = await statusOf(axios.post(`${API_URL}/api/users/me/phone/verification`, {}, customerAuth));
+    const wrongCode = await statusOf(
+      axios.post(`${API_URL}/api/users/me/phone/verify`, { code: otpCode === '000000' ? '111111' : '000000' }, customerAuth),
+    );
+    const verified = otpCode ? (await axios.post(`${API_URL}/api/users/me/phone/verify`, { code: otpCode }, customerAuth)).data : null;
+    const reverify = await statusOf(axios.post(`${API_URL}/api/users/me/phone/verification`, {}, customerAuth));
+    const changed = (await axios.patch(`${API_URL}/api/users/me`, { phone: '01112345678' }, customerAuth)).data;
+    if (
+      otpStart.status !== 202 ||
+      otpStart.data.phone !== '+201092784342' ||
+      !otpCode ||
+      resendTooSoon !== 429 ||
+      wrongCode !== 400 ||
+      !verified?.phoneVerifiedAt ||
+      reverify !== 409 ||
+      changed.phoneVerifiedAt !== null
+    ) {
+      throw new Error(
+        `Phone verification: ${JSON.stringify({ start: otpStart.status, code: !!otpCode, resendTooSoon, wrongCode, verified: verified?.phoneVerifiedAt, reverify, afterChange: changed.phoneVerifiedAt })}`,
+      );
+    }
+    console.log('Phone verification: code texted, resend 429, wrong code 400, verified; a new phone is unverified');
 
     const getOrder = async () => (await axios.get(`${API_URL}/api/orders/${orderId}`, customerAuth)).data;
 

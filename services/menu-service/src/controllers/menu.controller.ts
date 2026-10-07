@@ -120,6 +120,15 @@ export class MenuController {
     return this.menuService.createItemImageUploadUrl(id, user.sub, dto.contentType);
   }
 
+  @Delete('menu-items/:id/images/:imageId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.RESTAURANT_OWNER)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Remove one image of a menu item (owner only, #149); the next one becomes the primary' })
+  removeItemImage(@Param('id') id: string, @Param('imageId') imageId: string, @CurrentUser() user: JwtPayload) {
+    return this.menuService.removeItemImage(id, imageId, user.sub);
+  }
+
   @Post('menu-items/:id/image-confirm')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.RESTAURANT_OWNER)

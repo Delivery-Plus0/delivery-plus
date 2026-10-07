@@ -27,7 +27,7 @@
     },
     "devDependencies": {
         "@types/express": "^4.17.21",
-        "@types/http-proxy-middleware": "^0.19.3",
+        "@types/http-proxy-middleware": "^1.0.0",
         "@types/jest": "^29.5.12",
         "@types/node": "^26.6.4",
         "jest": "^29.7.0",

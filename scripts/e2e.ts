@@ -221,7 +221,8 @@ async function runE2E() {
 
     // Delivery fee (#145): the quote, the order and the payment all carry the same fee and total.
     const quote = (await axios.get(`${API_URL}/api/orders/quote`, customerAuth)).data;
-    if (quote.currency !== 'EGP' || Number(quote.totalAmount) !== Number(quote.subtotalAmount) + Number(quote.deliveryFee) || !(Number(quote.deliveryFee) > 0)) {
+    const piasters = (amount: string) => Math.round(Number(amount) * 100);
+    if (quote.currency !== 'EGP' || piasters(quote.totalAmount) !== piasters(quote.subtotalAmount) + piasters(quote.deliveryFee) || !(piasters(quote.deliveryFee) > 0)) {
       throw new Error(`Quote: ${JSON.stringify(quote)}`);
     }
 
@@ -513,11 +514,11 @@ async function runE2E() {
     // balance equals the sum of the entries; only the driver can read it.
     const earnings = (await axios.get(`${API_URL}/api/deliveries/me/earnings?limit=50`, driverAuth)).data;
     const mine = earnings.entries.filter((entry: { deliveryId: string }) => entry.deliveryId === deliveryId);
-    const expectedShare = (Number(quote.deliveryFee) / 2).toFixed(2);
+    const expectedShare = (Math.floor(piasters(quote.deliveryFee) / 2) / 100).toFixed(2);
     if (mine.length !== 1 || mine[0].type !== 'DELIVERY_EARNING' || mine[0].amount !== expectedShare || mine[0].status !== 'PENDING') {
       throw new Error(`Earnings for ${deliveryId}: ${JSON.stringify(mine)}`);
     }
-    if ((Number(earnings.pending) + Number(earnings.available)).toFixed(2) !== Number(earnings.balance).toFixed(2)) {
+    if (piasters(earnings.pending) + piasters(earnings.available) !== piasters(earnings.balance)) {
       throw new Error(`Earnings totals don't add up: ${JSON.stringify({ pending: earnings.pending, available: earnings.available, balance: earnings.balance })}`);
     }
     const customerEarnings = await statusOf(axios.get(`${API_URL}/api/deliveries/me/earnings`, customerAuth));

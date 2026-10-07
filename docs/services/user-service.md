@@ -14,6 +14,10 @@ From `services/user-service/src/controllers/users.controller.ts`:
 - `POST /users/me/avatar/image-upload-url` – create a short-lived presigned avatar POST policy
 - `POST /users/me/avatar/confirm` – verify the uploaded object and save its public URL
 
+## Phone numbers (#152)
+
+Profiles store only **Egyptian mobile numbers in E.164** (`+201XXXXXXXXX`, networks 010/011/012/015). `POST /users`, `PATCH /users/me` and auth registration accept any common form (`01092784342`, `+20 1092784342`, `0020-109-278-4342`, with spaces, dashes, dots or parentheses) and normalize it with the shared `normalizeEgyptianMobile()` / `@EgyptianMobile()`; anything else (landlines, other countries, wrong length) is a 400 with a clear message. Migration 004 normalized existing phones and cleared invalid ones, logging only how many. The apps use the same rules and the same case table.
+
 ## Dependencies
 - Calls `order-service` to fetch order history via `src/common/order-service.client.ts`
 - Depends on PostgreSQL for the user profile table

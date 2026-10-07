@@ -233,6 +233,14 @@ async function runE2E() {
     }
     console.log(`Order delivery address: ${orderRes.data.deliveryAddress}`);
 
+    // Egyptian mobiles (#152): any common form is stored as E.164; anything else is a 400.
+    const phoneUpdate = await axios.patch(`${API_URL}/api/users/me`, { phone: '0020-109-278-4342' }, customerAuth);
+    const landline = await statusOf(axios.patch(`${API_URL}/api/users/me`, { phone: '0223456789' }, customerAuth));
+    if (phoneUpdate.data.phone !== '+201092784342' || landline !== 400) {
+      throw new Error(`Phone normalization: expected +201092784342 and 400 for a landline, got ${phoneUpdate.data.phone} / ${landline}`);
+    }
+    console.log('Phone: 0020-109-278-4342 stored as +201092784342; landline 400');
+
     const getOrder = async () => (await axios.get(`${API_URL}/api/orders/${orderId}`, customerAuth)).data;
 
     // 5. Create the payment. createPayment's own completeSideEffects call

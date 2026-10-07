@@ -35,6 +35,8 @@ export const SERVICE_DEFINITIONS = [
       { method: 'post', path: '/me/avatar/image-upload-url', summary: 'Create a presigned avatar upload URL', auth: true, statusCode: 201 },
       { method: 'post', path: '/me/avatar/confirm', summary: 'Confirm and save an uploaded avatar', auth: true, statusCode: 201 },
       { method: 'delete', path: '/me/avatar', summary: 'Remove the current user avatar', auth: true, statusCode: 200 },
+      { method: 'post', path: '/me/phone/verification', summary: 'Text a one-time code to verify a phone', auth: true, statusCode: 202 },
+      { method: 'post', path: '/me/phone/verify', summary: 'Confirm a phone verification code', auth: true, statusCode: 200 },
     ],
   },
   {

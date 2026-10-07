@@ -574,6 +574,76 @@
         ]
       }
     },
+    "/api/users/me/phone/verification": {
+      "post": {
+        "summary": "Text a one-time code to verify a phone",
+        "tags": [
+          "users"
+        ],
+        "operationId": "users_post_api_users_me_phone_verification",
+        "responses": {
+          "202": {
+            "description": "Successful response"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/users/me/phone/verify": {
+      "post": {
+        "summary": "Confirm a phone verification code",
+        "tags": [
+          "users"
+        ],
+        "operationId": "users_post_api_users_me_phone_verify",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/restaurants": {
       "post": {
         "summary": "Create a restaurant",

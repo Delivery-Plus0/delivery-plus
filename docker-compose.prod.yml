@@ -98,6 +98,9 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
       REDIS_URL: redis://redis:6379
       INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:?INTERNAL_AUTH_SECRET must be set}
+      # Phone verification (#153): off until a real SMS provider and its credentials exist.
+      SMS_PROVIDER: ${SMS_PROVIDER:-disabled}
+      OTP_HASH_SECRET: ${OTP_HASH_SECRET:-}
       ORDER_SERVICE_URL: http://order-service:3006
       AWS_REGION: ${AWS_REGION:-us-east-1}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:?AWS_ACCESS_KEY_ID must be set}

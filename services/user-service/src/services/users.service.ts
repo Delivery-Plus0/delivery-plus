@@ -67,8 +67,10 @@ export class UsersService {
   }
 
   async updateOwnProfile(requester: JwtPayload, dto: UpdateProfileDto): Promise<UserProfile> {
-    await this.getOwnProfile(requester);
-    const updated = await this.profiles.update(requester.sub, dto);
+    const profile = await this.getOwnProfile(requester);
+    // A different number isn't verified yet (#153): only a confirmed code verifies it.
+    const phoneChanged = dto.phone !== undefined && (dto.phone ?? null) !== (profile.phone ?? null);
+    const updated = await this.profiles.update(requester.sub, phoneChanged ? { ...dto, phoneVerifiedAt: null } : dto);
     return updated as UserProfile;
   }
 

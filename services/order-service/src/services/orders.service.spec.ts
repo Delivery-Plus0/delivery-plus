@@ -635,9 +635,14 @@ describe('OrdersService', () => {
         total: 200,
       } as any);
       restaurantClient.getRestaurant.mockResolvedValue({ id: 'restaurant-1', status: 'OPEN' } as any);
-      orders.create.mockResolvedValue({ ...baseOrder, id: 'order-1' } as any);
+      orders.create.mockResolvedValue({ ...baseOrder, id: 'order-1', driverFeeShare: '12.50', platformFeeShare: '12.50', driverCancelFeeShare: '6.25' } as any);
 
-      await service.createFromCart('customer-1', 'Bearer x', undefined, { deliveryAddress: '1 Test Street' } as any);
+      const created = await service.createFromCart('customer-1', 'Bearer x', undefined, { deliveryAddress: '1 Test Street' } as any);
+
+      // The internal split never goes back to the customer.
+      expect(Object.keys(created)).not.toEqual(expect.arrayContaining(['driverFeeShare']));
+      expect(created).not.toHaveProperty('platformFeeShare');
+      expect(created).not.toHaveProperty('driverCancelFeeShare');
 
       expect(orders.create.mock.calls[0][3]).toEqual({
         subtotalAmount: '200.00',

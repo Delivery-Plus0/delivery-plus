@@ -64,6 +64,18 @@ const ORDER_STATUS_EVENTS: Partial<Record<OrderStatus, OrderEventType>> = {
 };
 
 /** The lifecycle event for an order as written; the eventId is stable per (order, event type). */
+/**
+ * The fee split is internal (#145): reads never select it, but an order just created still holds it
+ * in memory, so strip it before the order goes back to the customer.
+ */
+export function withoutFeeSplit(order: Order): Order {
+  const { driverFeeShare, platformFeeShare, driverCancelFeeShare, ...visible } = order;
+  void driverFeeShare;
+  void platformFeeShare;
+  void driverCancelFeeShare;
+  return visible as Order;
+}
+
 function orderEvent(order: Order, eventType: OrderEventType): OrderEvent {
   return {
     eventId: lifecycleEventId(order.id, eventType),
@@ -197,7 +209,7 @@ export class OrdersService implements OnModuleInit {
 
       await this.cartClient.clearCart(authHeader);
 
-      return order;
+      return withoutFeeSplit(order);
     } catch (error) {
       if (idempotencyKey) {
         const winner = await this.orders.findByCustomerAndIdempotencyKey(customerId, idempotencyKey);

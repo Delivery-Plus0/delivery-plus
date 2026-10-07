@@ -36,7 +36,7 @@ describe('NotificationsService', () => {
     it('subscribes to the order, payment, and delivery events and starts the consumer', async () => {
       await service.onModuleInit();
 
-      expect(kafkaConsumer.subscribe).toHaveBeenCalledTimes(5);
+      expect(kafkaConsumer.subscribe).toHaveBeenCalledTimes(6);
       expect(kafkaConsumer.subscribe).toHaveBeenNthCalledWith(
         1,
         TOPICS.ORDER_EVENTS,
@@ -53,6 +53,7 @@ describe('NotificationsService', () => {
         [TOPICS.DELIVERY_EVENTS, DeliveryEventType.DRIVER_ASSIGNED],
         [TOPICS.DELIVERY_EVENTS, DeliveryEventType.PICKED_UP],
         [TOPICS.DELIVERY_EVENTS, DeliveryEventType.COMPLETED],
+        [TOPICS.ORDER_EVENTS, OrderEventType.CANCELLED],
       ]);
       expect(kafkaConsumer.start).toHaveBeenCalledTimes(1);
     });
@@ -113,6 +114,32 @@ describe('NotificationsService', () => {
     beforeEach(async () => {
       repository.create.mockResolvedValue({} as Notification);
       await service.onModuleInit();
+    });
+
+    it('tells the customer when the restaurant cancels, with its reason (#154)', async () => {
+      await handlerFor(OrderEventType.CANCELLED)(
+        event(OrderEventType.CANCELLED, {
+          orderId: 'order-42',
+          customerId: 'customer-1',
+          status: 'CANCELLED',
+          cancelledBy: 'RESTAURANT',
+          cancellationReason: 'The restaurant cancelled this order: Out of falafel',
+        }),
+      );
+
+      expect(repository.create).toHaveBeenCalledWith(
+        'customer-1',
+        NotificationType.ORDER_CANCELLED,
+        'Order cancelled',
+        'The restaurant cancelled this order: Out of falafel',
+      );
+    });
+
+    it("doesn't notify the customer about their own cancellation", async () => {
+      await handlerFor(OrderEventType.CANCELLED)(
+        event(OrderEventType.CANCELLED, { orderId: 'order-42', customerId: 'customer-1', status: 'CANCELLED', cancelledBy: 'CUSTOMER' }),
+      );
+      expect(repository.create).not.toHaveBeenCalled();
     });
 
     it('notifies the paying customer when the payment completes', async () => {

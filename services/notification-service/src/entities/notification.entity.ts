@@ -6,6 +6,7 @@ export enum NotificationType {
   DRIVER_ASSIGNED = 'DRIVER_ASSIGNED',
   PICKED_UP = 'PICKED_UP',
   DELIVERED = 'DELIVERED',
+  ORDER_CANCELLED = 'ORDER_CANCELLED',
 }
 
 @Entity('notifications')

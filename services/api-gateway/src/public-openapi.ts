@@ -88,6 +88,7 @@ export const SERVICE_DEFINITIONS = [
       { method: 'post', path: '', summary: 'Create an order from the current cart', auth: true, statusCode: 201 },
       { method: 'get', path: '', summary: 'List the current customer orders', auth: true, statusCode: 200 },
       { method: 'get', path: '/restaurant/:restaurantId', summary: 'List orders for a restaurant', auth: true, statusCode: 200 },
+      { method: 'get', path: '/restaurant/:restaurantId/summary', summary: "Today's orders and item revenue for a restaurant (owner)", auth: true, statusCode: 200 },
       { method: 'get', path: '/quote', summary: 'Price the current cart: subtotal, delivery fee and total (EGP)', auth: true, statusCode: 200 },
       { method: 'get', path: '/:id', summary: 'Get an order by id', auth: true, statusCode: 200 },
       { method: 'patch', path: '/:id/status', summary: 'Transition an order status', auth: true, statusCode: 200 },

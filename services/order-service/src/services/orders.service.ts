@@ -20,6 +20,8 @@ import {
   OrderEvent,
   generateCorrelationId,
   lifecycleEventId,
+  ConflictError,
+  OrderPayload,
 } from '@food-delivery/shared';
 import { DeliveryAddress, OrdersRepository } from '../repositories/orders.repository';
 import { OrderPaymentStatus, outcomeFor } from '../common/order-outcome';
@@ -88,6 +90,8 @@ function orderEvent(order: Order, eventType: OrderEventType): OrderEvent {
       restaurantId: order.restaurantId,
       total: parseFloat(order.totalAmount),
       status: order.status,
+      ...(order.cancelledBy ? { cancelledBy: order.cancelledBy as OrderPayload['cancelledBy'] } : {}),
+      ...(order.cancellationReason ? { cancellationReason: order.cancellationReason } : {}),
     },
   };
 }
@@ -188,6 +192,7 @@ export class OrdersService implements OnModuleInit {
     }
 
     const delivery = await this.resolveDeliveryAddress(checkout, authHeader);
+    const customerFirstName = await this.customerFirstName(authHeader);
 
     try {
       const order = await this.orders.create(
@@ -204,6 +209,7 @@ export class OrdersService implements OnModuleInit {
         idempotencyKey,
         delivery,
         (created) => orderEvent(created, OrderEventType.CREATED),
+        customerFirstName,
       );
       this.outbox.kick();
 
@@ -284,6 +290,22 @@ export class OrdersService implements OnModuleInit {
     return { address: profileAddress, notes, latitude: null, longitude: null };
   }
 
+  /** Today's orders and item revenue for the owner's restaurant (#154). */
+  async todaySummary(restaurantId: string, requesterId: string) {
+    await this.restaurantClient.assertOwnership(restaurantId, requesterId);
+    return { restaurantId, timezone: 'Africa/Cairo', currency: 'EGP', ...(await this.orders.todaySummary(restaurantId)) };
+  }
+
+  /** The customer's first name for the kitchen (#154); best effort, checkout never fails over it. */
+  private async customerFirstName(authHeader: string): Promise<string | null> {
+    try {
+      const fullName = (await this.userClient.getOwnProfile(authHeader)).fullName?.trim();
+      return fullName ? fullName.split(/\s+/)[0].slice(0, 60) : null;
+    } catch {
+      return null;
+    }
+  }
+
   async listByCustomer(customerId: string, page: number, limit: number, filter?: OrderListFilter): Promise<PaginatedResult<Order>> {
     const statuses = filter ? ORDER_LIST_FILTER_STATUSES[filter] : null;
     const [items, total] = await this.orders.findByCustomer(customerId, page, limit, statuses);
@@ -319,6 +341,10 @@ export class OrdersService implements OnModuleInit {
 
     if (requesterRole === UserRole.RESTAURANT_OWNER) {
       await this.restaurantClient.assertOwnership(order.restaurantId, requesterId);
+      // A restaurant rejects an order before cooking it, never mid-way (#154).
+      if (dto.status === OrderStatus.CANCELLED && order.status !== OrderStatus.CONFIRMED && order.status !== OrderStatus.CANCELLED) {
+        throw new ConflictError('An order can only be rejected before you start preparing it.');
+      }
     }
 
     if (order.status === dto.status) {

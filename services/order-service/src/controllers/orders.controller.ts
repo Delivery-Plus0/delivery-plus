@@ -63,6 +63,14 @@ export class OrdersController {
     return this.ordersService.listByRestaurant(restaurantId, user.sub, query.page, query.limit);
   }
 
+  @Get('restaurant/:restaurantId/summary')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.RESTAURANT_OWNER)
+  @ApiOperation({ summary: "Today's orders and item revenue for your restaurant, in Cairo time (#154)" })
+  todaySummary(@Param('restaurantId') restaurantId: string, @CurrentUser() user: JwtPayload) {
+    return this.ordersService.todaySummary(restaurantId, user.sub);
+  }
+
   @Get('quote')
   @UseGuards(RolesGuard)
   @Roles(UserRole.CUSTOMER)

@@ -40,6 +40,7 @@ describe('OrdersService', () => {
     cancelledBy: null,
     cancellationReason: null,
     paymentStatus: null,
+    customerFirstName: null,
     subtotalAmount: '9.99',
     deliveryFee: '0.00',
     items: [],
@@ -211,7 +212,8 @@ describe('OrdersService', () => {
           latitude: 30.0444,
           longitude: 31.2357,
         });
-        expect(userClient.getOwnProfile).not.toHaveBeenCalled();
+        // The profile is read only for the first name now (#154); its address isn't used.
+        expect(persistedDelivery().address).toBe('9 Nile Corniche');
       });
 
       it("falls back to the customer's profile address, read with the customer's own token", async () => {
@@ -684,6 +686,54 @@ describe('OrdersService', () => {
 
       orders.findFeeSplit.mockResolvedValueOnce(null);
       await expect(service.getFeeSplit('nope')).rejects.toThrow(NotFoundError);
+    });
+  });
+
+  describe('restaurant operations (#154)', () => {
+    it.each([OrderStatus.PREPARING, OrderStatus.READY_FOR_PICKUP])('stops a restaurant rejecting an order once it is %s', async (status) => {
+      orders.findById.mockResolvedValue({ ...baseOrder, status } as any);
+
+      await expect(
+        service.updateStatus('order-1', 'owner-1', UserRole.RESTAURANT_OWNER, { status: OrderStatus.CANCELLED, reason: 'Too late' }),
+      ).rejects.toThrow('An order can only be rejected before you start preparing it.');
+      expect(orders.updateStatus).not.toHaveBeenCalled();
+    });
+
+    it('carries the reason on the order.cancelled event', async () => {
+      orders.findById.mockResolvedValue({ ...baseOrder, status: OrderStatus.CONFIRMED } as any);
+      orders.updateStatus.mockImplementation(async (_id, _from, to, event, outcome) => {
+        const changed = { ...baseOrder, status: to, ...outcome } as any;
+        (orders as any).lastEvent = event(changed);
+        return changed;
+      });
+
+      await service.updateStatus('order-1', 'owner-1', UserRole.RESTAURANT_OWNER, { status: OrderStatus.CANCELLED, reason: 'Out of falafel' });
+
+      expect((orders as any).lastEvent.payload).toMatchObject({
+        cancelledBy: 'RESTAURANT',
+        cancellationReason: 'The restaurant cancelled this order: Out of falafel',
+      });
+    });
+
+    it("snapshots only the customer's first name at checkout, and never fails checkout over it", async () => {
+      cartClient.getCart.mockResolvedValue({ userId: 'customer-1', restaurantId: 'restaurant-1', items: [{ menuItemId: 'i1', name: 'Koshary', price: 45, quantity: 1 }], total: 45 } as any);
+      restaurantClient.getRestaurant.mockResolvedValue({ id: 'restaurant-1', status: 'OPEN' } as any);
+      orders.create.mockResolvedValue({ ...baseOrder } as any);
+      userClient.getOwnProfile.mockResolvedValue({ id: 'customer-1', fullName: '  Mona Ahmed Ali ', address: 'x' } as any);
+
+      await service.createFromCart('customer-1', 'Bearer x', undefined, { deliveryAddress: '1 Test Street' } as any);
+      expect(orders.create.mock.calls[0][7]).toBe('Mona');
+
+      userClient.getOwnProfile.mockRejectedValue(new Error('user-service down'));
+      await service.createFromCart('customer-1', 'Bearer x', undefined, { deliveryAddress: '1 Test Street' } as any);
+      expect(orders.create.mock.calls[1][7]).toBeNull();
+    });
+
+    it("reports today's summary only to the restaurant's owner", async () => {
+      (orders as any).todaySummary = jest.fn().mockResolvedValue({ orders: 3, active: 1, delivered: 1, cancelled: 1, revenue: '90.00' });
+
+      await expect(service.todaySummary('restaurant-1', 'owner-1')).resolves.toMatchObject({ orders: 3, revenue: '90.00', timezone: 'Africa/Cairo', currency: 'EGP' });
+      expect(restaurantClient.assertOwnership).toHaveBeenCalledWith('restaurant-1', 'owner-1');
     });
   });
 });

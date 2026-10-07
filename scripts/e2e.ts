@@ -707,6 +707,35 @@ async function runE2E() {
     }
     console.log(`Driver profile: vehicle change while online 409; verification ${ownProfile.verificationStatus}`);
 
+    // Restaurant operations (#154): reject only before preparing, with a reason the customer is told.
+    await axios.post(`${API_URL}/api/cart/items`, { menuItemId, quantity: 1 }, customerAuth);
+    const rejectId = (await axios.post(`${API_URL}/api/orders`, {}, customerAuth)).data.id;
+    const rejectPayment = (await axios.post(`${API_URL}/api/payments`, { orderId: rejectId }, customerAuth)).data;
+    await axios.post(`${API_URL}/api/payments/${rejectPayment.id}/process`, { simulateFailure: false }, customerAuth);
+    await waitForOrderFields(rejectId, (order) => order.status === 'CONFIRMED', 'expected CONFIRMED');
+    await axios.patch(`${API_URL}/api/orders/${rejectId}/status`, { status: 'CANCELLED', reason: 'Out of stock tonight' }, ownerAuth);
+    const rejected = await waitForOrderFields(rejectId, (order) => order.status === 'CANCELLED', 'expected CANCELLED');
+    const deadlineNote = Date.now() + 20_000;
+    let rejectNote: { message?: string } | undefined;
+    while (!rejectNote && Date.now() < deadlineNote) {
+      const notes = (await axios.get(`${API_URL}/api/notifications?limit=50`, customerAuth)).data;
+      rejectNote = (notes.items ?? notes).find((note: { type?: string; message?: string }) => note.type === 'ORDER_CANCELLED' && note.message?.includes('Out of stock tonight'));
+      if (!rejectNote) await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    const lateReject = await statusOf(axios.patch(`${API_URL}/api/orders/${orderId}/status`, { status: 'CANCELLED', reason: 'too late' }, ownerAuth));
+    const summary154 = (await axios.get(`${API_URL}/api/orders/restaurant/${restaurantId}/summary`, ownerAuth)).data;
+    if (
+      rejected.cancelledBy !== 'RESTAURANT' ||
+      rejected.cancellationReason !== 'The restaurant cancelled this order: Out of stock tonight' ||
+      !rejectNote ||
+      lateReject !== 409 ||
+      !(summary154.orders >= 1) ||
+      summary154.currency !== 'EGP'
+    ) {
+      throw new Error(`Restaurant ops: ${JSON.stringify({ by: rejected.cancelledBy, reason: rejected.cancellationReason, note: !!rejectNote, lateReject, summary154 })}`);
+    }
+    console.log(`Restaurant ops: rejected with a reason (customer notified), late reject 409, today: ${summary154.orders} orders, EGP ${summary154.revenue}`);
+
     console.log('E2E critical-path flow completed successfully!');
   } catch (error: any) {
     console.error('E2E failed:');

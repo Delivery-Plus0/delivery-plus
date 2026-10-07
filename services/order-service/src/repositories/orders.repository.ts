@@ -43,8 +43,10 @@ export class OrdersRepository {
     idempotencyKey: string | undefined,
     delivery: DeliveryAddress,
     event: OrderEventBuilder,
+    customerFirstName: string | null = null,
   ): Promise<Order> {
     const order = this.repo.create({
+      customerFirstName,
       customerId,
       restaurantId,
       status: OrderStatus.CREATED,
@@ -125,6 +127,25 @@ export class OrdersRepository {
       .addSelect(['o.driverFeeShare', 'o.platformFeeShare', 'o.driverCancelFeeShare'])
       .where('o.id = :id', { id })
       .getOne();
+  }
+
+  /**
+   * Today's numbers for a restaurant (#154), "today" being the calendar day in Cairo. Revenue is the
+   * items' subtotal of orders that weren't cancelled or failed; the delivery fee isn't the restaurant's.
+   */
+  async todaySummary(restaurantId: string): Promise<{ orders: number; active: number; delivered: number; cancelled: number; revenue: string }> {
+    const [row] = (await this.repo.query(
+      `SELECT COUNT(*)::int AS "orders",
+              COUNT(*) FILTER (WHERE "status" NOT IN ('DELIVERED', 'CANCELLED', 'FAILED'))::int AS "active",
+              COUNT(*) FILTER (WHERE "status" = 'DELIVERED')::int AS "delivered",
+              COUNT(*) FILTER (WHERE "status" IN ('CANCELLED', 'FAILED'))::int AS "cancelled",
+              COALESCE(SUM(COALESCE("subtotalAmount", "totalAmount")) FILTER (WHERE "status" NOT IN ('CANCELLED', 'FAILED')), 0)::numeric(12,2)::text AS "revenue"
+         FROM "orders"
+        WHERE "restaurantId" = $1
+          AND ("createdAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Cairo')::date = (now() AT TIME ZONE 'Africa/Cairo')::date`,
+      [restaurantId],
+    )) as { orders: number; active: number; delivered: number; cancelled: number; revenue: string }[];
+    return row ?? { orders: 0, active: 0, delivered: 0, cancelled: 0, revenue: '0.00' };
   }
 
   async findByCustomer(

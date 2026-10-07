@@ -1,4 +1,6 @@
 import { DeliveriesService, stageTime } from './deliveries.service';
+import { LedgerRepository } from '../repositories/ledger.repository';
+import { AppConfig } from '../config/app-config';
 import { DeliveriesRepository } from '../repositories/deliveries.repository';
 import { OrderServiceClient } from '../common/order-service.client';
 import { DriverServiceClient, DriverStatusRejectedError } from '../common/driver-service.client';
@@ -33,6 +35,7 @@ describe('DeliveriesService', () => {
   let driverClient: jest.Mocked<DriverServiceClient>;
   let outbox: { kick: jest.Mock };
   let restaurantClient: jest.Mocked<RestaurantServiceClient>;
+  let ledger: { appendOnce: jest.Mock };
 
   const baseDelivery = {
     id: 'delivery-1',
@@ -79,6 +82,7 @@ describe('DeliveriesService', () => {
 
     orderClient = {
       getOrder: jest.fn().mockResolvedValue(orderAt(OrderStatus.READY_FOR_PICKUP)),
+      getFeeSplit: jest.fn().mockResolvedValue({ orderId: 'order-1', deliveryFee: '25.00', driverFeeShare: '12.50', platformFeeShare: '12.50', driverCancelFeeShare: '6.25' }),
       assertReadableBy: jest.fn(),
       updateOrderStatus: jest.fn(),
     } as unknown as jest.Mocked<OrderServiceClient>;
@@ -93,12 +97,15 @@ describe('DeliveriesService', () => {
 
     outbox = { kick: jest.fn() };
     restaurantClient = { getRestaurant: jest.fn() } as unknown as jest.Mocked<RestaurantServiceClient>;
+    ledger = { appendOnce: jest.fn() };
     service = new DeliveriesService(
       deliveries,
       orderClient,
       driverClient,
       outbox as unknown as OutboxRelayService,
       restaurantClient,
+      ledger as unknown as LedgerRepository,
+      { earningsSettlementHours: 12 } as AppConfig,
     );
   });
 
@@ -384,6 +391,7 @@ describe('DeliveriesService', () => {
         DeliveryStatus.DRIVER_ASSIGNED,
         { status: DeliveryStatus.PICKED_UP, pickedUpAt: expect.any(Date) },
         expect.any(Function),
+        undefined,
       );
     });
   });
@@ -407,6 +415,81 @@ describe('DeliveriesService', () => {
       expect(driverClient.releaseDriver).toHaveBeenCalledWith('driver-1');
       expect(orderClient.updateOrderStatus).toHaveBeenCalledWith('order-1', OrderStatus.DELIVERED);
       expect(result.status).toBe(DeliveryStatus.DELIVERED);
+    });
+  });
+
+  describe('earnings ledger (#145)', () => {
+    /** Runs the in-transaction hook passed to the last transition, against a fake manager. */
+    async function runHook() {
+      const calls = deliveries.transition.mock.calls;
+      const call = calls[calls.length - 1];
+      const hook = call[4] as ((manager: unknown, updated: unknown) => Promise<void>) | undefined;
+      if (hook) await hook({}, { ...baseDelivery, driverId: 'driver-1', status: call[2].status });
+      return hook;
+    }
+
+    beforeEach(() => {
+      driverClient.getDriver.mockResolvedValue({ id: 'driver-1', userId: 'user-1', status: DriverStatus.BUSY });
+    });
+
+    it("pays the order's driver share in the same transaction as DELIVERED, pending for the settlement window", async () => {
+      deliveries.findById.mockResolvedValue({ ...baseDelivery, driverId: 'driver-1', status: DeliveryStatus.IN_TRANSIT });
+      deliveries.transition.mockResolvedValue({ ...baseDelivery, driverId: 'driver-1', status: DeliveryStatus.DELIVERED });
+      const before = Date.now();
+
+      await service.complete('delivery-1', 'user-1', UserRole.DRIVER);
+      await runHook();
+
+      expect(orderClient.getFeeSplit).toHaveBeenCalledWith('order-1');
+      expect(ledger.appendOnce).toHaveBeenCalledTimes(1);
+      const entry = ledger.appendOnce.mock.calls[0][1];
+      expect(entry).toMatchObject({ driverId: 'driver-1', deliveryId: 'delivery-1', orderId: 'order-1', type: 'DELIVERY_EARNING', amount: '12.50' });
+      expect(entry.availableAt.getTime() - before).toBeGreaterThanOrEqual(12 * 3600 * 1000 - 50);
+      expect(entry.availableAt.getTime() - before).toBeLessThanOrEqual(12 * 3600 * 1000 + 1000);
+    });
+
+    it('writes nothing again when the completion is retried', async () => {
+      deliveries.findById.mockResolvedValue({ ...baseDelivery, driverId: 'driver-1', status: DeliveryStatus.DELIVERED });
+
+      await service.complete('delivery-1', 'user-1', UserRole.DRIVER);
+
+      expect(deliveries.transition).not.toHaveBeenCalled();
+      expect(orderClient.getFeeSplit).not.toHaveBeenCalled();
+      expect(ledger.appendOnce).not.toHaveBeenCalled();
+    });
+
+    it('pays nothing for orders from before fees existed (share 0)', async () => {
+      orderClient.getFeeSplit.mockResolvedValue({ orderId: 'order-1', deliveryFee: '0.00', driverFeeShare: '0.00', platformFeeShare: '0.00', driverCancelFeeShare: '0.00' });
+      deliveries.findById.mockResolvedValue({ ...baseDelivery, driverId: 'driver-1', status: DeliveryStatus.IN_TRANSIT });
+      deliveries.transition.mockResolvedValue({ ...baseDelivery, driverId: 'driver-1', status: DeliveryStatus.DELIVERED });
+
+      await service.complete('delivery-1', 'user-1', UserRole.DRIVER);
+
+      expect(await runHook()).toBeUndefined();
+      expect(ledger.appendOnce).not.toHaveBeenCalled();
+    });
+
+    it.each([DeliveryStatus.PICKED_UP, DeliveryStatus.IN_TRANSIT])(
+      'compensates the driver with 25%% of the fee when cancelled after pickup (%s)',
+      async (status) => {
+        deliveries.findById.mockResolvedValue({ ...baseDelivery, driverId: 'driver-1', status });
+        deliveries.transition.mockResolvedValue({ ...baseDelivery, driverId: 'driver-1', status: DeliveryStatus.CANCELLED });
+
+        await service.cancel('delivery-1', actor(UserRole.ADMIN));
+        await runHook();
+
+        expect(ledger.appendOnce.mock.calls[0][1]).toMatchObject({ type: 'CANCELLATION_COMPENSATION', amount: '6.25', driverId: 'driver-1' });
+      },
+    );
+
+    it.each([DeliveryStatus.CREATED, DeliveryStatus.DRIVER_ASSIGNED])('pays nothing when cancelled before pickup (%s)', async (status) => {
+      deliveries.findById.mockResolvedValue({ ...baseDelivery, driverId: status === DeliveryStatus.CREATED ? undefined : 'driver-1', status });
+      deliveries.transition.mockResolvedValue({ ...baseDelivery, status: DeliveryStatus.CANCELLED });
+
+      await service.cancel('delivery-1', actor(UserRole.ADMIN));
+
+      expect(orderClient.getFeeSplit).not.toHaveBeenCalled();
+      expect(await runHook()).toBeUndefined();
     });
   });
 

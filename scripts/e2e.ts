@@ -219,6 +219,13 @@ async function runE2E() {
     // 3. Add to Cart
     await axios.post(`${API_URL}/api/cart/items`, { menuItemId, quantity: 2 }, customerAuth);
 
+    // Delivery fee (#145): the quote, the order and the payment all carry the same fee and total.
+    const quote = (await axios.get(`${API_URL}/api/orders/quote`, customerAuth)).data;
+    const piasters = (amount: string) => Math.round(Number(amount) * 100);
+    if (quote.currency !== 'EGP' || piasters(quote.totalAmount) !== piasters(quote.subtotalAmount) + piasters(quote.deliveryFee) || !(piasters(quote.deliveryFee) > 0)) {
+      throw new Error(`Quote: ${JSON.stringify(quote)}`);
+    }
+
     // 4. Create Order (CREATED)
     const orderRes = await axios.post(`${API_URL}/api/orders`, {}, customerAuth);
     const orderId = orderRes.data.id;
@@ -249,6 +256,17 @@ async function runE2E() {
     // but poll briefly in case that side effect had to be retried.
     const paymentRes = await axios.post(`${API_URL}/api/payments`, { orderId }, customerAuth);
     const paymentId = paymentRes.data.id;
+    if (
+      orderRes.data.deliveryFee !== quote.deliveryFee ||
+      orderRes.data.totalAmount !== quote.totalAmount ||
+      Number(paymentRes.data.amount) !== Number(quote.totalAmount) ||
+      'driverFeeShare' in orderRes.data
+    ) {
+      throw new Error(
+        `Fee consistency: quote ${quote.totalAmount} (fee ${quote.deliveryFee}), order ${orderRes.data.totalAmount} (fee ${orderRes.data.deliveryFee}), payment ${paymentRes.data.amount}`,
+      );
+    }
+    console.log(`Delivery fee: EGP ${quote.subtotalAmount} + EGP ${quote.deliveryFee} = EGP ${quote.totalAmount} in the quote, the order and the payment`);
     console.log(`Payment created: ${paymentId} (status ${paymentRes.data.status})`);
 
     await waitFor(
@@ -499,6 +517,21 @@ async function runE2E() {
       throw new Error(`A customer got ${customerHistory} on the driver history, expected 403`);
     }
     console.log(`Driver history: ${done.restaurant?.name ?? '?'} delivered ${done.deliveredAt} (${history.data.total} completed); customer 403`);
+
+    // Earnings ledger (#145): exactly one pending earning for this delivery, half the fee; the
+    // balance equals the sum of the entries; only the driver can read it.
+    const earnings = (await axios.get(`${API_URL}/api/deliveries/me/earnings?limit=50`, driverAuth)).data;
+    const mine = earnings.entries.filter((entry: { deliveryId: string }) => entry.deliveryId === deliveryId);
+    const expectedShare = (Math.floor(piasters(quote.deliveryFee) / 2) / 100).toFixed(2);
+    if (mine.length !== 1 || mine[0].type !== 'DELIVERY_EARNING' || mine[0].amount !== expectedShare || mine[0].status !== 'PENDING') {
+      throw new Error(`Earnings for ${deliveryId}: ${JSON.stringify(mine)}`);
+    }
+    if (piasters(earnings.pending) + piasters(earnings.available) !== piasters(earnings.balance)) {
+      throw new Error(`Earnings totals don't add up: ${JSON.stringify({ pending: earnings.pending, available: earnings.available, balance: earnings.balance })}`);
+    }
+    const customerEarnings = await statusOf(axios.get(`${API_URL}/api/deliveries/me/earnings`, customerAuth));
+    if (customerEarnings !== 403) throw new Error(`A customer got ${customerEarnings} on driver earnings, expected 403`);
+    console.log(`Earnings: one PENDING EGP ${expectedShare} for this delivery (settles in ${earnings.settlementHours} h); customer 403`);
 
     // Ratings (#144): the order's customer rates the driver once; the driver's summary includes it.
     const ratingUrl = `${API_URL}/api/deliveries/${deliveryId}/rating`;

@@ -32,8 +32,30 @@ export class Order {
   @Column({ type: 'enum', enum: OrderStatus, default: OrderStatus.CREATED })
   status!: OrderStatus;
 
+  /** What the customer pays: subtotalAmount + deliveryFee (#145). */
   @Column('decimal', { precision: 10, scale: 2 })
   totalAmount!: string;
+
+  /** The items, as priced at checkout (#145). */
+  @Column('decimal', { precision: 10, scale: 2, nullable: true })
+  subtotalAmount!: string | null;
+
+  /** The delivery fee applied at checkout (#145); 0 for orders from before fees existed. */
+  @Column('decimal', { precision: 10, scale: 2, nullable: true })
+  deliveryFee!: string | null;
+
+  /**
+   * How the fee splits (#145), fixed at checkout. Internal: never selected by default, so customer and
+   * restaurant reads don't carry it; delivery-service reads it through the ADMIN-only fee-split route.
+   */
+  @Column('decimal', { precision: 10, scale: 2, nullable: true, select: false })
+  driverFeeShare?: string | null;
+
+  @Column('decimal', { precision: 10, scale: 2, nullable: true, select: false })
+  platformFeeShare?: string | null;
+
+  @Column('decimal', { precision: 10, scale: 2, nullable: true, select: false })
+  driverCancelFeeShare?: string | null;
 
   @Column({ type: 'varchar', length: 255, nullable: true })
   idempotencyKey?: string | null;

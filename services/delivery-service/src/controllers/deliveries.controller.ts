@@ -10,6 +10,8 @@ import { DriverHistoryPageDto, DriverHistoryQueryDto } from '../dto/driver-deliv
 import { DriverHistoryService } from '../services/driver-history.service';
 import { CreateRatingDto, DeliveryRatingStatusDto, DriverRatingSummaryDto, RatingDto } from '../dto/rating.dto';
 import { RatingsService } from '../services/ratings.service';
+import { DriverEarnings, EarningsService } from '../services/earnings.service';
+import { EarningsQueryDto } from '../dto/earnings-query.dto';
 
 @ApiTags('deliveries')
 @ApiBearerAuth()
@@ -21,6 +23,7 @@ export class DeliveriesController {
     private readonly driverCards: DriverCardService,
     private readonly driverHistory: DriverHistoryService,
     private readonly ratings: RatingsService,
+    private readonly earnings: EarningsService,
   ) {}
 
   @Post()
@@ -92,6 +95,17 @@ export class DeliveriesController {
   @ApiOkResponse({ type: DriverHistoryPageDto })
   getMyHistory(@Headers('authorization') authHeader: string, @Query() query: DriverHistoryQueryDto): Promise<DriverHistoryPageDto> {
     return this.driverHistory.getForDriver(authHeader, query);
+  }
+
+  @Get('me/earnings')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.DRIVER)
+  @ApiOperation({
+    summary: "The calling driver's earnings from the ledger: pending, available, balance and entries (#145)",
+    description: 'Earnings are PENDING for the settlement window after completion, then AVAILABLE (internal wallet only, no payouts).',
+  })
+  getMyEarnings(@Headers('authorization') authHeader: string, @Query() query: EarningsQueryDto): Promise<DriverEarnings> {
+    return this.earnings.getForDriver(authHeader, query.page, query.limit);
   }
 
   @Get('me/rating-summary')

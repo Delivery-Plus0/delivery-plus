@@ -1,3 +1,5 @@
+import { PricingPolicy, pricingFromEnv } from '../common/pricing';
+
 export const APP_CONFIG = Symbol('APP_CONFIG');
 
 export interface AppConfig {
@@ -11,6 +13,8 @@ export interface AppConfig {
   userServiceUrl: string;
   internalAuthService: string;
   internalAuthSecret: string;
+  /** Delivery fee and its split (#145); see common/pricing.ts. */
+  pricing: PricingPolicy;
 }
 
 export function loadConfig(): AppConfig {
@@ -31,6 +35,7 @@ export function loadConfig(): AppConfig {
     userServiceUrl: process.env.USER_SERVICE_URL || 'http://localhost:3002',
     internalAuthService: process.env.INTERNAL_AUTH_SERVICE || 'order-service',
     internalAuthSecret: requireInternalAuthSecret(),
+    pricing: pricingFromEnv(process.env),
   };
 }
 

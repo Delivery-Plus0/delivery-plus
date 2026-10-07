@@ -63,6 +63,22 @@ export class OrdersController {
     return this.ordersService.listByRestaurant(restaurantId, user.sub, query.page, query.limit);
   }
 
+  @Get('quote')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.CUSTOMER)
+  @ApiOperation({ summary: "Price the caller's current cart: subtotal, delivery fee and total in EGP (#145)" })
+  quote(@Headers('authorization') authHeader: string) {
+    return this.ordersService.quote(authHeader);
+  }
+
+  @Get(':id/fee-split')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: "An order's internal delivery-fee split (ADMIN / service token only, #145)" })
+  getFeeSplit(@Param('id') id: string) {
+    return this.ordersService.getFeeSplit(id);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get an order by id (owner, restaurant owner, or admin)' })
   getById(@Param('id') id: string, @CurrentUser() user: JwtPayload) {

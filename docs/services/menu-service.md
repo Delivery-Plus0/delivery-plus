@@ -16,6 +16,15 @@ From `services/menu-service/src/controllers/menu.controller.ts`:
 - `POST /menu-items/:id/image-upload-url` – create a presigned item-image POST policy (restaurant owner only)
 - `POST /menu-items/:id/image-confirm` – verify the uploaded image and save its public URL (restaurant owner only)
 
+## Menu management (#148)
+
+Owner-only writes, each checked against restaurant ownership (another owner gets 403):
+
+- **Items:** create and edit with a name of 1–100 characters (trimmed), a description of up to 500, a price above 0 and at most 100,000 (EGP), and a category of the same restaurant.
+- **Archive, not delete:** `DELETE /menu-items/:id` sets `archivedAt` and `available=false`. The item leaves the public menu and carts reject it (400 "not currently available"). It stays a valid reference for past orders, which keep their own name and price snapshot anyway. Archiving twice is a no-op. Editing or toggling an archived item is 409. Un-archiving is not offered yet.
+- **Categories:** `PATCH /categories/:id` renames or moves one. `PATCH /restaurants/:restaurantId/categories/order` sets the order of all of them; the list must name each category exactly once. `DELETE /categories/:id` only works when no item on the menu is in it (409 with how many are left); archived items in it just lose the category.
+- Migration 003 adds `menu_items.archivedAt` and an index on `(restaurantId, archivedAt)`.
+
 ## Dependencies
 - Calls `restaurant-service` to validate ownership via `src/common/restaurant-service.client.ts`; these checks use the shared HMAC internal-auth contract
 - Uses the shared S3 storage service for menu item image objects

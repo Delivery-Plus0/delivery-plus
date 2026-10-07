@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsNumber, IsOptional, IsPositive, IsString, IsUUID } from 'class-validator';
+import { IsNumber, IsOptional, IsPositive, IsString, IsUUID, Max, MaxLength, MinLength } from 'class-validator';
+import { Transform } from 'class-transformer';
 
 export class CreateMenuItemDto {
   @ApiProperty({
@@ -24,6 +25,9 @@ export class CreateMenuItemDto {
     example: 'Margherita Pizza',
   })
   @IsString()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @MinLength(1)
+  @MaxLength(100)
   name!: string;
 
   @ApiPropertyOptional({
@@ -32,6 +36,7 @@ export class CreateMenuItemDto {
   })
   @IsOptional()
   @IsString()
+  @MaxLength(500)
   description?: string;
 
   @ApiProperty({
@@ -41,6 +46,7 @@ export class CreateMenuItemDto {
   })
   @IsNumber()
   @IsPositive()
+  @Max(100000)
   price!: number;
 
 }

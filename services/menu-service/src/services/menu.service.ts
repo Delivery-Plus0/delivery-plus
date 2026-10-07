@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { BadRequestError, NotFoundError, CacheService, S3StorageService } from '@food-delivery/shared';
+import { BadRequestError, ConflictError, NotFoundError, CacheService, S3StorageService } from '@food-delivery/shared';
+import { ReorderCategoriesDto, UpdateCategoryDto } from '../dto/manage-categories.dto';
 import { CategoriesRepository } from '../repositories/categories.repository';
 import { MenuItemsRepository } from '../repositories/menu-items.repository';
 import { RestaurantServiceClient } from '../common/restaurant-service.client';
@@ -38,6 +39,40 @@ export class MenuService {
     return category;
   }
 
+  async updateCategory(id: string, requesterId: string, dto: UpdateCategoryDto): Promise<Category> {
+    const category = await this.findCategoryOrThrow(id);
+    await this.restaurantClient.assertOwnership(category.restaurantId, requesterId);
+    const updated = await this.categories.update(id, { ...(dto.name !== undefined ? { name: dto.name } : {}), ...(dto.displayOrder !== undefined ? { displayOrder: dto.displayOrder } : {}) });
+    await this.cache.del(`menu:${category.restaurantId}`);
+    return updated as Category;
+  }
+
+  /** Only an empty category can go (#148); archived items in it just lose the category. */
+  async deleteCategory(id: string, requesterId: string): Promise<void> {
+    const category = await this.findCategoryOrThrow(id);
+    await this.restaurantClient.assertOwnership(category.restaurantId, requesterId);
+    const live = await this.menuItems.countLiveInCategory(id);
+    if (live > 0) {
+      throw new ConflictError(`Move or archive the ${live} item${live === 1 ? '' : 's'} in this category first.`);
+    }
+    await this.menuItems.detachArchivedFromCategory(id);
+    await this.categories.delete(id);
+    await this.cache.del(`menu:${category.restaurantId}`);
+  }
+
+  /** The new order must list every category of the restaurant exactly once. */
+  async reorderCategories(restaurantId: string, requesterId: string, dto: ReorderCategoriesDto): Promise<Category[]> {
+    await this.restaurantClient.assertOwnership(restaurantId, requesterId);
+    const existing = await this.categories.findByRestaurant(restaurantId);
+    const known = new Set(existing.map((category) => category.id));
+    if (dto.categoryIds.length !== known.size || dto.categoryIds.some((id) => !known.has(id))) {
+      throw new BadRequestError('categoryIds must list every category of this restaurant exactly once');
+    }
+    await this.categories.reorder(dto.categoryIds);
+    await this.cache.del(`menu:${restaurantId}`);
+    return this.categories.findByRestaurant(restaurantId);
+  }
+
   async getMenu(restaurantId: string): Promise<MenuResponse> {
     return this.cache.getOrSet(`menu:${restaurantId}`, async () => {
       const [categories, items] = await Promise.all([
@@ -61,12 +96,7 @@ export class MenuService {
   async createItem(requesterId: string, dto: CreateMenuItemDto): Promise<MenuItem> {
     await this.restaurantClient.assertOwnership(dto.restaurantId, requesterId);
 
-    if (dto.categoryId) {
-      const category = await this.categories.findById(dto.categoryId);
-      if (!category || category.restaurantId !== dto.restaurantId) {
-        throw new BadRequestError('categoryId does not belong to this restaurant');
-      }
-    }
+    if (dto.categoryId) await this.assertCategoryOf(dto.categoryId, dto.restaurantId);
 
     const item = await this.menuItems.create({
       restaurantId: dto.restaurantId,
@@ -82,18 +112,25 @@ export class MenuService {
   async updateItem(id: string, requesterId: string, dto: UpdateMenuItemDto): Promise<MenuItem> {
     const item = await this.getItem(id);
     await this.restaurantClient.assertOwnership(item.restaurantId, requesterId);
+    this.assertNotArchived(item);
+    if (dto.categoryId) await this.assertCategoryOf(dto.categoryId, item.restaurantId);
     const updated = await this.menuItems.update(id, dto);
     await this.cache.del(`menu:${item.restaurantId}`);
     await this.cache.del(`menuitem:${id}`);
     return updated as MenuItem;
   }
 
-  async deleteItem(id: string, requesterId: string): Promise<void> {
+  /**
+   * DELETE /menu-items/:id archives (#148): the item leaves the menu and can't be added to carts
+   * (available false), but past orders and existing references stay valid. Repeating it is a no-op.
+   */
+  async archiveItem(id: string, requesterId: string, now = new Date()): Promise<MenuItem> {
     const item = await this.getItem(id);
     await this.restaurantClient.assertOwnership(item.restaurantId, requesterId);
-    await this.menuItems.delete(id);
+    const archived = item.archivedAt ? item : await this.menuItems.archive(id, now);
     await this.cache.del(`menu:${item.restaurantId}`);
     await this.cache.del(`menuitem:${id}`);
+    return archived as MenuItem;
   }
 
   async updateAvailability(
@@ -103,6 +140,7 @@ export class MenuService {
   ): Promise<MenuItem> {
     const item = await this.getItem(id);
     await this.restaurantClient.assertOwnership(item.restaurantId, requesterId);
+    this.assertNotArchived(item);
     const updated = await this.menuItems.update(id, { available: dto.available });
     await this.cache.del(`menu:${item.restaurantId}`);
     await this.cache.del(`menuitem:${id}`);
@@ -131,5 +169,23 @@ export class MenuService {
     await this.cache.del(`menu:${item.restaurantId}`);
     await this.cache.del(`menuitem:${id}`);
     return updated as MenuItem;
+  }
+
+  private async findCategoryOrThrow(id: string): Promise<Category> {
+    const category = await this.categories.findById(id);
+    if (!category) throw new NotFoundError(`Category ${id} not found`);
+    return category;
+  }
+
+  private async assertCategoryOf(categoryId: string, restaurantId: string): Promise<void> {
+    const category = await this.categories.findById(categoryId);
+    if (!category || category.restaurantId !== restaurantId) {
+      throw new BadRequestError('categoryId does not belong to this restaurant');
+    }
+  }
+
+  /** Archived items are kept for history only; un-archiving is not offered yet. */
+  private assertNotArchived(item: MenuItem): void {
+    if (item.archivedAt) throw new ConflictError('This item is archived and can no longer be changed.');
   }
 }

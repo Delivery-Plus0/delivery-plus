@@ -578,6 +578,48 @@ async function runE2E() {
     }
     console.log('Order outcomes: declined → PAYMENT (payment FAILED), customer cancel → CUSTOMER; list filters completed/cancelled');
 
+    // Menu management (#148): the owner creates, edits and archives an item; customers never see the
+    // archived item, it can't be added to a cart, and another owner can't touch the menu.
+    const category = (await axios.post(`${API_URL}/api/menus/categories`, { restaurantId, name: 'E2E Specials' }, ownerAuth)).data;
+    const created = (
+      await axios.post(
+        `${API_URL}/api/menus/menu-items`,
+        { restaurantId, categoryId: category.id, name: '  E2E Soup  ', description: 'Made for the test', price: 4.5 },
+        ownerAuth,
+      )
+    ).data;
+    const edited = (await axios.patch(`${API_URL}/api/menus/menu-items/${created.id}`, { name: 'E2E Soup of the day', price: 5 }, ownerAuth)).data;
+    const nonEmptyCategoryDelete = await statusOf(axios.delete(`${API_URL}/api/menus/categories/${category.id}`, ownerAuth));
+    const strangerOwner = await axios.post(`${API_URL}/api/auth/register`, {
+      email: `e2e.owner.${Date.now()}@example.com`,
+      password: 'password123',
+      fullName: 'E2E Other Owner',
+      role: 'RESTAURANT_OWNER',
+    });
+    const strangerAuth = { headers: { Authorization: `Bearer ${strangerOwner.data.accessToken}` } };
+    const strangerEdit = await statusOf(axios.patch(`${API_URL}/api/menus/categories/${category.id}`, { name: 'Mine now' }, strangerAuth));
+    const strangerArchive = await statusOf(axios.delete(`${API_URL}/api/menus/menu-items/${created.id}`, strangerAuth));
+    await axios.delete(`${API_URL}/api/menus/menu-items/${created.id}`, ownerAuth);
+    const publicMenu = (await axios.get(`${API_URL}/api/menus/restaurants/${restaurantId}/menu`, customerAuth)).data;
+    const archivedToCart = await statusOf(axios.post(`${API_URL}/api/cart/items`, { menuItemId: created.id, quantity: 1 }, customerAuth));
+    const editArchived = await statusOf(axios.patch(`${API_URL}/api/menus/menu-items/${created.id}`, { price: 6 }, ownerAuth));
+    await axios.delete(`${API_URL}/api/menus/categories/${category.id}`, ownerAuth);
+    if (
+      created.name !== 'E2E Soup' ||
+      edited.name !== 'E2E Soup of the day' ||
+      nonEmptyCategoryDelete !== 409 ||
+      strangerEdit !== 403 ||
+      strangerArchive !== 403 ||
+      publicMenu.items.some((menuItem: { id: string }) => menuItem.id === created.id) ||
+      archivedToCart !== 400 ||
+      editArchived !== 409
+    ) {
+      throw new Error(
+        `Menu management: ${JSON.stringify({ created: created.name, edited: edited.name, nonEmptyCategoryDelete, strangerEdit, strangerArchive, archivedToCart, editArchived })}`,
+      );
+    }
+    console.log('Menu management: create → edit → archive; hidden from customers, not addable (400), not editable (409); other owner 403');
+
     console.log('E2E critical-path flow completed successfully!');
   } catch (error: any) {
     console.error('E2E failed:');

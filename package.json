@@ -28,7 +28,7 @@
     "e2e:env:reset": "npm run e2e:env:down && npm run e2e:env:up && npm run seed:e2e"
   },
   "devDependencies": {
-    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/eslint-plugin": "^8.71.1",
     "@typescript-eslint/parser": "^7.18.0",
     "eslint": "^8.57.0",
     "eslint-config-prettier": "^9.1.0",

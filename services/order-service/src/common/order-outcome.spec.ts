@@ -7,6 +7,7 @@ describe('outcomeFor', () => {
       expect(outcomeFor(OrderStatus.FAILED, role)).toEqual({
         cancelledBy: OrderEndedBy.PAYMENT,
         cancellationReason: 'Your payment was declined, so the order was not placed.',
+        cancellationNote: null,
       });
     }
   });
@@ -15,6 +16,7 @@ describe('outcomeFor', () => {
     expect(outcomeFor(OrderStatus.CANCELLED, UserRole.CUSTOMER, 'whatever')).toEqual({
       cancelledBy: OrderEndedBy.CUSTOMER,
       cancellationReason: 'You cancelled this order.',
+      cancellationNote: null,
     });
   });
 
@@ -22,10 +24,13 @@ describe('outcomeFor', () => {
     expect(outcomeFor(OrderStatus.CANCELLED, UserRole.RESTAURANT_OWNER)).toEqual({
       cancelledBy: OrderEndedBy.RESTAURANT,
       cancellationReason: 'The restaurant cancelled this order.',
+      cancellationNote: null,
     });
     expect(outcomeFor(OrderStatus.CANCELLED, UserRole.RESTAURANT_OWNER, '  Out of stock ')).toEqual({
       cancelledBy: OrderEndedBy.RESTAURANT,
       cancellationReason: 'The restaurant cancelled this order: Out of stock',
+      // #151: the owner's own words, without the English lead-in, for localized reasons.
+      cancellationNote: 'Out of stock',
     });
   });
 
@@ -33,6 +38,7 @@ describe('outcomeFor', () => {
     expect(outcomeFor(OrderStatus.CANCELLED, UserRole.ADMIN)).toEqual({
       cancelledBy: OrderEndedBy.SYSTEM,
       cancellationReason: 'Delivery Plus cancelled this order.',
+      cancellationNote: null,
     });
   });
 

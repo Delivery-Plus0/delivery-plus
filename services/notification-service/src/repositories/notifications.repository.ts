@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Notification, NotificationType } from '../entities/notification.entity';
+import { Notification, NotificationType, NotificationParams } from '../entities/notification.entity';
 
 @Injectable()
 export class NotificationsRepository {
@@ -10,8 +10,14 @@ export class NotificationsRepository {
     private readonly repo: Repository<Notification>,
   ) {}
 
-  async create(userId: string, type: NotificationType, title: string, message: string): Promise<Notification> {
-    const notification = this.repo.create({ userId, type, title, message });
+  async create(
+    userId: string,
+    type: NotificationType,
+    title: string,
+    message: string,
+    localized: { messageKey?: string | null; params?: NotificationParams | null } = {},
+  ): Promise<Notification> {
+    const notification = this.repo.create({ userId, type, title, message, messageKey: localized.messageKey ?? null, params: localized.params ?? null });
     return this.repo.save(notification);
   }
 

@@ -93,6 +93,7 @@ describe('NotificationsService', () => {
         NotificationType.ORDER_CONFIRMED,
         'Order Confirmed',
         'Your order order-42 has been confirmed.',
+        { messageKey: 'order.confirmed', params: { orderId: 'order-42' } },
       );
     });
   });
@@ -124,6 +125,7 @@ describe('NotificationsService', () => {
           status: 'CANCELLED',
           cancelledBy: 'RESTAURANT',
           cancellationReason: 'The restaurant cancelled this order: Out of falafel',
+          cancellationNote: 'Out of falafel',
         }),
       );
 
@@ -132,6 +134,8 @@ describe('NotificationsService', () => {
         NotificationType.ORDER_CANCELLED,
         'Order cancelled',
         'The restaurant cancelled this order: Out of falafel',
+        // #151: the apps render it in the reader's language from the key and params.
+        { messageKey: 'order.cancelled', params: { orderId: 'order-42', cancelledBy: 'RESTAURANT', note: 'Out of falafel' } },
       );
     });
 
@@ -152,17 +156,18 @@ describe('NotificationsService', () => {
         NotificationType.PAYMENT_COMPLETED,
         'Payment Received',
         'We received your payment for order order-42.',
+        { messageKey: 'payment.completed', params: { orderId: 'order-42' } },
       );
     });
 
     it.each([
-      [DeliveryEventType.DRIVER_ASSIGNED, NotificationType.DRIVER_ASSIGNED, 'Driver Assigned', 'A driver is on the way to pick up your order order-42.'],
-      [DeliveryEventType.PICKED_UP, NotificationType.PICKED_UP, 'Order Picked Up', 'Your order order-42 has been picked up and is on its way.'],
-      [DeliveryEventType.COMPLETED, NotificationType.DELIVERED, 'Order Delivered', 'Your order order-42 has been delivered. Enjoy!'],
-    ])('notifies the customer on %s', async (eventType, type, title, message) => {
+      [DeliveryEventType.DRIVER_ASSIGNED, NotificationType.DRIVER_ASSIGNED, 'Driver Assigned', 'A driver is on the way to pick up your order order-42.', 'delivery.driver_assigned'],
+      [DeliveryEventType.PICKED_UP, NotificationType.PICKED_UP, 'Order Picked Up', 'Your order order-42 has been picked up and is on its way.', 'delivery.picked_up'],
+      [DeliveryEventType.COMPLETED, NotificationType.DELIVERED, 'Order Delivered', 'Your order order-42 has been delivered. Enjoy!', 'delivery.delivered'],
+    ])('notifies the customer on %s', async (eventType, type, title, message, messageKey) => {
       await handlerFor(eventType)(event(eventType, { deliveryId: 'd1', orderId: 'order-42', customerId: 'customer-1', status: 'X' }));
 
-      expect(repository.create).toHaveBeenCalledWith('customer-1', type, title, message);
+      expect(repository.create).toHaveBeenCalledWith('customer-1', type, title, message, { messageKey, params: { orderId: 'order-42' } });
     });
 
     it.each([PaymentEventType.COMPLETED, DeliveryEventType.DRIVER_ASSIGNED, DeliveryEventType.PICKED_UP, DeliveryEventType.COMPLETED])(
@@ -207,6 +212,7 @@ describe('NotificationsService', () => {
         NotificationType.DELIVERED,
         'Delivered',
         'Your order is here.',
+        {},
       );
       expect(result).toBe(createdNotification);
     });

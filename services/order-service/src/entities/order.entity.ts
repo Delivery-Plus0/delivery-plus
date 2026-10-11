@@ -88,6 +88,10 @@ export class Order {
   @Column({ type: 'varchar', length: 300, nullable: true })
   cancellationReason!: string | null;
 
+  /** #151: the canceller's own words, without the lead-in, for localized reasons. Null when none was given. */
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  cancellationNote!: string | null;
+
   /** PENDING / COMPLETED / FAILED, from the payment events this service consumes (#143). */
   @Column({ type: 'varchar', length: 20, nullable: true })
   paymentStatus!: string | null;

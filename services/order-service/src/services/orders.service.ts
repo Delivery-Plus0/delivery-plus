@@ -93,6 +93,7 @@ function orderEvent(order: Order, eventType: OrderEventType): OrderEvent {
       status: order.status,
       ...(order.cancelledBy ? { cancelledBy: order.cancelledBy as OrderPayload['cancelledBy'] } : {}),
       ...(order.cancellationReason ? { cancellationReason: order.cancellationReason } : {}),
+      ...(order.cancellationNote ? { cancellationNote: order.cancellationNote } : {}),
     },
   };
 }

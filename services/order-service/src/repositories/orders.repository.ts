@@ -95,7 +95,7 @@ export class OrdersRepository {
     from: OrderStatus,
     to: OrderStatus,
     event: OrderEventBuilder,
-    outcome: Partial<Pick<Order, 'cancelledBy' | 'cancellationReason'>> = {},
+    outcome: Partial<Pick<Order, 'cancelledBy' | 'cancellationReason' | 'cancellationNote'>> = {},
   ): Promise<Order | null> {
     return this.repo.manager.transaction(async (manager) => {
       const orders = manager.getRepository(Order);

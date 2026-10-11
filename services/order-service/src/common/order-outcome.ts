@@ -20,6 +20,8 @@ export const CANCELLATION_REASON_MAX = 200;
 export interface OrderOutcome {
   cancelledBy: OrderEndedBy;
   cancellationReason: string;
+  /** #151: the restaurant's or platform's own words, without the lead-in; null when none was given. */
+  cancellationNote: string | null;
 }
 
 /**
@@ -30,23 +32,25 @@ export interface OrderOutcome {
  */
 export function outcomeFor(target: OrderStatus, role: UserRole, reason?: string | null): OrderOutcome | null {
   if (target === OrderStatus.FAILED) {
-    return { cancelledBy: OrderEndedBy.PAYMENT, cancellationReason: 'Your payment was declined, so the order was not placed.' };
+    return { cancelledBy: OrderEndedBy.PAYMENT, cancellationReason: 'Your payment was declined, so the order was not placed.', cancellationNote: null };
   }
   if (target !== OrderStatus.CANCELLED) return null;
 
   const given = reason?.trim();
   switch (role) {
     case UserRole.CUSTOMER:
-      return { cancelledBy: OrderEndedBy.CUSTOMER, cancellationReason: 'You cancelled this order.' };
+      return { cancelledBy: OrderEndedBy.CUSTOMER, cancellationReason: 'You cancelled this order.', cancellationNote: null };
     case UserRole.RESTAURANT_OWNER:
       return {
         cancelledBy: OrderEndedBy.RESTAURANT,
         cancellationReason: given ? `The restaurant cancelled this order: ${given}` : 'The restaurant cancelled this order.',
+        cancellationNote: given || null,
       };
     default:
       return {
         cancelledBy: OrderEndedBy.SYSTEM,
         cancellationReason: given ? `Delivery Plus cancelled this order: ${given}` : 'Delivery Plus cancelled this order.',
+        cancellationNote: given || null,
       };
   }
 }

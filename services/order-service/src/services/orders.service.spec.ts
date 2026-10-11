@@ -40,6 +40,7 @@ describe('OrdersService', () => {
     deliveryLongitude: null,
     cancelledBy: null,
     cancellationReason: null,
+    cancellationNote: null,
     paymentStatus: null,
     customerFirstName: null,
     subtotalAmount: '9.99',
@@ -371,6 +372,7 @@ describe('OrdersService', () => {
       expect(orders.updateStatus).toHaveBeenCalledWith('order-1', baseOrder.status, OrderStatus.CANCELLED, expect.any(Function), {
         cancelledBy: 'CUSTOMER',
         cancellationReason: 'You cancelled this order.',
+        cancellationNote: null,
       });
     });
 
@@ -383,6 +385,7 @@ describe('OrdersService', () => {
       expect(orders.updateStatus).toHaveBeenCalledWith('order-1', OrderStatus.CONFIRMED, OrderStatus.CANCELLED, expect.any(Function), {
         cancelledBy: 'RESTAURANT',
         cancellationReason: 'The restaurant cancelled this order: Kitchen closed early',
+        cancellationNote: 'Kitchen closed early',
       });
     });
 
@@ -473,6 +476,7 @@ describe('OrdersService', () => {
       expect(orders.updateStatus).toHaveBeenCalledWith('order-1', OrderStatus.PAYMENT_PENDING, OrderStatus.FAILED, expect.any(Function), {
         cancelledBy: 'PAYMENT',
         cancellationReason: 'Your payment was declined, so the order was not placed.',
+        cancellationNote: null,
       });
       expect(orders.recordPaymentStatus).toHaveBeenCalledWith('order-1', 'FAILED');
       expect((await staged())[0].eventType).toBe(OrderEventType.FAILED);

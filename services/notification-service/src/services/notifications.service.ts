@@ -1,13 +1,16 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { NotificationsRepository } from '../repositories/notifications.repository';
 import { NotFoundError, PaginatedResult, KafkaConsumerService, TOPICS, OrderEventType, OrderEvent, PaymentEventType, PaymentEvent, DeliveryEventType, DeliveryEvent } from '@food-delivery/shared';
-import { Notification, NotificationType } from '../entities/notification.entity';
+import { Notification, NotificationParams, NotificationType } from '../entities/notification.entity';
 
-/** Delivery stages that notify the customer: (event, notification type, title, message). */
-const DELIVERY_NOTIFICATIONS: Array<[DeliveryEventType, NotificationType, string, (orderId: string) => string]> = [
-  [DeliveryEventType.DRIVER_ASSIGNED, NotificationType.DRIVER_ASSIGNED, 'Driver Assigned', (id) => `A driver is on the way to pick up your order ${id}.`],
-  [DeliveryEventType.PICKED_UP, NotificationType.PICKED_UP, 'Order Picked Up', (id) => `Your order ${id} has been picked up and is on its way.`],
-  [DeliveryEventType.COMPLETED, NotificationType.DELIVERED, 'Order Delivered', (id) => `Your order ${id} has been delivered. Enjoy!`],
+/**
+ * Delivery stages that notify the customer: (event, notification type, message key, English title, message).
+ * The key and params let the apps show the notification in the reader's language (#151).
+ */
+const DELIVERY_NOTIFICATIONS: Array<[DeliveryEventType, NotificationType, string, string, (orderId: string) => string]> = [
+  [DeliveryEventType.DRIVER_ASSIGNED, NotificationType.DRIVER_ASSIGNED, 'delivery.driver_assigned', 'Driver Assigned', (id) => `A driver is on the way to pick up your order ${id}.`],
+  [DeliveryEventType.PICKED_UP, NotificationType.PICKED_UP, 'delivery.picked_up', 'Order Picked Up', (id) => `Your order ${id} has been picked up and is on its way.`],
+  [DeliveryEventType.COMPLETED, NotificationType.DELIVERED, 'delivery.delivered', 'Order Delivered', (id) => `Your order ${id} has been delivered. Enjoy!`],
 ];
 
 @Injectable()
@@ -29,6 +32,7 @@ export class NotificationsService implements OnModuleInit {
           NotificationType.ORDER_CONFIRMED,
           'Order Confirmed',
           `Your order ${event.payload.orderId} has been confirmed.`,
+          { messageKey: 'order.confirmed', params: { orderId: event.payload.orderId } },
         );
       },
     );
@@ -38,15 +42,18 @@ export class NotificationsService implements OnModuleInit {
       PaymentEventType.COMPLETED,
       async (event) => {
         await this.notifyCustomer(event.payload.customerId, event, NotificationType.PAYMENT_COMPLETED, 'Payment Received',
-          `We received your payment for order ${event.payload.orderId}.`);
+          `We received your payment for order ${event.payload.orderId}.`, { messageKey: 'payment.completed', params: { orderId: event.payload.orderId } });
       },
     );
 
     // Delivery events: one notification per stage the customer sees. delivery.created (a driver is being
     // found) and delivery.in_transit (no matching notification type) are not notified.
-    for (const [eventType, type, title, message] of DELIVERY_NOTIFICATIONS) {
+    for (const [eventType, type, messageKey, title, message] of DELIVERY_NOTIFICATIONS) {
       await this.kafkaConsumer.subscribe<DeliveryEvent['payload']>(TOPICS.DELIVERY_EVENTS, eventType, async (event) => {
-        await this.notifyCustomer(event.payload.customerId, event, type, title, message(event.payload.orderId));
+        await this.notifyCustomer(event.payload.customerId, event, type, title, message(event.payload.orderId), {
+          messageKey,
+          params: { orderId: event.payload.orderId },
+        });
       });
     }
 
@@ -60,6 +67,14 @@ export class NotificationsService implements OnModuleInit {
         NotificationType.ORDER_CANCELLED,
         'Order cancelled',
         event.payload.cancellationReason ?? `Your order ${event.payload.orderId} was cancelled.`,
+        {
+          messageKey: 'order.cancelled',
+          params: {
+            orderId: event.payload.orderId,
+            ...(event.payload.cancelledBy ? { cancelledBy: event.payload.cancelledBy } : {}),
+            ...(event.payload.cancellationNote ? { note: event.payload.cancellationNote } : {}),
+          },
+        },
       );
     });
 
@@ -77,16 +92,23 @@ export class NotificationsService implements OnModuleInit {
     type: NotificationType,
     title: string,
     message: string,
+    localized: { messageKey: string; params: NotificationParams },
   ): Promise<void> {
     if (!customerId) {
       this.logger.warn(`Not notifying for ${event.eventType} ${event.eventId}: the event has no customerId`);
       return;
     }
-    await this.createNotification(customerId, type, title, message);
+    await this.createNotification(customerId, type, title, message, localized);
   }
 
-  async createNotification(userId: string, type: NotificationType, title: string, message: string): Promise<Notification> {
-    return this.notifications.create(userId, type, title, message);
+  async createNotification(
+    userId: string,
+    type: NotificationType,
+    title: string,
+    message: string,
+    localized: { messageKey?: string | null; params?: NotificationParams | null } = {},
+  ): Promise<Notification> {
+    return this.notifications.create(userId, type, title, message, localized);
   }
 
   async listForUser(userId: string, page: number, limit: number): Promise<PaginatedResult<Notification>> {

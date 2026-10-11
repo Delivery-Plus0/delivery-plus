@@ -10,6 +10,19 @@ From `services/notification-service/src/controllers/notifications.controller.ts`
 - `PATCH /notifications/:id/read` – mark one notification as read
 - `PATCH /notifications/read-all` – mark all notifications as read
 
+## Localized text (#151)
+
+Each notification stores a **message key and its parameters** next to the English `title`/`message`. That way the apps can show it in the reader's language (Arabic or English). Older clients keep using the English text. Older rows have no key and are shown as stored.
+
+| `messageKey` | `params` |
+| --- | --- |
+| `order.confirmed` | `orderId` |
+| `payment.completed` | `orderId` |
+| `delivery.driver_assigned`, `delivery.picked_up`, `delivery.delivered` | `orderId` |
+| `order.cancelled` | `orderId`; `cancelledBy` (`RESTAURANT` / `SYSTEM`); `note`, the canceller's own words shown as written, when one was given |
+
+Parameters never hold personal data. Migration 004 adds both columns, nullable: `messageKey` (varchar(64)) and `params` (jsonb).
+
 ## Dependencies
 - Uses PostgreSQL to persist notifications
 - Subscribes to Kafka topics emitted by order, payment, and delivery flows

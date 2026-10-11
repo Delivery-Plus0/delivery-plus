@@ -50,6 +50,8 @@ Migration 005 backfills only what the stored status proves: FAILED orders → `P
 
 `GET /orders?status=active|completed|cancelled` filters the customer's list: `cancelled` covers CANCELLED and FAILED.
 
+**Cancellation note (#151).** When a restaurant or the platform gives a reason, its own words are also stored as `cancellationNote` (varchar(200), migration 008), without the English lead-in. The note is sent on `order.cancelled` events, so the apps can show the reason in the reader's language with the note inside it. `cancellationReason` stays the English sentence.
+
 ## Restaurant operations (#154)
 
 - **Rejecting an order:** a restaurant owner may cancel (reject) an order only while it is **CONFIRMED**, before preparing starts. From PREPARING on, it's a 409: "An order can only be rejected before you start preparing it."

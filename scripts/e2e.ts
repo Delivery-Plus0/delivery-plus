@@ -748,7 +748,7 @@ async function runE2E() {
     await axios.patch(`${API_URL}/api/orders/${rejectId}/status`, { status: 'CANCELLED', reason: 'Out of stock tonight' }, ownerAuth);
     const rejected = await waitForOrderFields(rejectId, (order) => order.status === 'CANCELLED', 'expected CANCELLED');
     const deadlineNote = Date.now() + 20_000;
-    let rejectNote: { message?: string } | undefined;
+    let rejectNote: { message?: string; messageKey?: string; params?: Record<string, string> } | undefined;
     while (!rejectNote && Date.now() < deadlineNote) {
       const notes = (await axios.get(`${API_URL}/api/notifications?limit=50`, customerAuth)).data;
       rejectNote = (notes.items ?? notes).find((note: { type?: string; message?: string }) => note.type === 'ORDER_CANCELLED' && note.message?.includes('Out of stock tonight'));
@@ -760,6 +760,11 @@ async function runE2E() {
       rejected.cancelledBy !== 'RESTAURANT' ||
       rejected.cancellationReason !== 'The restaurant cancelled this order: Out of stock tonight' ||
       !rejectNote ||
+      // #151: the owner's words are kept apart, and the notification carries a key + params for the apps.
+      rejected.cancellationNote !== 'Out of stock tonight' ||
+      rejectNote.messageKey !== 'order.cancelled' ||
+      rejectNote.params?.note !== 'Out of stock tonight' ||
+      rejectNote.params?.cancelledBy !== 'RESTAURANT' ||
       lateReject !== 409 ||
       !(summary154.orders >= 1) ||
       summary154.currency !== 'EGP'

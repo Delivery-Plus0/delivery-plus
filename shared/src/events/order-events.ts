@@ -23,6 +23,8 @@ export interface OrderPayload {
   /** Set on order.cancelled / order.failed (#143, #154): who ended it and the customer-facing reason. */
   cancelledBy?: 'CUSTOMER' | 'RESTAURANT' | 'SYSTEM' | 'PAYMENT';
   cancellationReason?: string;
+  /** #151: the restaurant's or platform's own words, without the English lead-in, so clients can localize it. */
+  cancellationNote?: string;
 }
 
 export interface OrderEvent extends BaseEvent<OrderPayload> {

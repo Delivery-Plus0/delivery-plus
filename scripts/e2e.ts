@@ -694,6 +694,46 @@ async function runE2E() {
     }
     console.log('Menu management: create → edit → archive; hidden from customers, not addable (400), not editable (409); other owner 403');
 
+    // Checkout re-validation (#42): a price changed after the item went into the cart is never charged
+    // silently; the order is refused with what changed, the cart now holds the new price, and the retry
+    // is priced from it. Quantities are capped.
+    // Checkout allows 5 orders a minute per customer and this script places more: clear the counters (test Redis only).
+    const checkoutLimits = new Redis(REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 2 });
+    await checkoutLimits
+      .connect()
+      .then(async () => {
+        const keys = await checkoutLimits.keys('ratelimit:*');
+        if (keys.length) await checkoutLimits.del(...keys);
+      })
+      .finally(() => checkoutLimits.disconnect());
+    const repriced =(await axios.post(`${API_URL}/api/menus/menu-items`, { restaurantId, name: 'E2E Repriced', price: 40 }, ownerAuth)).data;
+    await axios.delete(`${API_URL}/api/cart`, customerAuth);
+    await axios.post(`${API_URL}/api/cart/items`, { menuItemId: repriced.id, quantity: 2 }, customerAuth);
+    await axios.patch(`${API_URL}/api/menus/menu-items/${repriced.id}`, { price: 45 }, ownerAuth);
+    const staleCheckout = await axios.post(`${API_URL}/api/orders`, {}, customerAuth).then(
+      () => ({ status: 201, data: null as any }),
+      (error) => ({ status: error.response?.status, data: error.response?.data }),
+    );
+    const cartAfter = (await axios.get(`${API_URL}/api/cart`, customerAuth)).data;
+    const retried = (await axios.post(`${API_URL}/api/orders`, {}, customerAuth)).data;
+    const tooMany = await statusOf(axios.post(`${API_URL}/api/cart/items`, { menuItemId: repriced.id, quantity: 21 }, customerAuth));
+    await axios.patch(`${API_URL}/api/orders/${retried.id}/status`, { status: 'CANCELLED' }, customerAuth);
+    await axios.delete(`${API_URL}/api/menus/menu-items/${repriced.id}`, ownerAuth);
+    const change = staleCheckout.data?.details?.changes?.[0];
+    if (
+      staleCheckout.status !== 409 ||
+      staleCheckout.data?.error !== 'CartChanged' ||
+      change?.change !== 'PRICE_CHANGED' ||
+      change?.previousPrice !== 40 ||
+      change?.currentPrice !== 45 ||
+      cartAfter.items?.[0]?.price !== 45 ||
+      retried.subtotalAmount !== '90.00' ||
+      tooMany !== 400
+    ) {
+      throw new Error(`Checkout re-validation: ${JSON.stringify({ staleCheckout, cartAfter: cartAfter.items, subtotal: retried.subtotalAmount, tooMany })}`);
+    }
+    console.log('Checkout re-validation: price 40 → 45 after adding → 409 CartChanged, cart updated, retry priced at 2 × 45; 21 of one item 400');
+
     // Item images (#149): ordered images with the first mirrored into imageUrl; remove promotes the next.
     const photoItem = (
       await axios.post(`${API_URL}/api/menus/menu-items`, { restaurantId, name: 'E2E Photo Dish', price: 30 }, ownerAuth)

@@ -23,11 +23,13 @@ export class AllExceptionsFilter implements ExceptionFilter {
     let statusCode = HttpStatus.INTERNAL_SERVER_ERROR;
     let error = 'InternalServerError';
     let message = 'An unexpected error occurred';
+    let details: Record<string, unknown> | undefined;
 
     if (exception instanceof AppError) {
       statusCode = exception.statusCode;
       error = exception.error;
       message = exception.message;
+      details = exception.details;
     } else if (exception instanceof HttpException) {
       statusCode = exception.getStatus();
       const body = exception.getResponse();
@@ -47,6 +49,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       timestamp: new Date().toISOString(),
       path: request.url,
       correlationId: request.correlationId,
+      ...(details ? { details } : {}),
     };
 
     this.logger.log({

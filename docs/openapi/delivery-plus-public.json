@@ -1766,6 +1766,51 @@
         ]
       }
     },
+    "/api/cart/validate": {
+      "post": {
+        "summary": "Re-check the cart against the menu (409 CartChanged lists what changed; the cart is updated)",
+        "tags": [
+          "cart"
+        ],
+        "operationId": "cart_post_api_cart_validate",
+        "responses": {
+          "201": {
+            "description": "Successful response"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "409": {
+            "description": "CartChanged: the cart was out of date with the menu and has been updated; review it and try again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartChangedError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/orders": {
       "post": {
         "summary": "Create an order from the current cart",
@@ -1792,6 +1837,16 @@
           },
           "403": {
             "description": "Forbidden"
+          },
+          "409": {
+            "description": "CartChanged: the cart was out of date with the menu and has been updated; review it and try again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartChangedError"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -3723,6 +3778,69 @@
           "error": {
             "type": "string",
             "nullable": true
+          }
+        }
+      },
+      "CartChangedError": {
+        "type": "object",
+        "description": "#42: 409 when the cart no longer matches the menu. The cart has already been updated.",
+        "properties": {
+          "statusCode": {
+            "type": "integer",
+            "example": 409
+          },
+          "error": {
+            "type": "string",
+            "example": "CartChanged"
+          },
+          "message": {
+            "type": "string"
+          },
+          "details": {
+            "type": "object",
+            "properties": {
+              "changes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "menuItemId",
+                    "name",
+                    "change"
+                  ],
+                  "properties": {
+                    "menuItemId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "change": {
+                      "type": "string",
+                      "enum": [
+                        "PRICE_CHANGED",
+                        "UNAVAILABLE",
+                        "REMOVED",
+                        "QUANTITY_LIMITED"
+                      ]
+                    },
+                    "previousPrice": {
+                      "type": "number"
+                    },
+                    "currentPrice": {
+                      "type": "number"
+                    },
+                    "previousQuantity": {
+                      "type": "integer"
+                    },
+                    "currentQuantity": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       },

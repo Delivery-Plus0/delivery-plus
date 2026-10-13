@@ -41,6 +41,18 @@ export class CartController {
     return this.cartService.removeItem(user.sub, menuItemId);
   }
 
+  @Post('validate')
+  @ApiOperation({
+    summary: 'Re-check the cart against the menu before checkout (#42)',
+    description:
+      'Returns the cart when every item still exists, is available and has the same price. Otherwise the cart is ' +
+      'brought up to date (current prices; unavailable or removed items taken out; quantities capped) and the ' +
+      'answer is 409 CartChanged with details.changes listing what changed.',
+  })
+  validate(@CurrentUser() user: JwtPayload) {
+    return this.cartService.validateForCheckout(user.sub);
+  }
+
   @Delete()
   @ApiOperation({ summary: 'Clear the cart' })
   clearCart(@CurrentUser() user: JwtPayload) {

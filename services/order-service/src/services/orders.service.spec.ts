@@ -17,6 +17,8 @@ import {
   UserRole,
   lifecycleEventId,
   PhoneNotVerifiedError,
+  CartChangedError,
+  MAX_CART_ITEM_QUANTITY,
 } from '@food-delivery/shared';
 
 describe('OrdersService', () => {
@@ -87,6 +89,8 @@ describe('OrdersService', () => {
       getCart: jest.fn(),
       clearCart: jest.fn(),
     } as unknown as jest.Mocked<CartServiceClient>;
+    // #42: checkout reads the re-checked cart; tests arrange it through getCart unless they say otherwise.
+    cartClient.getValidatedCart = jest.fn((auth: string) => cartClient.getCart(auth));
 
     restaurantClient = {
       getRestaurant: jest.fn(),
@@ -108,6 +112,51 @@ describe('OrdersService', () => {
       userClient,
       { pricing: DEFAULT_PRICING } as any,
     );
+  });
+
+  describe('checkout re-validation (#42)', () => {
+    const cartWith = (items: Array<{ price: number; quantity: number }>, total = 0) => ({
+      userId: 'customer-1',
+      restaurantId: 'rest-1',
+      items: items.map((item, i) => ({ menuItemId: `item-${i}`, name: `Item ${i}`, ...item })),
+      total,
+    });
+
+    beforeEach(() => {
+      restaurantClient.getRestaurant.mockResolvedValue({ id: 'rest-1', status: RestaurantStatus.OPEN } as any);
+      orders.create.mockImplementation(async (...args: any[]) => ({ ...baseOrder, ...args[4] }) as any);
+    });
+
+    it('passes CartChanged on to the customer and creates nothing', async () => {
+      const changed = new CartChangedError([{ menuItemId: 'item-0', name: 'Koshary', change: 'PRICE_CHANGED', previousPrice: 40, currentPrice: 45 }]);
+      cartClient.getValidatedCart.mockRejectedValue(changed);
+
+      await expect(service.createFromCart('customer-1', 'Bearer x', undefined, { deliveryAddress: '1 St' } as any)).rejects.toBe(changed);
+      expect(orders.create).not.toHaveBeenCalled();
+      expect(cartClient.clearCart).not.toHaveBeenCalled();
+    });
+
+    it('prices the order from the re-checked items, never from the cart total', async () => {
+      cartClient.getCart.mockResolvedValue(cartWith([{ price: 45, quantity: 2 }, { price: 12.5, quantity: 1 }], 1) as any);
+
+      await service.createFromCart('customer-1', 'Bearer x', undefined, { deliveryAddress: '1 St' } as any);
+
+      expect(orders.create.mock.calls[0][3]).toMatchObject({ subtotalAmount: '102.50', deliveryFee: '25.00', totalAmount: '127.50' });
+    });
+
+    it.each([0, MAX_CART_ITEM_QUANTITY + 1, 1.5])('refuses a line with quantity %s', async (quantity) => {
+      cartClient.getCart.mockResolvedValue(cartWith([{ price: 10, quantity }]) as any);
+
+      await expect(service.createFromCart('customer-1', 'Bearer x', undefined, { deliveryAddress: '1 St' } as any)).rejects.toThrow(BadRequestError);
+      expect(orders.create).not.toHaveBeenCalled();
+    });
+
+    it('still refuses a closed restaurant after the cart checks out', async () => {
+      cartClient.getCart.mockResolvedValue(cartWith([{ price: 10, quantity: 1 }]) as any);
+      restaurantClient.getRestaurant.mockResolvedValue({ id: 'rest-1', status: RestaurantStatus.CLOSED } as any);
+
+      await expect(service.createFromCart('customer-1', 'Bearer x', undefined, { deliveryAddress: '1 St' } as any)).rejects.toThrow('Restaurant is currently closed');
+    });
   });
 
   describe('phone gate (#153)', () => {

@@ -31,7 +31,7 @@ The split is stored on the order at checkout, but it is internal. It is never re
   - The move is automatic and idempotent: a sweep runs every `EARNINGS_SETTLE_SWEEP_MS`, and every earnings read first settles the reader's due entries.
   - AVAILABLE means available in the internal driver wallet. There are **no bank payouts** yet.
 - **Balance = the sum of the entries.** Nothing is stored separately that could drift.
-- **Corrections are new entries** (`REVERSAL`, negative), never edits. Nothing produces them yet: refunds are #53/#56.
+- **Corrections are new entries** (`REVERSAL`, negative), never edits. Nothing produces them yet: a cancelled delivery never recorded an earning, and refunds (#56) leave recorded earnings alone. See [cancellation-and-refunds.md](cancellation-and-refunds.md).
 - Orders from before fees existed have a zero fee and produce no entry.
 
 ## Read API

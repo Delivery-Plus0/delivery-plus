@@ -115,7 +115,14 @@ export class OrdersRepository {
    * a payment that completes after the order was cancelled is still recorded.
    */
   async recordPaymentStatus(id: string, status: string): Promise<void> {
-    const replaceable = status === 'PENDING' ? '"paymentStatus" IS NULL' : '("paymentStatus" IS NULL OR "paymentStatus" = \'PENDING\')';
+    // Statuses only move forward: PENDING → COMPLETED/FAILED → REFUNDED (#56). REFUNDED is final, and a
+    // refund can arrive without its completion ever being recorded (the order was cancelled first).
+    const replaceable =
+      status === 'PENDING'
+        ? '"paymentStatus" IS NULL'
+        : status === 'REFUNDED'
+          ? '("paymentStatus" IS NULL OR "paymentStatus" <> \'REFUNDED\')'
+          : '("paymentStatus" IS NULL OR "paymentStatus" = \'PENDING\')';
     await this.repo.query(`UPDATE "orders" SET "paymentStatus" = $1 WHERE "id" = $2 AND ${replaceable}`, [status, id]);
   }
 

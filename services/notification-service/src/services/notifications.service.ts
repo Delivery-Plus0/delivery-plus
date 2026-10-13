@@ -78,6 +78,21 @@ export class NotificationsService implements OnModuleInit {
       );
     });
 
+    // A declined payment: the order was not placed (#53 follow-up; the order screen already shows FAILED).
+    await this.kafkaConsumer.subscribe<PaymentEvent['payload']>(TOPICS.PAYMENT_EVENTS, PaymentEventType.FAILED, async (event) => {
+      await this.notifyCustomer(event.payload.customerId, event, NotificationType.PAYMENT_FAILED, 'Payment declined',
+        `Your payment for order ${event.payload.orderId} was declined, so the order was not placed.`,
+        { messageKey: 'payment.failed', params: { orderId: event.payload.orderId } });
+    });
+
+    // #56: a cancelled order's payment was refunded in full (items + delivery fee).
+    await this.kafkaConsumer.subscribe<PaymentEvent['payload']>(TOPICS.PAYMENT_EVENTS, PaymentEventType.REFUNDED, async (event) => {
+      const amount = Number(event.payload.amount ?? 0).toFixed(2);
+      await this.notifyCustomer(event.payload.customerId, event, NotificationType.PAYMENT_REFUNDED, 'Refund issued',
+        `We refunded EGP ${amount} for your order ${event.payload.orderId}.`,
+        { messageKey: 'payment.refunded', params: { orderId: event.payload.orderId, amount, currency: 'EGP' } });
+    });
+
     await this.kafkaConsumer.start();
   }
 

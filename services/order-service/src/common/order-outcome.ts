@@ -13,6 +13,8 @@ export enum OrderPaymentStatus {
   PENDING = 'PENDING',
   COMPLETED = 'COMPLETED',
   FAILED = 'FAILED',
+  /** #56: the whole payment was refunded after the order was cancelled. Final. */
+  REFUNDED = 'REFUNDED',
 }
 
 export const CANCELLATION_REASON_MAX = 200;

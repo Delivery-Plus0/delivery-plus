@@ -48,7 +48,7 @@ import { CartServiceClient } from '../common/cart-service.client';
 import { RestaurantServiceClient } from '../common/restaurant-service.client';
 import { UserServiceClient } from '../common/user-service.client';
 import { OutboxRelayService } from '../common/outbox-relay.service';
-import { isRoleAllowedForTransition } from '../common/order-transition-rules';
+import { cancellationRefusal, isRoleAllowedForTransition } from '../common/order-transition-rules';
 import { UpdateOrderStatusDto } from '../dto/update-order-status.dto';
 import { CreateOrderDto } from '../dto/create-order.dto';
 import { Order } from '../entities/order.entity';
@@ -142,6 +142,16 @@ export class OrdersService implements OnModuleInit {
       },
     );
 
+    // #56: the payment was refunded (the order was cancelled after it was paid). Only the payment
+    // line changes; the order is already CANCELLED.
+    await this.kafkaConsumer.subscribe<PaymentEvent['payload']>(
+      TOPICS.PAYMENT_EVENTS,
+      PaymentEventType.REFUNDED,
+      async (event) => {
+        await this.orders.recordPaymentStatus(event.payload.orderId, OrderPaymentStatus.REFUNDED);
+      },
+    );
+
     await this.kafkaConsumer.subscribe<DeliveryEvent['payload']>(
       TOPICS.DELIVERY_EVENTS,
       DeliveryEventType.DRIVER_ASSIGNED,
@@ -163,6 +173,17 @@ export class OrdersService implements OnModuleInit {
       DeliveryEventType.COMPLETED,
       async (event) => {
         await this.syncStatusFromEvent(event.payload.orderId, OrderStatus.DELIVERED);
+      },
+    );
+
+    // #53: the platform cancelled the delivery (POST /deliveries/:id/cancel). delivery-service also
+    // cancels the order over HTTP; whichever arrives first records the platform's reason, which the
+    // event carries too.
+    await this.kafkaConsumer.subscribe<DeliveryEvent['payload']>(
+      TOPICS.DELIVERY_EVENTS,
+      DeliveryEventType.CANCELLED,
+      async (event) => {
+        await this.syncStatusFromEvent(event.payload.orderId, OrderStatus.CANCELLED, event.payload.cancellationReason);
       },
     );
 
@@ -355,10 +376,12 @@ export class OrdersService implements OnModuleInit {
 
     if (requesterRole === UserRole.RESTAURANT_OWNER) {
       await this.restaurantClient.assertOwnership(order.restaurantId, requesterId);
-      // A restaurant rejects an order before cooking it, never mid-way (#154).
-      if (dto.status === OrderStatus.CANCELLED && order.status !== OrderStatus.CONFIRMED && order.status !== OrderStatus.CANCELLED) {
-        throw new ConflictError('An order can only be rejected before you start preparing it.');
-      }
+    }
+
+    // The cancellation window per actor (#53, #154). Cancelling an already cancelled order is a no-op below.
+    if (dto.status === OrderStatus.CANCELLED && order.status !== OrderStatus.CANCELLED) {
+      const refusal = cancellationRefusal(order.status, requesterId, requesterRole);
+      if (refusal) throw new ConflictError(refusal);
     }
 
     if (order.status === dto.status) {
@@ -397,7 +420,7 @@ export class OrdersService implements OnModuleInit {
    * order is picked up, or the customer cancelled while payment was pending) without failing the
    * consumer and ending up in the dead-letter topic.
    */
-  async syncStatusFromEvent(orderId: string, target: OrderStatus): Promise<void> {
+  async syncStatusFromEvent(orderId: string, target: OrderStatus, reason?: string): Promise<void> {
     const order = await this.orders.findById(orderId);
     if (!order) {
       this.logger.warn(`Ignoring event for unknown order ${orderId}`);
@@ -408,7 +431,7 @@ export class OrdersService implements OnModuleInit {
       this.logger.warn(`Ignoring stale event: order ${orderId} is ${order.status}, not moving to ${target}`);
       return;
     }
-    await this.updateStatus(orderId, 'system', UserRole.ADMIN, { status: target });
+    await this.updateStatus(orderId, 'system', UserRole.ADMIN, { status: target, ...(reason ? { reason } : {}) });
   }
 
   private async findOrThrow(id: string): Promise<Order> {

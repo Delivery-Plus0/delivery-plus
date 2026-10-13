@@ -773,4 +773,102 @@ describe('OrdersService', () => {
       expect(restaurantClient.assertOwnership).toHaveBeenCalledWith('restaurant-1', 'owner-1');
     });
   });
+
+  describe('cancellation window (#53)', () => {
+    const cancelAs = (requesterId: string, role: UserRole) =>
+      service.updateStatus('order-1', requesterId, role, { status: OrderStatus.CANCELLED });
+
+    it.each([OrderStatus.CREATED, OrderStatus.PAYMENT_PENDING, OrderStatus.CONFIRMED])('lets the customer cancel while %s', async (status) => {
+      orders.findById.mockResolvedValue({ ...baseOrder, status } as any);
+      orders.updateStatus.mockResolvedValue({ ...baseOrder, status: OrderStatus.CANCELLED } as any);
+
+      await expect(cancelAs('customer-1', UserRole.CUSTOMER)).resolves.toMatchObject({ status: OrderStatus.CANCELLED });
+    });
+
+    it.each([OrderStatus.PREPARING, OrderStatus.READY_FOR_PICKUP, OrderStatus.DRIVER_ASSIGNED, OrderStatus.PICKED_UP])(
+      'refuses the customer once the order is %s, before writing anything',
+      async (status) => {
+        orders.findById.mockResolvedValue({ ...baseOrder, status } as any);
+
+        await expect(cancelAs('customer-1', UserRole.CUSTOMER)).rejects.toThrow(
+          'An order can only be cancelled before the restaurant starts preparing it.',
+        );
+        expect(orders.updateStatus).not.toHaveBeenCalled();
+      },
+    );
+
+    it('repeating a cancellation of a cancelled order returns it unchanged', async () => {
+      orders.findById.mockResolvedValue({ ...baseOrder, status: OrderStatus.CANCELLED } as any);
+
+      await expect(cancelAs('customer-1', UserRole.CUSTOMER)).resolves.toMatchObject({ status: OrderStatus.CANCELLED });
+      expect(orders.updateStatus).not.toHaveBeenCalled();
+    });
+
+    it.each([OrderStatus.DRIVER_ASSIGNED, OrderStatus.PICKED_UP])('sends a human admin to the delivery once the order is %s', async (status) => {
+      orders.findById.mockResolvedValue({ ...baseOrder, status } as any);
+
+      await expect(cancelAs('admin-1', UserRole.ADMIN)).rejects.toThrow('cancel its delivery instead');
+      expect(orders.updateStatus).not.toHaveBeenCalled();
+    });
+
+    it('lets delivery-service cancel an order with a driver (system caller)', async () => {
+      orders.findById.mockResolvedValue({ ...baseOrder, status: OrderStatus.PICKED_UP } as any);
+      orders.updateStatus.mockResolvedValue({ ...baseOrder, status: OrderStatus.CANCELLED } as any);
+
+      await cancelAs('system:delivery-service', UserRole.ADMIN);
+
+      expect(orders.updateStatus).toHaveBeenCalledWith('order-1', OrderStatus.PICKED_UP, OrderStatus.CANCELLED, expect.any(Function), {
+        cancelledBy: 'SYSTEM',
+        cancellationReason: 'Delivery Plus cancelled this order.',
+        cancellationNote: null,
+      });
+    });
+
+    it('lets an admin cancel an order still in the kitchen', async () => {
+      orders.findById.mockResolvedValue({ ...baseOrder, status: OrderStatus.READY_FOR_PICKUP } as any);
+      orders.updateStatus.mockResolvedValue({ ...baseOrder, status: OrderStatus.CANCELLED } as any);
+
+      await expect(cancelAs('admin-1', UserRole.ADMIN)).resolves.toMatchObject({ status: OrderStatus.CANCELLED });
+    });
+
+    it('converges the order from delivery.cancelled, and ignores it for a delivered order', async () => {
+      await service.onModuleInit();
+      const handler = kafkaConsumer.subscribe.mock.calls.find(([, type]) => type === DeliveryEventType.CANCELLED)![2];
+
+      orders.findById.mockResolvedValue({ ...baseOrder, status: OrderStatus.PICKED_UP } as any);
+      orders.updateStatus.mockResolvedValue({ ...baseOrder, status: OrderStatus.CANCELLED } as any);
+      await handler({ payload: { orderId: 'order-1' } });
+      expect(orders.updateStatus).toHaveBeenCalledWith('order-1', OrderStatus.PICKED_UP, OrderStatus.CANCELLED, expect.any(Function), expect.objectContaining({ cancelledBy: 'SYSTEM' }));
+
+      orders.updateStatus.mockClear();
+      orders.findById.mockResolvedValue({ ...baseOrder, status: OrderStatus.DELIVERED } as any);
+      await expect(handler({ payload: { orderId: 'order-1' } })).resolves.toBeUndefined();
+      expect(orders.updateStatus).not.toHaveBeenCalled();
+    });
+
+    it("keeps the platform's reason when delivery.cancelled reaches the order first", async () => {
+      await service.onModuleInit();
+      const handler = kafkaConsumer.subscribe.mock.calls.find(([, type]) => type === DeliveryEventType.CANCELLED)![2];
+      orders.findById.mockResolvedValue({ ...baseOrder, status: OrderStatus.PICKED_UP } as any);
+      orders.updateStatus.mockResolvedValue({ ...baseOrder, status: OrderStatus.CANCELLED } as any);
+
+      await handler({ payload: { orderId: 'order-1', cancellationReason: 'The driver had a breakdown' } });
+
+      expect(orders.updateStatus).toHaveBeenCalledWith('order-1', OrderStatus.PICKED_UP, OrderStatus.CANCELLED, expect.any(Function), {
+        cancelledBy: 'SYSTEM',
+        cancellationReason: 'Delivery Plus cancelled this order: The driver had a breakdown',
+        cancellationNote: 'The driver had a breakdown',
+      });
+    });
+
+    it('records REFUNDED from payment.refunded (#56)', async () => {
+      await service.onModuleInit();
+      const handler = kafkaConsumer.subscribe.mock.calls.find(([, type]) => type === PaymentEventType.REFUNDED)![2];
+
+      await handler({ payload: { orderId: 'order-1' } });
+
+      expect(orders.recordPaymentStatus).toHaveBeenCalledWith('order-1', 'REFUNDED');
+      expect(orders.updateStatus).not.toHaveBeenCalled();
+    });
+  });
 });

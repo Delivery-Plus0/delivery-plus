@@ -72,6 +72,7 @@ function deliveryEvent(eventType: DeliveryEventType, delivery: Delivery): Delive
       driverId: delivery.driverId || undefined,
       assignedAt: delivery.assignedAt ? new Date(delivery.assignedAt).toISOString() : undefined,
       status: delivery.status,
+      ...(delivery.cancellationReason ? { cancellationReason: delivery.cancellationReason } : {}),
     },
   };
 }
@@ -156,6 +157,14 @@ export class DeliveriesService {
     }
     this.assertTransition(delivery.status, DeliveryStatus.DRIVER_ASSIGNED);
 
+    // #53: an order cancelled between its delivery's creation and now never gets a driver. Cancelling
+    // it here closes the window where order.cancelled was handled before the delivery existed.
+    const order = await this.orderClient.getOrder(delivery.orderId);
+    if (order.status === OrderStatus.CANCELLED) {
+      await this.cancelForCancelledOrder(delivery.orderId);
+      throw new InvalidStateTransitionError('Delivery', DeliveryStatus.CANCELLED, DeliveryStatus.DRIVER_ASSIGNED);
+    }
+
     const driver = await this.claimAvailableDriver();
     let updated: Delivery | null;
     try {
@@ -211,15 +220,54 @@ export class DeliveriesService {
     }, earning);
   }
 
-  async cancel(deliveryId: string, requester: DeliveryRequester): Promise<Delivery> {
-    this.assertDispatchRole(requester.role);
+  /**
+   * A platform cancellation (#53): ADMIN only. Restaurants reject orders before preparation through
+   * order-service and never cancel deliveries. The delivery moves first (compare-and-set against the
+   * driver's own actions), with the driver's compensation when it is past pickup, then the driver is
+   * released and the order cancelled with the reason, which refunds the customer (#56).
+   */
+  async cancel(deliveryId: string, requester: DeliveryRequester, reason?: string): Promise<Delivery> {
+    if (requester.role !== UserRole.ADMIN) {
+      throw new ForbiddenError('Only the platform can cancel a delivery');
+    }
     const delivery = await this.findOrThrow(deliveryId);
-    await this.assertCanDispatch(delivery.orderId, requester);
     const compensation = await this.earningFor(delivery, DeliveryStatus.CANCELLED);
-    return this.advance(delivery, DeliveryStatus.CANCELLED, DeliveryEventType.CANCELLED, async (updated) => {
-      await this.releaseDriverOf(updated);
-      await this.orderClient.updateOrderStatus(updated.orderId, OrderStatus.CANCELLED);
-    }, compensation);
+    return this.advance(
+      delivery,
+      DeliveryStatus.CANCELLED,
+      DeliveryEventType.CANCELLED,
+      async (updated) => {
+        await this.releaseDriverOf(updated);
+        // The reason recorded with the cancellation, also on a retry that sends none.
+        const recorded = updated.cancellationReason ?? undefined;
+        await this.orderClient.updateOrderStatus(updated.orderId, OrderStatus.CANCELLED, ...(recorded ? [recorded] : []));
+      },
+      compensation,
+      { cancellationReason: reason?.trim() || null },
+    );
+  }
+
+  /**
+   * #53: the order was cancelled (order.cancelled). Cancels its delivery if one is still active:
+   * releases the driver and, past pickup, writes the driver's compensation with the move. Idempotent:
+   * no delivery or an already cancelled one is a no-op. A delivered one is left alone and logged:
+   * once a driver is assigned, cancellations go through `cancel` above, so this means drift.
+   */
+  async cancelForCancelledOrder(orderId: string): Promise<Delivery | null> {
+    const delivery = await this.deliveries.findByOrderId(orderId);
+    if (!delivery || delivery.status === DeliveryStatus.CANCELLED) return delivery;
+    if (delivery.status === DeliveryStatus.DELIVERED) {
+      this.logger.error(`Order ${orderId} was cancelled but its delivery ${delivery.id} is already DELIVERED; leaving it`);
+      return delivery;
+    }
+    const compensation = await this.earningFor(delivery, DeliveryStatus.CANCELLED);
+    return this.advance(
+      delivery,
+      DeliveryStatus.CANCELLED,
+      DeliveryEventType.CANCELLED,
+      (updated) => this.releaseDriverOf(updated),
+      compensation,
+    );
   }
 
   /**
@@ -370,6 +418,8 @@ export class DeliveriesService {
     eventType: DeliveryEventType,
     effects: (updated: Delivery) => Promise<void>,
     inTransaction?: (manager: EntityManager, updated: Delivery) => Promise<void>,
+    /** More fields written in the same compare-and-set (e.g. the cancellation reason). */
+    extra: Partial<Delivery> = {},
   ): Promise<Delivery> {
     let current = delivery;
     if (delivery.status !== target) {
@@ -377,7 +427,7 @@ export class DeliveriesService {
       const updated = await this.deliveries.transition(
         delivery.id,
         delivery.status,
-        { status: target, ...stageTime(target) },
+        { status: target, ...stageTime(target), ...extra },
         (moved) => deliveryEvent(eventType, moved),
         inTransaction,
       );

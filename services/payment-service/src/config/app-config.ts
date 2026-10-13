@@ -8,6 +8,8 @@ export interface AppConfig {
   jwtSecret: string;
   orderServiceUrl: string;
   paymentSuccessRate: number;
+  /** How often owed payment side effects (events, order updates) are finished; 0 turns the sweep off (#56). */
+  sideEffectsSweepMs: number;
 }
 
 export function loadConfig(): AppConfig {
@@ -25,5 +27,6 @@ export function loadConfig(): AppConfig {
     jwtSecret: process.env.JWT_SECRET as string,
     orderServiceUrl: process.env.ORDER_SERVICE_URL || 'http://localhost:3006',
     paymentSuccessRate: parseFloat(process.env.PAYMENT_SUCCESS_RATE || '0.9'),
+    sideEffectsSweepMs: parseInt(process.env.PAYMENT_SIDE_EFFECTS_SWEEP_MS || '30000', 10),
   };
 }

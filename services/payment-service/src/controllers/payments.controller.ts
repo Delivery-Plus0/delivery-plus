@@ -4,6 +4,7 @@ import { JwtAuthGuard, CurrentUser, JwtPayload } from '@food-delivery/shared';
 import { PaymentsService } from '../services/payments.service';
 import { CreatePaymentDto } from '../dto/create-payment.dto';
 import { ProcessPaymentDto } from '../dto/process-payment.dto';
+import { RefundPaymentDto } from '../dto/refund-payment.dto';
 import { IDEMPOTENCY_KEY_HEADER, parseIdempotencyKey } from '../common/idempotency-key';
 
 @ApiTags('payments')
@@ -56,8 +57,22 @@ export class PaymentsController {
   }
 
   @Post(':id/refund')
-  @ApiOperation({ summary: 'Refund a completed payment' })
-  refund(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
-    return this.paymentsService.refund(id, user.sub, user.role);
+  @ApiOperation({
+    summary: 'Refund a completed payment in full (support / ADMIN only)',
+    description:
+      'Cancelled orders are refunded automatically (#56); this is for support. Repeating it returns the refunded payment. ' +
+      'Refunds are simulated until a real payment gateway exists.',
+  })
+  @ApiResponse({ status: 403, description: 'Not ADMIN' })
+  @ApiResponse({ status: 409, description: 'The payment never completed, so there is nothing to refund' })
+  refund(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: RefundPaymentDto) {
+    return this.paymentsService.refund(id, user.sub, user.role, dto.reason);
+  }
+
+  @Get(':id/refund')
+  @ApiOperation({ summary: "The payment's refund record (the paying customer or ADMIN)" })
+  @ApiResponse({ status: 404, description: 'The payment has not been refunded' })
+  getRefund(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.paymentsService.getRefund(id, user.sub, user.role);
   }
 }

@@ -516,6 +516,90 @@ describe('DeliveriesService', () => {
       expect(orderClient.updateOrderStatus).toHaveBeenCalledWith('order-1', OrderStatus.CANCELLED);
       expect(result.status).toBe(DeliveryStatus.CANCELLED);
     });
+
+    it("records the platform's reason with the cancellation, on its event, and on the order (#53)", async () => {
+      deliveries.findById.mockResolvedValue({ ...baseDelivery, driverId: 'driver-1', status: DeliveryStatus.IN_TRANSIT });
+      deliveries.transition.mockImplementation(async (_id, _from, data) => ({ ...baseDelivery, driverId: 'driver-1', ...data }) as Delivery);
+
+      await service.cancel('delivery-1', actor(UserRole.ADMIN), '  Driver had an accident ');
+
+      expect(deliveries.transition.mock.calls[0][2]).toMatchObject({ status: DeliveryStatus.CANCELLED, cancellationReason: 'Driver had an accident' });
+      const [[, event]] = await staged();
+      expect(event.payload).toMatchObject({ cancellationReason: 'Driver had an accident' });
+      expect(orderClient.updateOrderStatus).toHaveBeenCalledWith('order-1', OrderStatus.CANCELLED, 'Driver had an accident');
+    });
+
+    it('a retried cancel sends the reason recorded the first time', async () => {
+      deliveries.findById.mockResolvedValue({ ...baseDelivery, driverId: 'driver-1', status: DeliveryStatus.CANCELLED, cancellationReason: 'Driver had an accident' });
+
+      await service.cancel('delivery-1', actor(UserRole.ADMIN));
+
+      expect(deliveries.transition).not.toHaveBeenCalled();
+      expect(orderClient.updateOrderStatus).toHaveBeenCalledWith('order-1', OrderStatus.CANCELLED, 'Driver had an accident');
+    });
+  });
+
+  describe('order cancelled (#53)', () => {
+    const at = (status: DeliveryStatus) => ({ ...baseDelivery, driverId: 'driver-1', status });
+
+    /** Runs the in-transaction hook of the last transition (the ledger write), like the repository does. */
+    async function runLedgerHook() {
+      const last = deliveries.transition.mock.calls.length - 1;
+      const call = deliveries.transition.mock.calls[last];
+      const hook = call[4] as ((manager: unknown, updated: unknown) => Promise<void>) | undefined;
+      if (hook) await hook({}, await deliveries.transition.mock.results[last].value);
+      return hook;
+    }
+
+    it('cancels an active delivery after pickup, releases the driver and compensates them, without touching the order', async () => {
+      deliveries.findByOrderId.mockResolvedValue(at(DeliveryStatus.IN_TRANSIT));
+      deliveries.transition.mockResolvedValue(at(DeliveryStatus.CANCELLED));
+
+      await service.cancelForCancelledOrder('order-1');
+      await runLedgerHook();
+
+      expect(deliveries.transition).toHaveBeenCalledWith('delivery-1', DeliveryStatus.IN_TRANSIT, expect.objectContaining({ status: DeliveryStatus.CANCELLED }), expect.any(Function), expect.any(Function));
+      expect(ledger.appendOnce.mock.calls[0][1]).toMatchObject({ type: 'CANCELLATION_COMPENSATION', amount: '6.25' });
+      expect(driverClient.releaseDriver).toHaveBeenCalledWith('driver-1');
+      expect(orderClient.updateOrderStatus).not.toHaveBeenCalled();
+      expect((await staged()).map(([, e]) => e.eventType)).toEqual([DeliveryEventType.CANCELLED]);
+    });
+
+    it('cancels a delivery still waiting for a driver, with no compensation', async () => {
+      deliveries.findByOrderId.mockResolvedValue({ ...baseDelivery, status: DeliveryStatus.CREATED });
+      deliveries.transition.mockResolvedValue({ ...baseDelivery, status: DeliveryStatus.CANCELLED });
+
+      await service.cancelForCancelledOrder('order-1');
+
+      expect(await runLedgerHook()).toBeUndefined();
+      expect(driverClient.releaseDriver).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['no delivery', null],
+      ['an already cancelled delivery', { ...baseDelivery, driverId: 'driver-1', status: DeliveryStatus.CANCELLED }],
+      ['a delivered delivery', { ...baseDelivery, driverId: 'driver-1', status: DeliveryStatus.DELIVERED }],
+    ])('does nothing for %s', async (_label, delivery) => {
+      deliveries.findByOrderId.mockResolvedValue(delivery as any);
+
+      await service.cancelForCancelledOrder('order-1');
+
+      expect(deliveries.transition).not.toHaveBeenCalled();
+      expect(driverClient.releaseDriver).not.toHaveBeenCalled();
+    });
+
+    it('never assigns a driver to a delivery whose order was cancelled; cancels it instead', async () => {
+      deliveries.findById.mockResolvedValue(baseDelivery);
+      deliveries.findByOrderId.mockResolvedValue(baseDelivery);
+      orderClient.getOrder.mockResolvedValue(orderAt(OrderStatus.CANCELLED));
+      deliveries.transition.mockResolvedValue({ ...baseDelivery, status: DeliveryStatus.CANCELLED });
+
+      await expect(service.assignDriver('delivery-1', actor(UserRole.ADMIN))).rejects.toThrow(InvalidStateTransitionError);
+
+      expect(driverClient.findAvailableDriver).not.toHaveBeenCalled();
+      expect(driverClient.updateDriverStatus).not.toHaveBeenCalled();
+      expect(deliveries.transition).toHaveBeenCalledWith('delivery-1', DeliveryStatus.CREATED, expect.objectContaining({ status: DeliveryStatus.CANCELLED }), expect.any(Function), undefined);
+    });
   });
 
   describe('delivery events', () => {
@@ -824,12 +908,13 @@ describe('DeliveriesService', () => {
       expect(driverClient.updateDriverStatus).not.toHaveBeenCalled();
     });
 
-    it("rejects an owner cancelling another restaurant's delivery", async () => {
-      deliveries.findById.mockResolvedValue(baseDelivery as any);
-      orderClient.assertReadableBy.mockRejectedValue(new ForbiddenError('nope'));
+    it("never lets an owner cancel a delivery, even their own restaurant's (#53: platform only)", async () => {
+      deliveries.findById.mockResolvedValue({ ...baseDelivery, driverId: 'driver-1', status: DeliveryStatus.PICKED_UP } as any);
+      orderClient.assertReadableBy.mockResolvedValue(undefined);
 
-      await expect(service.cancel('delivery-1', actor(UserRole.RESTAURANT_OWNER, 'other-owner'))).rejects.toThrow(ForbiddenError);
+      await expect(service.cancel('delivery-1', actor(UserRole.RESTAURANT_OWNER, 'owner-1'))).rejects.toThrow(ForbiddenError);
       expect(deliveries.transition).not.toHaveBeenCalled();
+      expect(orderClient.updateOrderStatus).not.toHaveBeenCalled();
     });
 
     it('does not ask order-service for admins (they may dispatch anything)', async () => {

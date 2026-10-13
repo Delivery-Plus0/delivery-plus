@@ -30,6 +30,7 @@ describe('MenuServiceClient', () => {
       name: 'Burger',
       price: 9.99,
       available: true,
+      archived: false,
     });
     expect(fetchMock).toHaveBeenCalledWith(`http://menu-service:3004/menu-items/${validId}`);
   });

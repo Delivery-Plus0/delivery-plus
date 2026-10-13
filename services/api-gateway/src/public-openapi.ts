@@ -80,6 +80,7 @@ export const SERVICE_DEFINITIONS = [
       { method: 'post', path: '/items', summary: 'Add an item to the cart', auth: true, statusCode: 201 },
       { method: 'patch', path: '/items/:menuItemId', summary: 'Update the quantity of an item', auth: true, statusCode: 200 },
       { method: 'delete', path: '/items/:menuItemId', summary: 'Remove an item from the cart', auth: true, statusCode: 200 },
+      { method: 'post', path: '/validate', summary: 'Re-check the cart against the menu (409 CartChanged lists what changed; the cart is updated)', auth: true, statusCode: 201 },
       { method: 'delete', path: '', summary: 'Clear the cart', auth: true, statusCode: 200 },
     ],
   },
@@ -203,6 +204,36 @@ const baseSchemas = {
       statusCode: { type: 'integer', example: 400 },
       message: { type: 'string', example: 'Bad Request' },
       error: { type: 'string', nullable: true },
+    },
+  },
+  CartChangedError: {
+    type: 'object',
+    description: '#42: 409 when the cart no longer matches the menu. The cart has already been updated.',
+    properties: {
+      statusCode: { type: 'integer', example: 409 },
+      error: { type: 'string', example: 'CartChanged' },
+      message: { type: 'string' },
+      details: {
+        type: 'object',
+        properties: {
+          changes: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['menuItemId', 'name', 'change'],
+              properties: {
+                menuItemId: { type: 'string', format: 'uuid' },
+                name: { type: 'string' },
+                change: { type: 'string', enum: ['PRICE_CHANGED', 'UNAVAILABLE', 'REMOVED', 'QUANTITY_LIMITED'] },
+                previousPrice: { type: 'number' },
+                currentPrice: { type: 'number' },
+                previousQuantity: { type: 'integer' },
+                currentQuantity: { type: 'integer' },
+              },
+            },
+          },
+        },
+      },
     },
   },
   LoginRequest: {
@@ -591,6 +622,14 @@ export function generatePublicOpenApiDocument() {
           },
         };
         operation.responses['404'] = { description: 'The payment has not been refunded' };
+      }
+
+      // #42: checkout re-checks the cart; what changed comes back in details.changes.
+      if (route.method === 'post' && ((service.service === 'orders' && route.path === '') || (service.service === 'cart' && route.path === '/validate'))) {
+        operation.responses['409'] = {
+          description: 'CartChanged: the cart was out of date with the menu and has been updated; review it and try again',
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/CartChangedError' } } },
+        };
       }
 
       if (route.method === 'post' && service.service === 'orders' && route.path === '') {

@@ -36,6 +36,11 @@ export function toPiasters(amount: number | string): number {
 
 export const fromPiasters = (piasters: number): string => (piasters / 100).toFixed(2);
 
+/** #42: the items' subtotal from each line's price × quantity, in whole piasters; never a client-sent total. */
+export function itemsSubtotal(items: ReadonlyArray<{ price: number | string; quantity: number }>): string {
+  return fromPiasters(items.reduce((sum, item) => sum + toPiasters(item.price) * item.quantity, 0));
+}
+
 /** Percent of an amount in piasters, rounded down; the platform's side takes the remainder. */
 const percentOf = (piasters: number, percent: number) => Math.floor((piasters * percent) / 100);
 

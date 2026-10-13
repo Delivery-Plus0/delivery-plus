@@ -8,6 +8,8 @@ export class AppError extends Error {
     public readonly statusCode: number,
     public readonly error: string,
     message: string,
+    /** Machine-readable specifics for clients, sent as `details` in the error response (e.g. #42's cart changes). */
+    public readonly details?: Record<string, unknown>,
   ) {
     super(message);
     this.name = new.target.name;
@@ -48,6 +50,35 @@ export class ConflictError extends AppError {
 export class InvalidStateTransitionError extends AppError {
   constructor(entity: string, from: string, to: string) {
     super(409, 'InvalidStateTransition', `Cannot transition ${entity} from ${from} to ${to}`);
+  }
+}
+
+/** #42: the most of one menu item a cart (and so an order) may hold. */
+export const MAX_CART_ITEM_QUANTITY = 20;
+
+/** #42: what checkout found different between the cart and the menu, per item. */
+export interface CartChange {
+  menuItemId: string;
+  name: string;
+  /** PRICE_CHANGED: the cart now has the current price. UNAVAILABLE/REMOVED: taken out of the cart. QUANTITY_LIMITED: lowered to the maximum. */
+  change: 'PRICE_CHANGED' | 'UNAVAILABLE' | 'REMOVED' | 'QUANTITY_LIMITED';
+  previousPrice?: number;
+  currentPrice?: number;
+  previousQuantity?: number;
+  currentQuantity?: number;
+}
+
+/**
+ * #42: checkout found the cart out of date with the menu. The cart has already been brought up to
+ * date (current prices, unavailable items removed), so the customer reviews it and places the order
+ * again; nothing is ever charged at a price they didn't see.
+ */
+export class CartChangedError extends AppError {
+  constructor(
+    public readonly changes: CartChange[],
+    message = 'Some items in your cart changed. Review your cart and place the order again.',
+  ) {
+    super(409, 'CartChanged', message, { changes });
   }
 }
 

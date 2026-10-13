@@ -28,7 +28,9 @@ export class OrdersController {
   @ApiOperation({
     summary: 'Create an order from the current cart',
     description:
-      "The drop-off address is taken from the body, or else from the customer's profile, and copied onto the order. 400 if neither has one.",
+      "The drop-off address is taken from the body, or else from the customer's profile, and copied onto the order. 400 if neither has one. " +
+      'The cart is re-checked against the menu first (#42): if a price changed or an item is gone or unavailable, the answer is ' +
+      '409 CartChanged with details.changes, and the cart already holds the current prices. Each line is capped at 20.',
   })
   @ApiHeader({
     name: 'Idempotency-Key',

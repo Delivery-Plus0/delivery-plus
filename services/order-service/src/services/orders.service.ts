@@ -23,10 +23,11 @@ import {
   ConflictError,
   OrderPayload,
   PhoneNotVerifiedError,
+  MAX_CART_ITEM_QUANTITY,
 } from '@food-delivery/shared';
 import { DeliveryAddress, OrdersRepository } from '../repositories/orders.repository';
 import { OrderPaymentStatus, outcomeFor } from '../common/order-outcome';
-import { priceOrder } from '../common/pricing';
+import { itemsSubtotal, priceOrder } from '../common/pricing';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 
 export interface OrderQuote {
@@ -207,10 +208,15 @@ export class OrdersService implements OnModuleInit {
       await this.assertVerifiedPhone(authHeader);
     }
 
-    const cart = await this.cartClient.getCart(authHeader);
+    // #42: re-checked against the menu now (409 CartChanged with what changed, the cart already updated).
+    const cart = await this.cartClient.getValidatedCart(authHeader);
 
     if (cart.items.length === 0 || !cart.restaurantId) {
       throw new BadRequestError('Cart is empty');
+    }
+    const oversized = cart.items.find((item) => !Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > MAX_CART_ITEM_QUANTITY);
+    if (oversized) {
+      throw new BadRequestError(`Each item's quantity must be between 1 and ${MAX_CART_ITEM_QUANTITY}`);
     }
 
     const restaurant = await this.restaurantClient.getRestaurant(cart.restaurantId);
@@ -231,8 +237,8 @@ export class OrdersService implements OnModuleInit {
           price: item.price,
           quantity: item.quantity,
         })),
-        // Fee and split are priced here and stored with the order (#145).
-        priceOrder(cart.total, this.config.pricing),
+        // Fee and split are priced here and stored with the order (#145), from the re-checked items (#42).
+        priceOrder(itemsSubtotal(cart.items), this.config.pricing),
         idempotencyKey,
         delivery,
         (created) => orderEvent(created, OrderEventType.CREATED),

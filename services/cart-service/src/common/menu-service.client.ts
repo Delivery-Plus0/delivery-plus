@@ -8,6 +8,8 @@ export interface MenuItemDetails {
   name: string;
   price: number;
   available: boolean;
+  /** Archived items (#148) are kept for old orders but can never be bought again. */
+  archived?: boolean;
 }
 
 @Injectable()
@@ -31,6 +33,7 @@ export class MenuServiceClient {
       name: string;
       price: string;
       available: boolean;
+      archivedAt?: string | null;
     };
     return {
       id: body.id,
@@ -38,6 +41,7 @@ export class MenuServiceClient {
       name: body.name,
       price: parseFloat(body.price),
       available: body.available,
+      archived: Boolean(body.archivedAt),
     };
   }
 }

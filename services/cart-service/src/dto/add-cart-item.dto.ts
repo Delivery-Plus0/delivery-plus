@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsInt, IsUUID, Min } from 'class-validator';
+import { IsInt, IsUUID, Max, Min } from 'class-validator';
+import { MAX_CART_ITEM_QUANTITY } from '@food-delivery/shared';
 
 export class AddCartItemDto {
   @ApiProperty({
@@ -13,9 +14,11 @@ export class AddCartItemDto {
   @ApiProperty({
     description: 'Quantity of the menu item to add.',
     minimum: 1,
+    maximum: MAX_CART_ITEM_QUANTITY,
     example: 2,
   })
   @IsInt()
   @Min(1)
+  @Max(MAX_CART_ITEM_QUANTITY)
   quantity!: number;
 }

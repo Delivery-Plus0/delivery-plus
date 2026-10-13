@@ -7,6 +7,8 @@ export enum NotificationType {
   PICKED_UP = 'PICKED_UP',
   DELIVERED = 'DELIVERED',
   ORDER_CANCELLED = 'ORDER_CANCELLED',
+  PAYMENT_FAILED = 'PAYMENT_FAILED',
+  PAYMENT_REFUNDED = 'PAYMENT_REFUNDED',
 }
 
 @Entity('notifications')

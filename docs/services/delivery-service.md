@@ -11,7 +11,8 @@ From `services/delivery-service/src/controllers/deliveries.controller.ts`:
 - `POST /deliveries/:id/pickup` – driver marks the order as picked up
 - `POST /deliveries/:id/start` – driver starts the route
 - `POST /deliveries/:id/complete` – mark the delivery as completed
-- `POST /deliveries/:id/cancel` – cancel a delivery
+- `POST /deliveries/:id/cancel` – platform (ADMIN only) cancellation of a delivery and its order, with an optional `reason`. Releases the driver; past pickup the driver gets 25 % of the fee (`CANCELLATION_COMPENSATION`); the customer is refunded (#53/#56). Restaurant owners can't cancel deliveries.
+- On `order.cancelled`, an active delivery of that order is cancelled too (driver released, compensated past pickup). `assignDriver` checks the order first, so a cancelled order never gets a driver.
 - `GET /deliveries/me/current` – the calling driver's active delivery (DRIVER only; see below)
 - `GET /deliveries/me/history` – the calling driver's deliveries, newest first (DRIVER only; see below)
 - `GET /deliveries/me/rating-summary` – the calling driver's rating (DRIVER only; see below)

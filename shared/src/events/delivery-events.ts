@@ -22,6 +22,8 @@ export interface DeliveryPayload {
    */
   assignedAt?: string;
   status: string; // PENDING, ASSIGNED, PICKED_UP, IN_TRANSIT, DELIVERED, CANCELLED
+  /** On delivery.cancelled (#53): the platform's own words, when it gave any. */
+  cancellationReason?: string;
 }
 
 export interface DeliveryEvent extends BaseEvent<DeliveryPayload> {

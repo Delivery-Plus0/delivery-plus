@@ -29,6 +29,9 @@ const SWEEP_BATCH = 20;
  *   A periodic sweep (AUTO_DISPATCH_SWEEP_MS, default 15 s) assigns waiting deliveries, oldest
  *   first, once drivers come online.
  *
+ * - On `order.cancelled` (#53): cancel the order's delivery if it is still active. Assignment also
+ *   checks the order first, so a delivery created just before its order was cancelled gets no driver.
+ *
  * Safe against duplicates and races: events are deduplicated per consumer group (durable
  * idempotency), `deliveries.orderId` is unique (a concurrent manual create gets 409), the delivery
  * transition is compare-and-set, and the driver claim is exclusive (#33).
@@ -52,6 +55,14 @@ export class AutoDispatchService implements OnModuleInit, OnModuleDestroy {
       OrderEventType.READY_FOR_PICKUP,
       async (event) => {
         await this.dispatchOrder(event.payload.orderId);
+      },
+    );
+    // #53: a cancelled order's active delivery is cancelled too (driver released, compensated past pickup).
+    await this.kafkaConsumer.subscribe<OrderEvent['payload']>(
+      TOPICS.ORDER_EVENTS,
+      OrderEventType.CANCELLED,
+      async (event) => {
+        await this.deliveriesService.cancelForCancelledOrder(event.payload.orderId);
       },
     );
     await this.kafkaConsumer.start();

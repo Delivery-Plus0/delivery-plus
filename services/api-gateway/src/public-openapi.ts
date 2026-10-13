@@ -103,7 +103,8 @@ export const SERVICE_DEFINITIONS = [
       { method: 'post', path: '', summary: 'Create a payment for an order', auth: true, statusCode: 201 },
       { method: 'post', path: '/:id/process', summary: 'Process a payment', auth: true, statusCode: 201 },
       { method: 'get', path: '/:id', summary: 'Get payment status', auth: true, statusCode: 200 },
-      { method: 'post', path: '/:id/refund', summary: 'Refund a payment (support/admin only)', auth: true, statusCode: 201 },
+      { method: 'post', path: '/:id/refund', summary: 'Refund a completed payment in full (support/admin only; cancelled orders are refunded automatically)', auth: true, statusCode: 201 },
+      { method: 'get', path: '/:id/refund', summary: "Get a payment's refund record (the paying customer or admin)", auth: true, statusCode: 200 },
     ],
   },
   {
@@ -115,7 +116,7 @@ export const SERVICE_DEFINITIONS = [
       { method: 'post', path: '/:id/pickup', summary: 'Mark a delivery as picked up', auth: true, statusCode: 201 },
       { method: 'post', path: '/:id/start', summary: 'Start a delivery run', auth: true, statusCode: 201 },
       { method: 'post', path: '/:id/complete', summary: 'Complete a delivery', auth: true, statusCode: 201 },
-      { method: 'post', path: '/:id/cancel', summary: 'Cancel a delivery', auth: true, statusCode: 201 },
+      { method: 'post', path: '/:id/cancel', summary: 'Cancel a delivery and its order (admin only; compensates the driver past pickup, refunds the customer)', auth: true, statusCode: 201 },
       { method: 'get', path: '/me/current', summary: "Get the calling driver's active delivery (204 when none)", auth: true, statusCode: 200 },
       { method: 'get', path: '/me/earnings', summary: "Get the calling driver's earnings: pending, available, balance and ledger entries", auth: true, statusCode: 200 },
       { method: 'get', path: '/me/history', summary: "List the calling driver's deliveries, newest first", auth: true, statusCode: 200 },
@@ -554,6 +555,42 @@ export function generatePublicOpenApiDocument() {
           description: "The calling driver's average, count and recent comments (DRIVER role only; no customer identity)",
           content: { 'application/json': { schema: { $ref: '#/components/schemas/DriverRatingSummary' } } },
         };
+      }
+
+      // #53/#56: optional reasons on platform cancellations and support refunds; the refund audit record.
+      if (route.method === 'post' && (route.path === '/:id/cancel' || route.path === '/:id/refund') && ['deliveries', 'payments'].includes(service.service)) {
+        operation.requestBody = {
+          required: false,
+          content: {
+            'application/json': {
+              schema: { type: 'object', properties: { reason: { type: 'string', maxLength: service.service === 'deliveries' ? 200 : 300 } } },
+            },
+          },
+        };
+      }
+      if (route.method === 'get' && service.service === 'payments' && route.path === '/:id/refund') {
+        operation.responses['200'] = {
+          description: 'The refund (one per payment, always the whole amount; simulated until a payment gateway exists)',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  id: { type: 'string', format: 'uuid' },
+                  paymentId: { type: 'string', format: 'uuid' },
+                  orderId: { type: 'string', format: 'uuid' },
+                  amount: { type: 'string', example: '225.00' },
+                  currency: { type: 'string', example: 'EGP' },
+                  initiatedBy: { type: 'string', enum: ['CUSTOMER', 'RESTAURANT', 'SYSTEM', 'SUPPORT'] },
+                  reason: { type: 'string' },
+                  provider: { type: 'string', example: 'SIMULATED' },
+                  createdAt: { type: 'string', format: 'date-time' },
+                },
+              },
+            },
+          },
+        };
+        operation.responses['404'] = { description: 'The payment has not been refunded' };
       }
 
       if (route.method === 'post' && service.service === 'orders' && route.path === '') {

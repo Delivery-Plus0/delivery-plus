@@ -15,8 +15,9 @@ import {
   PaymentEvent,
   generateCorrelationId,
 } from '@food-delivery/shared';
-import { PaymentsRepository, isUniqueViolation } from '../repositories/payments.repository';
-import { OrderServiceClient } from '../common/order-service.client';
+import { PaymentsRepository, RefundDetails, isUniqueViolation } from '../repositories/payments.repository';
+import { Refund, RefundInitiator } from '../entities/refund.entity';
+import { OrderDto, OrderServiceClient } from '../common/order-service.client';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { CreatePaymentDto } from '../dto/create-payment.dto';
 import { ProcessPaymentDto } from '../dto/process-payment.dto';
@@ -36,11 +37,32 @@ export const PAYMENT_EVENT_NAMESPACE = '6f1c2b9e-6a4d-4f3e-9d7a-2f0b8c1e5a47';
 /** Orders in these states no longer react to a payment outcome. */
 const TERMINAL_ORDER_STATUSES: OrderStatus[] = [OrderStatus.FAILED, OrderStatus.CANCELLED, OrderStatus.DELIVERED];
 
-const SIDE_EFFECTS: Partial<Record<PaymentStatus, { eventType: PaymentEventType; orderStatus: OrderStatus }>> = {
+/**
+ * A refund (#56) has no order update of its own: the order is already CANCELLED, and order-service
+ * records the refunded payment from the event.
+ */
+const SIDE_EFFECTS: Partial<Record<PaymentStatus, { eventType: PaymentEventType; orderStatus?: OrderStatus }>> = {
   [PaymentStatus.PENDING]: { eventType: PaymentEventType.CREATED, orderStatus: OrderStatus.PAYMENT_PENDING },
   [PaymentStatus.COMPLETED]: { eventType: PaymentEventType.COMPLETED, orderStatus: OrderStatus.CONFIRMED },
   [PaymentStatus.FAILED]: { eventType: PaymentEventType.FAILED, orderStatus: OrderStatus.FAILED },
+  [PaymentStatus.REFUNDED]: { eventType: PaymentEventType.REFUNDED },
 };
+
+/** Who ended an order, as order.cancelled carries it, to the refund's initiator. */
+const REFUND_INITIATORS: Record<string, RefundInitiator> = {
+  CUSTOMER: RefundInitiator.CUSTOMER,
+  RESTAURANT: RefundInitiator.RESTAURANT,
+  SYSTEM: RefundInitiator.SYSTEM,
+};
+
+/** Why an order was cancelled and by whom, for the refund it triggers. */
+export interface CancelledOrder {
+  orderId: string;
+  cancelledBy?: string | null;
+  cancellationReason?: string | null;
+  /** What reported it, e.g. `order.cancelled:<eventId>`. */
+  source: string;
+}
 
 /** How long a request may hold the side-effects lease before another retry can take over. */
 export const SIDE_EFFECTS_LEASE_MS = 30_000;
@@ -195,23 +217,78 @@ export class PaymentsService {
   }
 
   /**
-   * Refunds are a support/admin action. Customers used to be able to refund their own COMPLETED
-   * payment at any time, even after delivery, with no order-state policy. A customer-facing refund
-   * needs such a policy (e.g. only for orders cancelled before preparation) before it is reopened.
+   * A support refund of a COMPLETED payment (ADMIN only). Customers never refund directly: their
+   * refunds come from cancelling before preparation (#53/#56, refundCancelledOrder). Repeating it
+   * returns the refunded payment.
    */
-  async refund(paymentId: string, requesterId: string, requesterRole: UserRole): Promise<Payment> {
+  async refund(paymentId: string, requesterId: string, requesterRole: UserRole, reason?: string): Promise<Payment> {
     if (requesterRole !== UserRole.ADMIN) {
       throw new ForbiddenError('Refunds can only be issued by support');
     }
     const payment = await this.findOrThrow(paymentId);
+    return this.refundPayment(payment, {
+      initiatedBy: RefundInitiator.SUPPORT,
+      requestedBy: requesterId,
+      reason: reason?.trim() || 'Refunded by support.',
+      source: 'support',
+    });
+  }
 
-    this.assertTransition(payment.status, PaymentStatus.REFUNDED);
-    const refunded = await this.payments.transition(paymentId, payment.status, PaymentStatus.REFUNDED);
-    const current = await this.findOrThrow(paymentId);
-    if (!refunded && current.status !== PaymentStatus.REFUNDED) {
+  /**
+   * #56: an order was cancelled. If its payment collected money, refund all of it (items + delivery
+   * fee). A payment still PENDING/PROCESSING is refunded when it completes (completeSideEffects); no
+   * payment or a FAILED one collected nothing. Idempotent: a redelivered event finds REFUNDED.
+   */
+  async refundCancelledOrder(cancelled: CancelledOrder): Promise<Payment | null> {
+    const payment = await this.payments.findCollectedByOrder(cancelled.orderId);
+    if (!payment) return null;
+    return this.refundPayment(payment, {
+      initiatedBy: REFUND_INITIATORS[cancelled.cancelledBy ?? ''] ?? RefundInitiator.SYSTEM,
+      requestedBy: null,
+      reason: (cancelled.cancellationReason?.trim() || 'The order was cancelled.').slice(0, 300),
+      source: cancelled.source.slice(0, 120),
+    });
+  }
+
+  /** The payment's refund record: for the paying customer and support only. */
+  async getRefund(paymentId: string, requesterId: string, requesterRole: UserRole): Promise<Refund> {
+    await this.getStatus(paymentId, requesterId, requesterRole);
+    const refund = await this.payments.findRefundByPayment(paymentId);
+    if (!refund) throw new NotFoundError(`Payment ${paymentId} has not been refunded`);
+    return refund;
+  }
+
+  /**
+   * Finishes side effects that a failed or crashed request left owed (e.g. a refund whose event
+   * could not be published while another request held the lease). Safe to run anywhere, any time:
+   * each payment's side effects are leased and tracked per status.
+   */
+  async finishOwedSideEffects(idleMs: number, limit: number): Promise<number> {
+    const owed = await this.payments.findWithOwedSideEffects(idleMs, limit);
+    let finished = 0;
+    for (const payment of owed) {
+      try {
+        await this.completeSideEffects(payment);
+        finished++;
+      } catch (err) {
+        this.logger.warn(`Side effects of payment ${payment.id} (${payment.status}) are still owed: ${(err as Error).message}`);
+      }
+    }
+    return finished;
+  }
+
+  /** Refunds the whole payment once, then publishes payment.refunded (also on a repeat, if still owed). */
+  private async refundPayment(payment: Payment, details: RefundDetails): Promise<Payment> {
+    const outcome = await this.payments.refundOnce(payment.id, details);
+    if (outcome === 'missing') throw new NotFoundError(`Payment ${payment.id} not found`);
+    const current = await this.findOrThrow(payment.id);
+    if (outcome === 'not-refundable') {
       throw new InvalidStateTransitionError('Payment', current.status, PaymentStatus.REFUNDED);
     }
-    return current;
+    if (outcome === 'refunded') {
+      this.logger.log(`Refunded payment ${payment.id} of order ${payment.orderId} (${details.initiatedBy}: ${details.source})`);
+    }
+    return this.completeSideEffects(current);
   }
 
   /** Validates that a replayed idempotency key is being reused for the same order. */
@@ -243,6 +320,7 @@ export class PaymentsService {
       return payment;
     }
 
+    let cancelledOrder: OrderDto | null = null;
     try {
       // Re-read under the lease: a previous holder may have finished some steps.
       const current = await this.findOrThrow(payment.id);
@@ -250,6 +328,8 @@ export class PaymentsService {
       if (!effects) return current;
 
       if (current.publishedEventStatus !== current.status) {
+        const refundId =
+          current.status === PaymentStatus.REFUNDED ? (await this.payments.findRefundByPayment(current.id))?.id : undefined;
         const event: PaymentEvent = {
           eventId: paymentEventId(current.id, effects.eventType),
           eventType: effects.eventType,
@@ -261,6 +341,7 @@ export class PaymentsService {
             customerId: current.customerId,
             amount: parseFloat(current.amount),
             status: current.status,
+            ...(refundId ? { refundId } : {}),
           },
         };
         await this.kafkaProducer.publish(TOPICS.PAYMENT_EVENTS, event);
@@ -268,34 +349,52 @@ export class PaymentsService {
       }
 
       if (current.orderSyncedStatus !== current.status) {
-        await this.syncOrder(current, effects.orderStatus);
+        if (effects.orderStatus) cancelledOrder = await this.syncOrder(current, effects.orderStatus);
         await this.payments.markOrderSynced(current.id, current.status);
       }
     } finally {
       await this.payments.releaseSideEffectsLease(payment.id);
     }
 
+    if (cancelledOrder) {
+      // #56 rule 5: the payment completed after its order was cancelled. Never keep that money.
+      return this.refundPayment(payment, {
+        initiatedBy: REFUND_INITIATORS[cancelledOrder.cancelledBy ?? ''] ?? RefundInitiator.SYSTEM,
+        requestedBy: null,
+        reason: 'The order was cancelled before the payment completed.',
+        source: 'payment.completed-after-cancel',
+      });
+    }
     return this.findOrThrow(payment.id);
   }
 
   /**
    * Moves the order to the status this payment implies. order-service's payment.failed consumer
    * converges the order to the same FAILED status, and a same-status update is a no-op there, so
-   * the two writers never disagree. The one legitimate conflict left: the customer cancelled the
-   * order while the payment was still pending, then the payment was declined. The order is already
-   * closed, so there is nothing to sync. A COMPLETED payment on a closed order is still an error:
-   * that money needs a refund, and silently marking it synced would hide it.
+   * the two writers never disagree. Two legitimate conflicts are left, both because the customer
+   * cancelled while the payment was still pending:
+   * - the payment was then declined: the order is already closed, nothing to sync;
+   * - the payment then completed: the order is returned so the caller refunds it (#56). Any other
+   *   conflict for a COMPLETED payment is an error and stays visible.
    */
-  private async syncOrder(payment: Payment, orderStatus: OrderStatus): Promise<void> {
+  private async syncOrder(payment: Payment, orderStatus: OrderStatus): Promise<OrderDto | null> {
     try {
       await this.orderClient.updateOrderStatus(payment.orderId, orderStatus);
+      return null;
     } catch (err) {
-      if (!(err instanceof ConflictError) || payment.status !== PaymentStatus.FAILED) throw err;
+      const settled = payment.status === PaymentStatus.FAILED || payment.status === PaymentStatus.COMPLETED;
+      if (!(err instanceof ConflictError) || !settled) throw err;
       const order = await this.orderClient.getOrderAsSystem(payment.orderId);
+      if (payment.status === PaymentStatus.COMPLETED) {
+        if (order.status !== OrderStatus.CANCELLED) throw err;
+        this.logger.warn(`Payment ${payment.id} completed after order ${payment.orderId} was cancelled; refunding it`);
+        return order;
+      }
       if (!TERMINAL_ORDER_STATUSES.includes(order.status)) throw err;
       this.logger.warn(
         `Payment ${payment.id} failed after order ${payment.orderId} was already ${order.status}; nothing to sync`,
       );
+      return null;
     }
   }
 

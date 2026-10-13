@@ -44,7 +44,17 @@ Every order that ends unsuccessfully says who ended it and why, recorded **with*
 | Restaurant owner cancels | `RESTAURANT` | The restaurant cancelled this order. (+ `: <reason>` when the owner sends `reason`, ≤ 200 chars) |
 | Platform cancels (ADMIN-role callers: delivery-service, support) | `SYSTEM` | Delivery Plus cancelled this order. (+ optional reason) |
 
-`paymentStatus` (`PENDING` / `COMPLETED` / `FAILED`) is recorded from the payment events this service consumes. It never moves backwards and is independent of the order status, so a payment that completes after a cancellation is still visible (refunds: #53/#56).
+`paymentStatus` (`PENDING` / `COMPLETED` / `FAILED` / `REFUNDED`) is recorded from the payment events this service consumes. It never moves backwards and is independent of the order status. `REFUNDED` (from `payment.refunded`, #56) is final.
+
+## Cancellation window (#53)
+
+Who may cancel, by the order's status, is enforced here for every caller (`cancellationRefusal` in `order-transition-rules.ts`; rules in [cancellation-and-refunds.md](../business/cancellation-and-refunds.md)):
+
+- **Customer:** only while `CREATED`, `PAYMENT_PENDING` or `CONFIRMED`; later it's a 409.
+- **Restaurant owner:** only while `CONFIRMED` (reject, #154).
+- **Admin:** any unfinished order, except once a driver is on it (`DRIVER_ASSIGNED`, `PICKED_UP`): then 409, cancel the delivery (`POST /deliveries/:id/cancel`). Services (`system:*` callers) may still sync it.
+- Cancelling a `CANCELLED` order returns it unchanged.
+- order-service also converges the order to `CANCELLED` from `delivery.cancelled`.
 
 Migration 005 backfills only what the stored status proves: FAILED orders → `PAYMENT` and payment FAILED; PAYMENT_PENDING → payment PENDING; orders past CONFIRMED → payment COMPLETED. Older CANCELLED orders keep both unknown (null).
 
@@ -57,7 +67,7 @@ Migration 005 backfills only what the stored status proves: FAILED orders → `P
 - **Rejecting an order:** a restaurant owner may cancel (reject) an order only while it is **CONFIRMED**, before preparing starts. From PREPARING on, it's a 409: "An order can only be rejected before you start preparing it."
   - The optional `reason` is recorded as "The restaurant cancelled this order: <reason>" (#143).
   - The reason travels on `order.cancelled` (`cancelledBy`, `cancellationReason`), and notification-service tells the customer.
-  - The money isn't returned automatically yet: refunds are #53. The order keeps showing the payment as Paid.
+  - A paid order is refunded in full automatically (#56); the order's `paymentStatus` becomes `REFUNDED`.
 - **Customer first name:** copied at checkout from the customer's profile (`customerFirstName`) so the kitchen can call the order out. Only the first name, never the surname or contact data. A profile outage never blocks checkout (null).
 - **Today summary:** `GET /orders/restaurant/:restaurantId/summary` (owner only) returns today's (Africa/Cairo calendar day):
   - `orders`, `active`, `delivered`, `cancelled` (includes failed);

@@ -9,7 +9,18 @@ From `services/payment-service/src/controllers/payments.controller.ts` (exposed 
 - `POST /payments` – create a payment for an order (moves the order to `PAYMENT_PENDING`). Accepts an optional `Idempotency-Key` header.
 - `POST /payments/:id/process` – simulate processing and settle to success or failure. Retry-safe.
 - `GET /payments/:id` – get payment status
-- `POST /payments/:id/refund` – refund a completed payment
+- `POST /payments/:id/refund` – support (ADMIN) refund of a completed payment, in full, with an optional `reason`. Repeating it returns the refunded payment.
+- `GET /payments/:id/refund` – the payment's refund record (the paying customer or ADMIN); 404 when not refunded
+
+## Refunds (#56)
+
+The rules and state transitions are in [cancellation-and-refunds.md](../business/cancellation-and-refunds.md). In short:
+
+- **Automatic.** payment-service consumes `order.cancelled` (consumer group `payment-service-group`). If the order's payment is `COMPLETED`, it refunds all of it (items + delivery fee). A payment that completes after its order was cancelled is refunded right away.
+- **Once, auditable.** `PaymentsRepository.refundOnce` locks the payment row, writes the `refunds` record (initiator, reason, source, `provider = SIMULATED`) and moves the payment `COMPLETED → REFUNDED` in one transaction. `refunds.paymentId` is unique (migration 003).
+- **Event.** `payment.refunded` (deterministic eventId per payment, `refundId` in the payload) is published like the other payment events, tracked by `publishedEventStatus`.
+- **Sweep.** Every `PAYMENT_SIDE_EFFECTS_SWEEP_MS` (default 30000; 0 turns it off), events and order updates a failed or crashed request left owed are finished.
+- **Simulated** until a real payment gateway exists.
 
 ## Idempotency and retries
 

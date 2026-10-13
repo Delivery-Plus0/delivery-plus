@@ -158,6 +158,8 @@ jobs:
           check payment_service      "select count(*) from information_schema.tables where table_name='payments'" "table payments"
           check payment_service      "select count(*) from pg_indexes where indexname='UQ_payments_active_order'" "index UQ_payments_active_order"
           check payment_service      "select count(*) from pg_indexes where indexname='UQ_payments_customer_idempotency_key'" "index UQ_payments_customer_idempotency_key"
+          check payment_service      "select count(*) from information_schema.tables where table_name='refunds'" "table refunds"
+          check payment_service      "select count(*) from pg_indexes where indexname='UQ_refunds_payment'" "index UQ_refunds_payment"
 
           check delivery_service     "select count(*) from information_schema.tables where table_name='deliveries'" "table deliveries"
           check delivery_service     "select count(*) from pg_indexes where indexname='UQ_deliveries_orderId'" "index UQ_deliveries_orderId"

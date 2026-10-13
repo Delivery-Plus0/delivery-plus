@@ -19,6 +19,8 @@ import { Column, CreateDateColumn, DataSource, Entity, Index, PrimaryGeneratedCo
 import { PaymentStatus } from '@food-delivery/shared';
 import { Payment, UQ_PAYMENTS_ACTIVE_ORDER, UQ_PAYMENTS_CUSTOMER_IDEMPOTENCY_KEY } from '../entities/payment.entity';
 import { PaymentsRepository, isUniqueViolation } from './payments.repository';
+import { Refund, RefundInitiator } from '../entities/refund.entity';
+import { randomUUID } from 'crypto';
 
 const DATABASE_URL = process.env.PAYMENT_TEST_DATABASE_URL;
 const describeDb = DATABASE_URL ? describe : describe.skip;
@@ -51,7 +53,7 @@ describeDb('PaymentsRepository (PostgreSQL integration)', () => {
   const newOrderId = () => `order-${Date.now()}-${++seq}`;
 
   beforeAll(async () => {
-    ds = await dataSource([Payment], true).initialize();
+    ds = await dataSource([Payment, Refund], true).initialize();
     repo = new PaymentsRepository(ds.getRepository(Payment));
   });
 
@@ -60,7 +62,7 @@ describeDb('PaymentsRepository (PostgreSQL integration)', () => {
   });
 
   beforeEach(async () => {
-    await ds.query('TRUNCATE payments');
+    await ds.query('TRUNCATE refunds, payments');
   });
 
   it('schema is stable: synchronize (dev) leaves no pending changes', async () => {
@@ -185,6 +187,47 @@ describeDb('PaymentsRepository (PostgreSQL integration)', () => {
       const stored = await repo.findById(p.id);
       expect(stored?.publishedEventStatus).toBe(PaymentStatus.PENDING);
       expect(stored?.orderSyncedStatus).toBe(PaymentStatus.PENDING);
+    });
+  });
+
+  describe('refunds (#56)', () => {
+    const details = { initiatedBy: RefundInitiator.CUSTOMER, requestedBy: null, reason: 'You cancelled this order.', source: 'order.cancelled:e1' };
+
+    async function completedPayment(): Promise<Payment> {
+      const p = await repo.create({ orderId: randomUUID(), customerId: randomUUID(), amount: '225.00' });
+      await repo.transition(p.id, PaymentStatus.PENDING, PaymentStatus.PROCESSING);
+      await repo.transition(p.id, PaymentStatus.PROCESSING, PaymentStatus.COMPLETED);
+      return p;
+    }
+
+    it('many concurrent refunds of one payment: one refund row, payment REFUNDED, the rest find it done', async () => {
+      const p = await completedPayment();
+
+      const outcomes = await Promise.all(Array.from({ length: 10 }, () => repo.refundOnce(p.id, details)));
+
+      expect(outcomes.filter((o) => o === 'refunded')).toHaveLength(1);
+      expect(outcomes.filter((o) => o === 'already')).toHaveLength(9);
+      expect(await ds.getRepository(Refund).count({ where: { paymentId: p.id } })).toBe(1);
+      expect((await repo.findById(p.id))?.status).toBe(PaymentStatus.REFUNDED);
+      expect(await repo.findRefundByPayment(p.id)).toMatchObject({ amount: '225.00', currency: 'EGP', provider: 'SIMULATED', ...details });
+    });
+
+    it('refuses a payment that never completed and writes nothing', async () => {
+      const p = await repo.create({ orderId: randomUUID(), customerId: randomUUID(), amount: '10.00' });
+
+      expect(await repo.refundOnce(p.id, details)).toBe('not-refundable');
+      expect(await ds.getRepository(Refund).count()).toBe(0);
+      expect((await repo.findById(p.id))?.status).toBe(PaymentStatus.PENDING);
+    });
+
+    it('finds the collected payment of an order and the payments with owed side effects', async () => {
+      const p = await completedPayment();
+      expect((await repo.findCollectedByOrder(p.orderId))?.id).toBe(p.id);
+
+      expect((await repo.findWithOwedSideEffects(0, 10)).map((x) => x.id)).toContain(p.id);
+      await repo.markEventPublished(p.id, PaymentStatus.COMPLETED);
+      await repo.markOrderSynced(p.id, PaymentStatus.COMPLETED);
+      expect((await repo.findWithOwedSideEffects(0, 10)).map((x) => x.id)).not.toContain(p.id);
     });
   });
 });

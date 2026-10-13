@@ -5,6 +5,7 @@ import { JwtAuthGuard, CurrentUser, JwtPayload, Roles, RolesGuard, UserRole } fr
 import { DeliveriesService } from '../services/deliveries.service';
 import { DriverCardService } from '../services/driver-card.service';
 import { CreateDeliveryDto } from '../dto/create-delivery.dto';
+import { CancelDeliveryDto } from '../dto/cancel-delivery.dto';
 import { DriverCurrentDeliveryDto } from '../dto/driver-current-delivery.dto';
 import { DriverHistoryPageDto, DriverHistoryQueryDto } from '../dto/driver-delivery-history.dto';
 import { DriverHistoryService } from '../services/driver-history.service';
@@ -61,9 +62,19 @@ export class DeliveriesController {
   }
 
   @Post(':id/cancel')
-  @ApiOperation({ summary: 'Cancel a delivery (dispatch role only)' })
-  cancel(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Headers('authorization') authHeader: string) {
-    return this.deliveriesService.cancel(id, { userId: user.sub, role: user.role, authHeader });
+  @ApiOperation({
+    summary: 'Cancel a delivery and its order (platform / ADMIN only)',
+    description:
+      'Releases the driver; past pickup the driver gets 25% of the delivery fee as compensation. The order is cancelled ' +
+      'with the reason and a collected payment is refunded in full (#53/#56). Repeating it is safe.',
+  })
+  cancel(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @Headers('authorization') authHeader: string,
+    @Body() dto: CancelDeliveryDto,
+  ) {
+    return this.deliveriesService.cancel(id, { userId: user.sub, role: user.role, authHeader }, dto.reason);
   }
 
   @Get('me/current')

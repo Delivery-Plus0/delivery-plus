@@ -48,6 +48,14 @@ export class Delivery {
   @Column({ type: 'timestamptz', nullable: true })
   cancelledAt?: Date | null;
 
+  /**
+   * #53: the platform's own words when it cancelled this delivery, written with the move to
+   * CANCELLED and carried on delivery.cancelled, so the order records the same reason whichever path
+   * (the HTTP sync or the event) reaches order-service first.
+   */
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  cancellationReason?: string | null;
+
   @Column({ type: 'enum', enum: DeliveryStatus, default: DeliveryStatus.CREATED })
   status!: DeliveryStatus;
 

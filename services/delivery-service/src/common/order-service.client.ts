@@ -82,13 +82,14 @@ export class OrderServiceClient {
     }
   }
 
-  async updateOrderStatus(orderId: string, status: OrderStatus): Promise<void> {
+  /** `reason` only with CANCELLED: the platform's own words, shown to the customer (#53). */
+  async updateOrderStatus(orderId: string, status: OrderStatus, reason?: string): Promise<void> {
     const safeOrderId = assertValidUuidV4(orderId, 'orderId');
     const authHeader = await this.systemToken.mint();
     const response = await fetch(`${this.config.orderServiceUrl}/orders/${safeOrderId}/status`, {
       method: 'PATCH',
       headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status }),
+      body: JSON.stringify(reason ? { status, reason } : { status }),
     });
 
     if (!response.ok) {

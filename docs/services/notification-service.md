@@ -20,6 +20,8 @@ Each notification stores a **message key and its parameters** next to the Englis
 | `payment.completed` | `orderId` |
 | `delivery.driver_assigned`, `delivery.picked_up`, `delivery.delivered` | `orderId` |
 | `order.cancelled` | `orderId`; `cancelledBy` (`RESTAURANT` / `SYSTEM`); `note`, the canceller's own words shown as written, when one was given |
+| `payment.failed` | `orderId` (a declined payment: the order was not placed) |
+| `payment.refunded` | `orderId`; `amount` (two decimals); `currency` (`EGP`) — #56 |
 
 Parameters never hold personal data. Migration 004 adds both columns, nullable: `messageKey` (varchar(64)) and `params` (jsonb).
 

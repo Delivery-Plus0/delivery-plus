@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { PaymentStatus } from '@food-delivery/shared';
 import { ACTIVE_PAYMENT_STATUSES, Payment } from '../entities/payment.entity';
+import { REFUND_PROVIDER_SIMULATED, Refund } from '../entities/refund.entity';
 
 export type CreatePaymentData = Pick<Payment, 'orderId' | 'customerId' | 'amount'> & {
   idempotencyKey?: string | null;
@@ -88,7 +89,78 @@ export class PaymentsRepository {
   async markOrderSynced(id: string, status: PaymentStatus): Promise<void> {
     await this.repo.update({ id }, { orderSyncedStatus: status });
   }
+
+  /** The order's payment that collected money (COMPLETED) or already gave it back (REFUNDED), if any. */
+  findCollectedByOrder(orderId: string): Promise<Payment | null> {
+    return this.repo.findOne({
+      where: { orderId, status: In([PaymentStatus.COMPLETED, PaymentStatus.REFUNDED]) },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  /**
+   * Refunds the whole payment once (#56): locks the payment row, then writes the refund record and
+   * moves the payment COMPLETED → REFUNDED in one transaction. Concurrent or repeated calls queue on
+   * the lock and find REFUNDED ('already'); a payment that never completed is 'not-refundable'.
+   */
+  async refundOnce(id: string, details: RefundDetails): Promise<RefundOutcome> {
+    return this.repo.manager.transaction(async (manager) => {
+      const payment = await manager
+        .getRepository(Payment)
+        .createQueryBuilder('p')
+        .setLock('pessimistic_write')
+        .where('p.id = :id', { id })
+        .getOne();
+      if (!payment) return 'missing';
+      if (payment.status === PaymentStatus.REFUNDED) return 'already';
+      if (payment.status !== PaymentStatus.COMPLETED) return 'not-refundable';
+
+      const refunds = manager.getRepository(Refund);
+      await refunds.save(
+        refunds.create({
+          paymentId: payment.id,
+          orderId: payment.orderId,
+          customerId: payment.customerId,
+          amount: payment.amount,
+          currency: 'EGP',
+          provider: REFUND_PROVIDER_SIMULATED,
+          ...details,
+        }),
+      );
+      await manager.getRepository(Payment).update({ id, status: PaymentStatus.COMPLETED }, { status: PaymentStatus.REFUNDED });
+      return 'refunded';
+    });
+  }
+
+  findRefundByPayment(paymentId: string): Promise<Refund | null> {
+    return this.repo.manager.getRepository(Refund).findOne({ where: { paymentId } });
+  }
+
+  /**
+   * Settled payments whose event or order update is still owed and that nobody is working on: the
+   * request that owed them failed or crashed. Oldest first; `idleMs` keeps clear of requests in flight.
+   */
+  findWithOwedSideEffects(idleMs: number, limit: number): Promise<Payment[]> {
+    return this.repo
+      .createQueryBuilder('p')
+      .where('p.status IN (:...settled)', {
+        settled: [PaymentStatus.COMPLETED, PaymentStatus.FAILED, PaymentStatus.REFUNDED],
+      })
+      .andWhere(
+        '(p."publishedEventStatus" IS DISTINCT FROM p.status::text OR p."orderSyncedStatus" IS DISTINCT FROM p.status::text)',
+      )
+      .andWhere('(p."sideEffectsLeaseUntil" IS NULL OR p."sideEffectsLeaseUntil" < now())')
+      .andWhere(`p."updatedAt" < now() - (:idleMs * interval '1 millisecond')`, { idleMs })
+      .orderBy('p."updatedAt"', 'ASC')
+      .limit(limit)
+      .getMany();
+  }
 }
+
+/** The audit fields of a refund; the amount, currency and provider come from the payment. */
+export type RefundDetails = Pick<Refund, 'initiatedBy' | 'requestedBy' | 'reason' | 'source'>;
+
+export type RefundOutcome = 'refunded' | 'already' | 'not-refundable' | 'missing';
 
 const PG_UNIQUE_VIOLATION = '23505';
 

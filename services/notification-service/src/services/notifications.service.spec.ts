@@ -36,7 +36,7 @@ describe('NotificationsService', () => {
     it('subscribes to the order, payment, and delivery events and starts the consumer', async () => {
       await service.onModuleInit();
 
-      expect(kafkaConsumer.subscribe).toHaveBeenCalledTimes(6);
+      expect(kafkaConsumer.subscribe).toHaveBeenCalledTimes(8);
       expect(kafkaConsumer.subscribe).toHaveBeenNthCalledWith(
         1,
         TOPICS.ORDER_EVENTS,
@@ -54,6 +54,8 @@ describe('NotificationsService', () => {
         [TOPICS.DELIVERY_EVENTS, DeliveryEventType.PICKED_UP],
         [TOPICS.DELIVERY_EVENTS, DeliveryEventType.COMPLETED],
         [TOPICS.ORDER_EVENTS, OrderEventType.CANCELLED],
+        [TOPICS.PAYMENT_EVENTS, PaymentEventType.FAILED],
+        [TOPICS.PAYMENT_EVENTS, PaymentEventType.REFUNDED],
       ]);
       expect(kafkaConsumer.start).toHaveBeenCalledTimes(1);
     });
@@ -170,7 +172,35 @@ describe('NotificationsService', () => {
       expect(repository.create).toHaveBeenCalledWith('customer-1', type, title, message, { messageKey, params: { orderId: 'order-42' } });
     });
 
-    it.each([PaymentEventType.COMPLETED, DeliveryEventType.DRIVER_ASSIGNED, DeliveryEventType.PICKED_UP, DeliveryEventType.COMPLETED])(
+    it('tells the customer a declined payment means the order was not placed', async () => {
+      await handlerFor(PaymentEventType.FAILED)(
+        event(PaymentEventType.FAILED, { paymentId: 'p1', orderId: 'order-42', customerId: 'customer-1', amount: 24.5, status: 'FAILED' }),
+      );
+
+      expect(repository.create).toHaveBeenCalledWith(
+        'customer-1',
+        NotificationType.PAYMENT_FAILED,
+        'Payment declined',
+        'Your payment for order order-42 was declined, so the order was not placed.',
+        { messageKey: 'payment.failed', params: { orderId: 'order-42' } },
+      );
+    });
+
+    it('tells the customer their refund was issued, with the amount (#56)', async () => {
+      await handlerFor(PaymentEventType.REFUNDED)(
+        event(PaymentEventType.REFUNDED, { paymentId: 'p1', orderId: 'order-42', customerId: 'customer-1', amount: 225, status: 'REFUNDED', refundId: 'r1' }),
+      );
+
+      expect(repository.create).toHaveBeenCalledWith(
+        'customer-1',
+        NotificationType.PAYMENT_REFUNDED,
+        'Refund issued',
+        'We refunded EGP 225.00 for your order order-42.',
+        { messageKey: 'payment.refunded', params: { orderId: 'order-42', amount: '225.00', currency: 'EGP' } },
+      );
+    });
+
+    it.each([PaymentEventType.COMPLETED, PaymentEventType.FAILED, PaymentEventType.REFUNDED, DeliveryEventType.DRIVER_ASSIGNED, DeliveryEventType.PICKED_UP, DeliveryEventType.COMPLETED])(
       'skips %s without a customerId instead of notifying anyone (older events)',
       async (eventType) => {
         await handlerFor(eventType)(event(eventType, { orderId: 'order-42', status: 'X' }));

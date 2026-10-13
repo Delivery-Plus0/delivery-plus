@@ -773,6 +773,89 @@ async function runE2E() {
     }
     console.log(`Restaurant ops: rejected with a reason (customer notified), late reject 409, today: ${summary154.orders} orders, EGP ${summary154.revenue}`);
 
+    // Cancellations and refunds (#53/#56, docs/business/cancellation-and-refunds.md).
+    // Checkout is limited to 5 orders a minute per customer, and this script has just placed several:
+    // clear the counters (test Redis only) rather than slow the run down.
+    const limits = new Redis(REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 2 });
+    await limits
+      .connect()
+      .then(async () => {
+        const keys = await limits.keys('ratelimit:*');
+        if (keys.length) await limits.del(...keys);
+      })
+      .finally(() => limits.disconnect());
+    const notificationOf = async (type: string, id: string) => {
+      const deadline = Date.now() + 20_000;
+      for (;;) {
+        const notes = (await axios.get(`${API_URL}/api/notifications?limit=50`, customerAuth)).data;
+        const found = (notes.items ?? notes).find(
+          (note: { type?: string; params?: Record<string, string> | null }) => note.type === type && note.params?.orderId === id,
+        );
+        if (found) return found as { params: Record<string, string> };
+        if (Date.now() > deadline) throw new Error(`No ${type} notification for order ${id}`);
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    };
+    const paidOrder = async () => {
+      await axios.post(`${API_URL}/api/cart/items`, { menuItemId, quantity: 1 }, customerAuth);
+      const id = (await axios.post(`${API_URL}/api/orders`, {}, customerAuth)).data.id as string;
+      const payment = (await axios.post(`${API_URL}/api/payments`, { orderId: id }, customerAuth)).data;
+      await axios.post(`${API_URL}/api/payments/${payment.id}/process`, { simulateFailure: false }, customerAuth);
+      await waitForOrderFields(id, (order) => order.status === 'CONFIRMED', 'expected CONFIRMED');
+      return { id, payment };
+    };
+
+    // 1. The rejected (paid) order above is refunded in full, recorded as the restaurant's.
+    const rejectRefunded = await waitForOrderFields(rejectId, (order) => order.paymentStatus === 'REFUNDED', 'expected payment REFUNDED');
+    const rejectRefund = (await axios.get(`${API_URL}/api/payments/${rejectPayment.id}/refund`, customerAuth)).data;
+    const rejectRefundNote = await notificationOf('PAYMENT_REFUNDED', rejectId);
+
+    // 2. A customer cancels a paid order before preparation: full refund, once.
+    const paid = await paidOrder();
+    await axios.patch(`${API_URL}/api/orders/${paid.id}/status`, { status: 'CANCELLED' }, customerAuth);
+    await waitForOrderFields(paid.id, (order) => order.status === 'CANCELLED' && order.paymentStatus === 'REFUNDED', 'expected CANCELLED + REFUNDED');
+    const customerRefund = (await axios.get(`${API_URL}/api/payments/${paid.payment.id}/refund`, customerAuth)).data;
+    const refundedPayment = (await axios.get(`${API_URL}/api/payments/${paid.payment.id}`, customerAuth)).data;
+    const cancelAgain = await statusOf(axios.patch(`${API_URL}/api/orders/${paid.id}/status`, { status: 'CANCELLED' }, customerAuth));
+    const supportRefundByCustomer = await statusOf(axios.post(`${API_URL}/api/payments/${paid.payment.id}/refund`, {}, customerAuth));
+
+    // 3. Once the kitchen starts, the customer can no longer cancel (the API enforces the app's rule).
+    const cooking = await paidOrder();
+    await axios.patch(`${API_URL}/api/orders/${cooking.id}/status`, { status: 'PREPARING' }, ownerAuth);
+    const lateCustomerCancel = await statusOf(axios.patch(`${API_URL}/api/orders/${cooking.id}/status`, { status: 'CANCELLED' }, customerAuth));
+    const stillPaid = (await axios.get(`${API_URL}/api/payments/${cooking.payment.id}`, customerAuth)).data;
+
+    // 4. Nothing collected, nothing refunded: the unpaid cancelled order and the declined one.
+    const unpaidCancelled = (await axios.get(`${API_URL}/api/orders/${cancelledId}`, customerAuth)).data;
+    const declinedRefund = await statusOf(axios.get(`${API_URL}/api/payments/${declinedPayment.id}/refund`, customerAuth));
+    const declinedNote = await notificationOf('PAYMENT_FAILED', declinedId);
+
+    if (
+      rejectRefunded.status !== 'CANCELLED' ||
+      rejectRefund.initiatedBy !== 'RESTAURANT' ||
+      rejectRefund.amount !== rejectPayment.amount ||
+      rejectRefund.currency !== 'EGP' ||
+      rejectRefund.provider !== 'SIMULATED' ||
+      rejectRefundNote.params.amount !== Number(rejectPayment.amount).toFixed(2) ||
+      customerRefund.initiatedBy !== 'CUSTOMER' ||
+      customerRefund.amount !== paid.payment.amount ||
+      refundedPayment.status !== 'REFUNDED' ||
+      cancelAgain !== 200 ||
+      supportRefundByCustomer !== 403 ||
+      lateCustomerCancel !== 409 ||
+      stillPaid.status !== 'COMPLETED' ||
+      unpaidCancelled.paymentStatus !== null ||
+      declinedRefund !== 404 ||
+      declinedNote.params.orderId !== declinedId
+    ) {
+      throw new Error(
+        `Cancellations/refunds: ${JSON.stringify({ rejectRefund, customerRefund, refunded: refundedPayment.status, cancelAgain, supportRefundByCustomer, lateCustomerCancel, stillPaid: stillPaid.status, unpaid: unpaidCancelled.paymentStatus, declinedRefund })}`,
+      );
+    }
+    console.log(
+      `Refunds: restaurant reject → EGP ${rejectRefund.amount} refunded (customer notified); customer cancel → refunded once; cancel after PREPARING 409; unpaid/declined → no refund`,
+    );
+
     console.log('E2E critical-path flow completed successfully!');
   } catch (error: any) {
     console.error('E2E failed:');

@@ -9,6 +9,8 @@ export interface OrderDto {
   restaurantId: string;
   status: OrderStatus;
   totalAmount: string;
+  /** Who ended a cancelled order (#143): CUSTOMER, RESTAURANT or SYSTEM. */
+  cancelledBy?: string | null;
 }
 
 @Injectable()

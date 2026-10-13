@@ -2186,7 +2186,7 @@
     },
     "/api/payments/{id}/refund": {
       "post": {
-        "summary": "Refund a payment (support/admin only)",
+        "summary": "Refund a completed payment in full (support/admin only; cancelled orders are refunded automatically)",
         "tags": [
           "payments"
         ],
@@ -2210,6 +2210,117 @@
           },
           "403": {
             "description": "Forbidden"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 300
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "Get a payment's refund record (the paying customer or admin)",
+        "tags": [
+          "payments"
+        ],
+        "operationId": "payments_get_api_payments_id_refund",
+        "responses": {
+          "200": {
+            "description": "The refund (one per payment, always the whole amount; simulated until a payment gateway exists)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "paymentId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "orderId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "amount": {
+                      "type": "string",
+                      "example": "225.00"
+                    },
+                    "currency": {
+                      "type": "string",
+                      "example": "EGP"
+                    },
+                    "initiatedBy": {
+                      "type": "string",
+                      "enum": [
+                        "CUSTOMER",
+                        "RESTAURANT",
+                        "SYSTEM",
+                        "SUPPORT"
+                      ]
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "provider": {
+                      "type": "string",
+                      "example": "SIMULATED"
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "The payment has not been refunded"
           }
         },
         "parameters": [
@@ -2446,7 +2557,7 @@
     },
     "/api/deliveries/{id}/cancel": {
       "post": {
-        "summary": "Cancel a delivery",
+        "summary": "Cancel a delivery and its order (admin only; compensates the driver past pickup, refunds the customer)",
         "tags": [
           "deliveries"
         ],
@@ -2486,7 +2597,23 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 200
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/deliveries/me/current": {

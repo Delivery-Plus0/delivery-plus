@@ -115,7 +115,14 @@ export class OrdersRepository {
    * a payment that completes after the order was cancelled is still recorded.
    */
   async recordPaymentStatus(id: string, status: string): Promise<void> {
-    const replaceable = status === 'PENDING' ? '"paymentStatus" IS NULL' : '("paymentStatus" IS NULL OR "paymentStatus" = \'PENDING\')';
+    // Statuses only move forward: PENDING → COMPLETED/FAILED → REFUNDED (#56). REFUNDED is final, and a
+    // refund can arrive without its completion ever being recorded (the order was cancelled first).
+    const replaceable =
+      status === 'PENDING'
+        ? '"paymentStatus" IS NULL'
+        : status === 'REFUNDED'
+          ? '("paymentStatus" IS NULL OR "paymentStatus" <> \'REFUNDED\')'
+          : '("paymentStatus" IS NULL OR "paymentStatus" = \'PENDING\')';
     await this.repo.query(`UPDATE "orders" SET "paymentStatus" = $1 WHERE "id" = $2 AND ${replaceable}`, [status, id]);
   }
 
@@ -134,6 +141,9 @@ export class OrdersRepository {
    * items' subtotal of orders that weren't cancelled or failed; the delivery fee isn't the restaurant's.
    */
   async todaySummary(restaurantId: string): Promise<{ orders: number; active: number; delivered: number; cancelled: number; revenue: string }> {
+    // "createdAt" is timestamptz: AT TIME ZONE 'Africa/Cairo' gives its Cairo wall-clock time directly.
+    // (Converting through UTC first read that UTC time as Cairo time, so orders placed 00:00–03:00 UTC,
+    // 03:00–06:00 in Cairo, counted as yesterday's.)
     const [row] = (await this.repo.query(
       `SELECT COUNT(*)::int AS "orders",
               COUNT(*) FILTER (WHERE "status" NOT IN ('DELIVERED', 'CANCELLED', 'FAILED'))::int AS "active",
@@ -142,7 +152,7 @@ export class OrdersRepository {
               COALESCE(SUM(COALESCE("subtotalAmount", "totalAmount")) FILTER (WHERE "status" NOT IN ('CANCELLED', 'FAILED')), 0)::numeric(12,2)::text AS "revenue"
          FROM "orders"
         WHERE "restaurantId" = $1
-          AND ("createdAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Cairo')::date = (now() AT TIME ZONE 'Africa/Cairo')::date`,
+          AND ("createdAt" AT TIME ZONE 'Africa/Cairo')::date = (now() AT TIME ZONE 'Africa/Cairo')::date`,
       [restaurantId],
     )) as { orders: number; active: number; delivered: number; cancelled: number; revenue: string }[];
     return row ?? { orders: 0, active: 0, delivered: 0, cancelled: 0, revenue: '0.00' };

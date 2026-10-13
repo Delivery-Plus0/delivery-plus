@@ -20,7 +20,7 @@ const noDriver = () => new ConflictError('No available drivers to assign');
 
 describe('AutoDispatchService', () => {
   let service: AutoDispatchService;
-  let deliveriesService: jest.Mocked<Pick<DeliveriesService, 'create' | 'assignDriver'>>;
+  let deliveriesService: jest.Mocked<Pick<DeliveriesService, 'create' | 'assignDriver' | 'cancelForCancelledOrder'>>;
   let repo: jest.Mocked<Pick<DeliveriesRepository, 'findByOrderId' | 'findWaitingForDriver'>>;
   let kafkaConsumer: { subscribe: jest.Mock; start: jest.Mock };
 
@@ -33,10 +33,23 @@ describe('AutoDispatchService', () => {
     );
 
   beforeEach(() => {
-    deliveriesService = { create: jest.fn(), assignDriver: jest.fn() };
+    deliveriesService = { create: jest.fn(), assignDriver: jest.fn(), cancelForCancelledOrder: jest.fn() };
     repo = { findByOrderId: jest.fn(), findWaitingForDriver: jest.fn().mockResolvedValue([]) };
     kafkaConsumer = { subscribe: jest.fn(), start: jest.fn() };
     service = build();
+  });
+
+  describe('order.cancelled (#53)', () => {
+    it('cancels the delivery of a cancelled order, subscribed before the consumer starts', async () => {
+      await service.onModuleInit();
+
+      const call = kafkaConsumer.subscribe.mock.calls.find(([, type]) => type === OrderEventType.CANCELLED)!;
+      expect(call[0]).toBe(TOPICS.ORDER_EVENTS);
+      expect(Math.max(...kafkaConsumer.subscribe.mock.invocationCallOrder)).toBeLessThan(kafkaConsumer.start.mock.invocationCallOrder[0]);
+
+      await call[2]({ payload: { orderId: 'order-1' } });
+      expect(deliveriesService.cancelForCancelledOrder).toHaveBeenCalledWith('order-1');
+    });
   });
 
   describe('order.ready_for_pickup', () => {

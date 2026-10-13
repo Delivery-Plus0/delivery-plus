@@ -92,7 +92,7 @@ export class Order {
   @Column({ type: 'varchar', length: 200, nullable: true })
   cancellationNote!: string | null;
 
-  /** PENDING / COMPLETED / FAILED, from the payment events this service consumes (#143). */
+  /** PENDING / COMPLETED / FAILED / REFUNDED, from the payment events this service consumes (#143, #56). */
   @Column({ type: 'varchar', length: 20, nullable: true })
   paymentStatus!: string | null;
 

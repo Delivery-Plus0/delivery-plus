@@ -1,5 +1,6 @@
 import { PaymentsService, paymentEventId } from './payments.service';
-import { PaymentsRepository, CreatePaymentData } from '../repositories/payments.repository';
+import { PaymentsRepository, CreatePaymentData, RefundDetails, RefundOutcome } from '../repositories/payments.repository';
+import { Refund, RefundInitiator } from '../entities/refund.entity';
 import { OrderServiceClient, OrderDto } from '../common/order-service.client';
 import {
   ConflictError,
@@ -108,6 +109,47 @@ class FakePaymentsRepository {
   markOrderSynced = jest.fn(async (id: string, status: PaymentStatus) => {
     this.rows.get(id)!.orderSyncedStatus = status;
   });
+
+  /** Refund records by paymentId (the unique index of the real table). */
+  refunds = new Map<string, Refund>();
+
+  findCollectedByOrder = jest.fn(async (orderId: string) =>
+    this.copy(
+      [...this.rows.values()]
+        .reverse()
+        .find((p) => p.orderId === orderId && (p.status === PaymentStatus.COMPLETED || p.status === PaymentStatus.REFUNDED)),
+    ),
+  );
+
+  /** Same contract as the locked transaction: one refund per payment, only from COMPLETED. */
+  refundOnce = jest.fn(async (id: string, details: RefundDetails): Promise<RefundOutcome> => {
+    const row = this.rows.get(id);
+    if (!row) return 'missing';
+    if (row.status === PaymentStatus.REFUNDED) return 'already';
+    if (row.status !== PaymentStatus.COMPLETED) return 'not-refundable';
+    this.refunds.set(id, {
+      id: `refund-${id}`,
+      paymentId: id,
+      orderId: row.orderId,
+      customerId: row.customerId,
+      amount: row.amount,
+      currency: 'EGP',
+      provider: 'SIMULATED',
+      createdAt: new Date(),
+      ...details,
+    });
+    row.status = PaymentStatus.REFUNDED;
+    return 'refunded';
+  });
+
+  findRefundByPayment = jest.fn(async (paymentId: string) => this.refunds.get(paymentId) ?? null);
+
+  findWithOwedSideEffects = jest.fn(async () =>
+    [...this.rows.values()]
+      .filter((p) => [PaymentStatus.COMPLETED, PaymentStatus.FAILED, PaymentStatus.REFUNDED].includes(p.status))
+      .filter((p) => p.publishedEventStatus !== p.status || p.orderSyncedStatus !== p.status)
+      .map((p) => ({ ...p })),
+  );
 
   /** Seeds a row directly, bypassing the constraints (for arranging state). */
   seed(overrides: Partial<Payment>): Payment {
@@ -615,13 +657,135 @@ describe('PaymentsService', () => {
       expect(payments.rows.get(p.id)!.orderSyncedStatus).not.toBe(PaymentStatus.FAILED);
     });
 
-    it('never hides a COMPLETED payment on a cancelled order (needs a refund)', async () => {
+    it('refunds a payment that completed after the customer cancelled (#56 rule 5)', async () => {
       const p = seedSynced(PaymentStatus.PENDING);
       orderClient.updateOrderStatus.mockRejectedValueOnce(new ConflictError('conflict'));
-      orderClient.getOrderAsSystem.mockResolvedValueOnce(order({ status: OrderStatus.CANCELLED }));
+      orderClient.getOrderAsSystem.mockResolvedValueOnce(order({ status: OrderStatus.CANCELLED, cancelledBy: 'CUSTOMER' }));
+
+      const result = await service.processPayment(p.id, 'customer-1', { simulateFailure: false });
+
+      expect(result.status).toBe(PaymentStatus.REFUNDED);
+      expect(publishedEventTypes()).toEqual([PaymentEventType.COMPLETED, PaymentEventType.REFUNDED]);
+      expect(payments.refunds.get(p.id)).toMatchObject({
+        amount: '19.98',
+        initiatedBy: RefundInitiator.CUSTOMER,
+        source: 'payment.completed-after-cancel',
+      });
+      expect(result.orderSyncedStatus).toBe(PaymentStatus.REFUNDED);
+    });
+
+    it('still surfaces a conflict for a COMPLETED payment on an order that is not cancelled', async () => {
+      const p = seedSynced(PaymentStatus.PENDING);
+      orderClient.updateOrderStatus.mockRejectedValueOnce(new ConflictError('conflict'));
+      orderClient.getOrderAsSystem.mockResolvedValueOnce(order({ status: OrderStatus.DELIVERED }));
 
       await expect(service.processPayment(p.id, 'customer-1', { simulateFailure: false })).rejects.toThrow(ConflictError);
-      expect(orderClient.getOrderAsSystem).not.toHaveBeenCalled();
+      expect(payments.refunds.size).toBe(0);
+    });
+  });
+
+  describe('refunds for cancelled orders (#56)', () => {
+    const cancelled = (overrides: Partial<{ cancelledBy: string; cancellationReason: string }> = {}) => ({
+      orderId: 'order-1',
+      cancelledBy: 'RESTAURANT',
+      cancellationReason: 'The restaurant cancelled this order: Out of stock',
+      source: 'order.cancelled:event-1',
+      ...overrides,
+    });
+
+    it('refunds the whole collected payment once and publishes payment.refunded with the refund id', async () => {
+      const p = seedSynced(PaymentStatus.COMPLETED, { amount: '225.00' });
+
+      const result = await service.refundCancelledOrder(cancelled());
+
+      expect(result!.status).toBe(PaymentStatus.REFUNDED);
+      expect(payments.refunds.get(p.id)).toMatchObject({
+        amount: '225.00',
+        currency: 'EGP',
+        provider: 'SIMULATED',
+        initiatedBy: RefundInitiator.RESTAURANT,
+        requestedBy: null,
+        reason: 'The restaurant cancelled this order: Out of stock',
+        source: 'order.cancelled:event-1',
+      });
+      expect(kafka.publish).toHaveBeenCalledWith(
+        TOPICS.PAYMENT_EVENTS,
+        expect.objectContaining({
+          eventId: paymentEventId(p.id, PaymentEventType.REFUNDED),
+          eventType: PaymentEventType.REFUNDED,
+          payload: expect.objectContaining({ paymentId: p.id, orderId: 'order-1', amount: 225, status: PaymentStatus.REFUNDED, refundId: `refund-${p.id}` }),
+        }),
+      );
+      expect(orderClient.updateOrderStatus).not.toHaveBeenCalled();
+    });
+
+    it('a redelivered cancellation refunds nothing more and publishes nothing more', async () => {
+      seedSynced(PaymentStatus.COMPLETED);
+
+      await service.refundCancelledOrder(cancelled());
+      await service.refundCancelledOrder(cancelled());
+
+      expect(payments.refunds.size).toBe(1);
+      expect(publishedEventTypes()).toEqual([PaymentEventType.REFUNDED]);
+    });
+
+    it('cancellation and a support refund racing each other refund once', async () => {
+      const p = seedSynced(PaymentStatus.COMPLETED);
+
+      await Promise.all([service.refundCancelledOrder(cancelled()), service.refund(p.id, 'admin-1', UserRole.ADMIN)]);
+
+      expect(payments.refunds.size).toBe(1);
+      expect(publishedEventTypes()).toEqual([PaymentEventType.REFUNDED]);
+    });
+
+    it.each([PaymentStatus.PENDING, PaymentStatus.PROCESSING, PaymentStatus.FAILED])(
+      'refunds nothing while the payment is %s (no money collected yet)',
+      async (status) => {
+        seedSynced(status);
+
+        await expect(service.refundCancelledOrder(cancelled({ cancelledBy: 'CUSTOMER' }))).resolves.toBeNull();
+        expect(payments.refunds.size).toBe(0);
+        expect(kafka.publish).not.toHaveBeenCalled();
+      },
+    );
+
+    it('refunds nothing for an order that never had a payment', async () => {
+      await expect(service.refundCancelledOrder(cancelled())).resolves.toBeNull();
+    });
+
+    it('records a platform cancellation as SYSTEM, with a default reason', async () => {
+      const p = seedSynced(PaymentStatus.COMPLETED);
+
+      await service.refundCancelledOrder({ orderId: 'order-1', cancelledBy: undefined, cancellationReason: null, source: 'order.cancelled:e' });
+
+      expect(payments.refunds.get(p.id)).toMatchObject({ initiatedBy: RefundInitiator.SYSTEM, reason: 'The order was cancelled.' });
+    });
+
+    it('a refund event that failed to publish is retried with the same eventId, without a second refund', async () => {
+      const p = seedSynced(PaymentStatus.COMPLETED);
+      kafka.publish.mockRejectedValueOnce(new Error('broker down'));
+
+      await expect(service.refundCancelledOrder(cancelled())).rejects.toThrow('broker down');
+      expect(payments.rows.get(p.id)!.status).toBe(PaymentStatus.REFUNDED);
+
+      await service.refundCancelledOrder(cancelled());
+
+      expect(payments.refunds.size).toBe(1);
+      const ids = kafka.publish.mock.calls.map(([, e]) => e.eventId);
+      expect(ids).toEqual([paymentEventId(p.id, PaymentEventType.REFUNDED), paymentEventId(p.id, PaymentEventType.REFUNDED)]);
+    });
+
+    it('the sweep finishes a refund event left owed while another request held the lease', async () => {
+      const p = seedSynced(PaymentStatus.COMPLETED, { sideEffectsLeaseUntil: new Date(Date.now() + 10_000) });
+
+      await service.refundCancelledOrder(cancelled());
+      expect(kafka.publish).not.toHaveBeenCalled(); // lease busy: owed, not lost
+
+      payments.rows.get(p.id)!.sideEffectsLeaseUntil = null;
+      await expect(service.finishOwedSideEffects(0, 10)).resolves.toBe(1);
+
+      expect(publishedEventTypes()).toEqual([PaymentEventType.REFUNDED]);
+      await expect(service.finishOwedSideEffects(0, 10)).resolves.toBe(0);
     });
   });
 
@@ -650,10 +814,34 @@ describe('PaymentsService', () => {
       await expect(service.refund(p.id, 'admin-1', UserRole.ADMIN)).rejects.toThrow(InvalidStateTransitionError);
     });
 
-    it('lets support (admin) refund a COMPLETED payment', async () => {
+    it('lets support (admin) refund a COMPLETED payment, recorded as theirs', async () => {
       const p = seedSynced(PaymentStatus.COMPLETED);
-      const result = await service.refund(p.id, 'admin-1', UserRole.ADMIN);
+      const result = await service.refund(p.id, 'admin-1', UserRole.ADMIN, 'Cold food');
       expect(result.status).toBe(PaymentStatus.REFUNDED);
+      expect(payments.refunds.get(p.id)).toMatchObject({
+        initiatedBy: RefundInitiator.SUPPORT,
+        requestedBy: 'admin-1',
+        reason: 'Cold food',
+        source: 'support',
+      });
+    });
+
+    it('repeating a support refund returns the refunded payment', async () => {
+      const p = seedSynced(PaymentStatus.COMPLETED);
+      await service.refund(p.id, 'admin-1', UserRole.ADMIN);
+      await expect(service.refund(p.id, 'admin-1', UserRole.ADMIN)).resolves.toMatchObject({ status: PaymentStatus.REFUNDED });
+      expect(payments.refunds.size).toBe(1);
+    });
+
+    it('shows the refund record to the paying customer and support only', async () => {
+      const p = seedSynced(PaymentStatus.COMPLETED);
+      await expect(service.getRefund(p.id, 'customer-1', UserRole.CUSTOMER)).rejects.toThrow(NotFoundError);
+
+      await service.refund(p.id, 'admin-1', UserRole.ADMIN);
+
+      await expect(service.getRefund(p.id, 'customer-1', UserRole.CUSTOMER)).resolves.toMatchObject({ paymentId: p.id });
+      await expect(service.getRefund(p.id, 'admin-2', UserRole.ADMIN)).resolves.toMatchObject({ paymentId: p.id });
+      await expect(service.getRefund(p.id, 'someone-else', UserRole.CUSTOMER)).rejects.toThrow(ForbiddenError);
     });
 
     it('no longer lets a customer refund their own completed payment (e.g. after delivery)', async () => {

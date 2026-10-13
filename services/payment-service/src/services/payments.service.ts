@@ -23,6 +23,7 @@ import { CreatePaymentDto } from '../dto/create-payment.dto';
 import { ProcessPaymentDto } from '../dto/process-payment.dto';
 import { ACTIVE_PAYMENT_STATUSES, Payment, UQ_PAYMENTS_ACTIVE_ORDER } from '../entities/payment.entity';
 import { v5 as uuidv5 } from 'uuid';
+import { randomUUID } from 'crypto';
 
 /**
  * Fixed namespace for deterministic payment event ids. Never change it: consumers
@@ -66,6 +67,9 @@ export interface CancelledOrder {
 
 /** How long a request may hold the side-effects lease before another retry can take over. */
 export const SIDE_EFFECTS_LEASE_MS = 30_000;
+
+/** #18: why a payment abandoned in PROCESSING ends FAILED. True for the simulator: nothing was charged. */
+export const ABANDONED_PROCESSING_REASON = 'Payment processing was interrupted, so you were not charged.';
 
 /** What to do when side effects are owed but another request holds the lease. */
 type OnBusy = 'return' | 'conflict';
@@ -165,8 +169,16 @@ export class PaymentsService {
     if (this.isSettled(payment.status)) {
       return this.completeSideEffects(payment);
     }
+
+    // #18: each claim has its own token; only the current holder can settle the payment.
+    const token = randomUUID();
     if (payment.status === PaymentStatus.PROCESSING) {
-      throw new ConflictError(`Payment ${paymentId} is already being processed`);
+      // Another request holds the claim, unless it was abandoned (crashed or timed out): take it over.
+      if (!(await this.payments.reclaimExpiredProcessing(paymentId, token, this.config.processingTimeoutMs))) {
+        throw new ConflictError(`Payment ${paymentId} is already being processed`);
+      }
+      this.logger.warn(`Took over the abandoned processing claim of payment ${paymentId}`);
+      return this.settle(paymentId, token, dto.simulateFailure);
     }
 
     this.assertTransition(payment.status, PaymentStatus.PROCESSING);
@@ -179,7 +191,7 @@ export class PaymentsService {
       throw new ConflictError(`Payment ${paymentId} is being finalized, please retry`);
     }
 
-    const claimed = await this.payments.transition(paymentId, PaymentStatus.PENDING, PaymentStatus.PROCESSING);
+    const claimed = await this.payments.claimProcessing(paymentId, token);
     if (!claimed) {
       const current = await this.findOrThrow(paymentId);
       if (this.isSettled(current.status)) return this.completeSideEffects(current);
@@ -189,23 +201,58 @@ export class PaymentsService {
       throw new InvalidStateTransitionError('Payment', current.status, PaymentStatus.PROCESSING);
     }
 
-    const succeeded = this.simulateOutcome(dto.simulateFailure);
+    return this.settle(paymentId, token, dto.simulateFailure);
+  }
+
+  /**
+   * Decides the outcome and settles the payment as the holder of claim `token`. A request whose claim
+   * was taken over in the meantime writes nothing and returns what the new holder settled.
+   *
+   * The outcome is simulated. A real gateway must look the charge up by its idempotency key here
+   * instead of charging again, so a taken-over claim can never charge twice (docs/services/payment-service.md).
+   */
+  private async settle(paymentId: string, token: string, simulateFailure?: boolean): Promise<Payment> {
+    const succeeded = this.simulateOutcome(simulateFailure);
     const target = succeeded ? PaymentStatus.COMPLETED : PaymentStatus.FAILED;
     this.assertTransition(PaymentStatus.PROCESSING, target);
 
-    const settled = await this.payments.transition(
-      paymentId,
-      PaymentStatus.PROCESSING,
-      target,
-      succeeded ? undefined : 'Simulated payment decline',
-    );
+    const settled = await this.payments.settleProcessing(paymentId, token, target, succeeded ? undefined : 'Simulated payment decline');
     if (!settled) {
-      // Only the request that claimed PROCESSING may settle; anything else is a bug.
       const current = await this.findOrThrow(paymentId);
+      if (this.isSettled(current.status)) return this.completeSideEffects(current);
+      if (current.status === PaymentStatus.PROCESSING) {
+        throw new ConflictError(`Payment ${paymentId} is being processed by another request`);
+      }
       throw new InvalidStateTransitionError('Payment', current.status, target);
     }
 
     return this.completeSideEffects(await this.findOrThrow(paymentId));
+  }
+
+  /**
+   * #18: payments left in PROCESSING for longer than `olderThanMs` (their request crashed and the
+   * customer never retried) are taken over and settled FAILED, "not charged". That is true for the
+   * simulator, which charges nothing until it settles; with a real gateway this step must ask the
+   * provider for the charge's outcome instead. Then the usual side effects run: payment.failed, the
+   * order moves to FAILED and the customer is told. Returns how many were recovered.
+   */
+  async recoverAbandonedProcessing(olderThanMs: number, limit: number): Promise<number> {
+    const abandoned = await this.payments.findAbandonedProcessing(olderThanMs, limit);
+    let recovered = 0;
+    for (const payment of abandoned) {
+      const token = randomUUID();
+      if (!(await this.payments.reclaimExpiredProcessing(payment.id, token, olderThanMs))) continue;
+      if (!(await this.payments.settleProcessing(payment.id, token, PaymentStatus.FAILED, ABANDONED_PROCESSING_REASON))) continue;
+      recovered++;
+      this.logger.warn(`Payment ${payment.id} was abandoned in PROCESSING; settled FAILED (not charged)`);
+      try {
+        await this.completeSideEffects(await this.findOrThrow(payment.id));
+      } catch (err) {
+        // Owed, not lost: finishOwedSideEffects picks it up on a later tick.
+        this.logger.warn(`Side effects of recovered payment ${payment.id} are still owed: ${(err as Error).message}`);
+      }
+    }
+    return recovered;
   }
 
   async getStatus(paymentId: string, requesterId: string, requesterRole: UserRole): Promise<Payment> {

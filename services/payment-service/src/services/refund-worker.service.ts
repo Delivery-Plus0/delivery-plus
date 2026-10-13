@@ -12,8 +12,10 @@ const SWEEP_BATCH = 50;
  * - On `order.cancelled`: refund the order's payment if it collected money. The handler is
  *   idempotent in the database (row lock + one refund per payment), so redeliveries and dead-letter
  *   replays are safe even without durable consumer idempotency here.
- * - Every PAYMENT_SIDE_EFFECTS_SWEEP_MS: finish events and order updates a failed or crashed request
- *   left owed, e.g. a refund event that could not be published while another request held the lease.
+ * - Every PAYMENT_SIDE_EFFECTS_SWEEP_MS:
+ *   - #18: settle payments abandoned in PROCESSING for PAYMENT_PROCESSING_ABANDON_MS as not charged;
+ *   - finish events and order updates a failed or crashed request left owed, e.g. a refund event that
+ *     could not be published while another request held the lease.
  */
 @Injectable()
 export class RefundWorkerService implements OnModuleInit, OnModuleDestroy {
@@ -52,6 +54,9 @@ export class RefundWorkerService implements OnModuleInit, OnModuleDestroy {
     if (this.sweeping) return;
     this.sweeping = true;
     try {
+      // #18 first: a payment it recovers then owes its side effects, which the next step finishes.
+      const recovered = await this.payments.recoverAbandonedProcessing(this.config.processingAbandonMs, SWEEP_BATCH);
+      if (recovered > 0) this.logger.warn(`Recovered ${recovered} payment(s) abandoned in PROCESSING`);
       const finished = await this.payments.finishOwedSideEffects(this.config.sideEffectsSweepMs, SWEEP_BATCH);
       if (finished > 0) this.logger.log(`Finished owed side effects for ${finished} payment(s)`);
     } catch (error) {

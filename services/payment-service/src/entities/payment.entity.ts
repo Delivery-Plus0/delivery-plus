@@ -79,6 +79,18 @@ export class Payment {
   @Column({ type: 'timestamptz', nullable: true })
   sideEffectsLeaseUntil?: Date | null;
 
+  /**
+   * #18: when the current PROCESSING claim was taken (database clock). A claim older than
+   * PAYMENT_PROCESSING_TIMEOUT_MS was abandoned (its request crashed or timed out) and may be taken
+   * over. Null on a PROCESSING row means it was claimed before this was recorded: also abandoned.
+   */
+  @Column({ type: 'timestamptz', nullable: true })
+  processingClaimedAt?: Date | null;
+
+  /** #18: who holds the PROCESSING claim. Only that holder may settle the payment (fencing). */
+  @Column({ type: 'uuid', nullable: true })
+  processingToken?: string | null;
+
   @CreateDateColumn()
   createdAt!: Date;
 

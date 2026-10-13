@@ -1,4 +1,4 @@
-import { PaymentsService, paymentEventId } from './payments.service';
+import { ABANDONED_PROCESSING_REASON, PaymentsService, paymentEventId } from './payments.service';
 import { PaymentsRepository, CreatePaymentData, RefundDetails, RefundOutcome } from '../repositories/payments.repository';
 import { Refund, RefundInitiator } from '../entities/refund.entity';
 import { OrderServiceClient, OrderDto } from '../common/order-service.client';
@@ -85,6 +85,35 @@ class FakePaymentsRepository {
     if (failureReason !== undefined) row.failureReason = failureReason;
     return true;
   });
+
+  /** #18: the PROCESSING claim, with the same rules as the SQL (database clock = Date.now here). */
+  claimProcessing = jest.fn(async (id: string, token: string) => {
+    const row = this.rows.get(id);
+    if (!row || row.status !== PaymentStatus.PENDING) return false;
+    Object.assign(row, { status: PaymentStatus.PROCESSING, processingClaimedAt: new Date(), processingToken: token });
+    return true;
+  });
+
+  reclaimExpiredProcessing = jest.fn(async (id: string, token: string, timeoutMs: number) => {
+    const row = this.rows.get(id);
+    if (!row || row.status !== PaymentStatus.PROCESSING) return false;
+    if (row.processingClaimedAt && row.processingClaimedAt.getTime() >= Date.now() - timeoutMs) return false;
+    Object.assign(row, { processingClaimedAt: new Date(), processingToken: token });
+    return true;
+  });
+
+  settleProcessing = jest.fn(async (id: string, token: string, to: PaymentStatus, failureReason?: string) => {
+    const row = this.rows.get(id);
+    if (!row || row.status !== PaymentStatus.PROCESSING || row.processingToken !== token) return false;
+    Object.assign(row, { status: to, processingToken: null, ...(failureReason !== undefined ? { failureReason } : {}) });
+    return true;
+  });
+
+  findAbandonedProcessing = jest.fn(async (olderThanMs: number) =>
+    [...this.rows.values()]
+      .filter((p) => p.status === PaymentStatus.PROCESSING && (!p.processingClaimedAt || p.processingClaimedAt.getTime() < Date.now() - olderThanMs))
+      .map((p) => ({ ...p })),
+  );
 
   /** Lease state keyed by id; `now` is overridable to simulate expiry. */
   now = () => Date.now();
@@ -183,7 +212,7 @@ describe('PaymentsService', () => {
   let orderClient: jest.Mocked<OrderServiceClient>;
   let kafka: { publish: jest.Mock };
 
-  const config = { paymentSuccessRate: 0.9 } as never;
+  const config = { paymentSuccessRate: 0.9, processingTimeoutMs: 60_000, processingAbandonMs: 900_000 } as never;
 
   const order = (overrides: Partial<OrderDto> = {}): OrderDto => ({
     id: 'order-1',
@@ -451,7 +480,8 @@ describe('PaymentsService', () => {
           const result = await service.processPayment(p.id, 'customer-1', { simulateFailure: status === PaymentStatus.COMPLETED });
 
           expect(result.status).toBe(status);
-          expect(payments.transition).not.toHaveBeenCalled();
+          expect(payments.claimProcessing).not.toHaveBeenCalled();
+          expect(payments.settleProcessing).not.toHaveBeenCalled();
           expect(kafka.publish).not.toHaveBeenCalled();
           expect(orderClient.updateOrderStatus).not.toHaveBeenCalled();
         },
@@ -482,7 +512,7 @@ describe('PaymentsService', () => {
 
     describe('race', () => {
       it('returns 409 while another request holds the payment in PROCESSING', async () => {
-        const p = seedSynced(PaymentStatus.PROCESSING);
+        const p = seedSynced(PaymentStatus.PROCESSING, { processingClaimedAt: new Date(), processingToken: 'someone-else' });
         await expect(service.processPayment(p.id, 'customer-1', {})).rejects.toThrow(ConflictError);
       });
 
@@ -506,7 +536,7 @@ describe('PaymentsService', () => {
 
       it('returns the settled result when the claim is lost to a request that already finished', async () => {
         const p = seedSynced(PaymentStatus.PENDING);
-        payments.transition.mockImplementationOnce(async (id: string) => {
+        payments.claimProcessing.mockImplementationOnce(async (id: string) => {
           Object.assign(payments.rows.get(id)!, {
             status: PaymentStatus.FAILED,
             publishedEventStatus: PaymentStatus.FAILED,
@@ -620,6 +650,81 @@ describe('PaymentsService', () => {
           OrderStatus.FAILED,
         ]);
       });
+    });
+  });
+
+  describe('stuck PROCESSING recovery (#18)', () => {
+    const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000);
+
+    it('a fresh claim is protected: a retry gets 409 and changes nothing', async () => {
+      const p = seedSynced(PaymentStatus.PROCESSING, { processingClaimedAt: new Date(), processingToken: 'holder' });
+
+      await expect(service.processPayment(p.id, 'customer-1', {})).rejects.toThrow('already being processed');
+      expect(payments.rows.get(p.id)).toMatchObject({ status: PaymentStatus.PROCESSING, processingToken: 'holder' });
+      expect(kafka.publish).not.toHaveBeenCalled();
+    });
+
+    it('a retry takes over an abandoned claim and settles the payment once', async () => {
+      const p = seedSynced(PaymentStatus.PROCESSING, { processingClaimedAt: minutesAgo(2), processingToken: 'crashed' });
+
+      const result = await service.processPayment(p.id, 'customer-1', { simulateFailure: false });
+
+      expect(result.status).toBe(PaymentStatus.COMPLETED);
+      expect(result.processingToken).toBeNull();
+      expect(publishedEventTypes()).toEqual([PaymentEventType.COMPLETED]);
+      expect(orderClient.updateOrderStatus).toHaveBeenCalledWith('order-1', OrderStatus.CONFIRMED);
+    });
+
+    it('a row stuck before claims were recorded (no claim time) is recoverable', async () => {
+      const p = seedSynced(PaymentStatus.PROCESSING, { processingClaimedAt: null, processingToken: null });
+
+      await expect(service.processPayment(p.id, 'customer-1', { simulateFailure: false })).resolves.toMatchObject({ status: PaymentStatus.COMPLETED });
+    });
+
+    it('two concurrent takeovers: exactly one settles', async () => {
+      const p = seedSynced(PaymentStatus.PROCESSING, { processingClaimedAt: minutesAgo(5), processingToken: 'crashed' });
+
+      const results = await Promise.allSettled([
+        service.processPayment(p.id, 'customer-1', { simulateFailure: false }),
+        service.processPayment(p.id, 'customer-1', { simulateFailure: true }),
+      ]);
+
+      expect(payments.settleProcessing.mock.results.filter((r) => r.type === 'return')).toHaveLength(1);
+      for (const r of results) if (r.status === 'rejected') expect(r.reason).toBeInstanceOf(ConflictError);
+      expect(publishedEventTypes()).toHaveLength(1);
+    });
+
+    it('a request whose claim was taken over cannot settle; it returns what the new holder settled', async () => {
+      const p = seedSynced(PaymentStatus.PENDING);
+      // While this request decides the outcome, its claim is taken over and settled by another one.
+      payments.settleProcessing.mockImplementationOnce(async (id: string) => {
+        Object.assign(payments.rows.get(id)!, {
+          status: PaymentStatus.FAILED,
+          processingToken: null,
+          publishedEventStatus: PaymentStatus.FAILED,
+          orderSyncedStatus: PaymentStatus.FAILED,
+        });
+        return false;
+      });
+
+      const result = await service.processPayment(p.id, 'customer-1', { simulateFailure: false });
+
+      expect(result.status).toBe(PaymentStatus.FAILED);
+      expect(kafka.publish).not.toHaveBeenCalled();
+      expect(orderClient.updateOrderStatus).not.toHaveBeenCalledWith('order-1', OrderStatus.CONFIRMED);
+    });
+
+    it('the sweep settles long-abandoned payments as not charged, and leaves recent claims alone', async () => {
+      const abandoned = seedSynced(PaymentStatus.PROCESSING, { processingClaimedAt: minutesAgo(30), processingToken: 'crashed', orderId: 'order-a' });
+      const recent = seedSynced(PaymentStatus.PROCESSING, { processingClaimedAt: minutesAgo(2), processingToken: 'busy', orderId: 'order-b' });
+
+      await expect(service.recoverAbandonedProcessing(15 * 60_000, 10)).resolves.toBe(1);
+
+      expect(payments.rows.get(abandoned.id)).toMatchObject({ status: PaymentStatus.FAILED, failureReason: ABANDONED_PROCESSING_REASON });
+      expect(publishedEventTypes()).toEqual([PaymentEventType.FAILED]);
+      expect(orderClient.updateOrderStatus).toHaveBeenCalledWith('order-a', OrderStatus.FAILED);
+      expect(payments.rows.get(recent.id)).toMatchObject({ status: PaymentStatus.PROCESSING, processingToken: 'busy' });
+      await expect(service.recoverAbandonedProcessing(15 * 60_000, 10)).resolves.toBe(0);
     });
   });
 

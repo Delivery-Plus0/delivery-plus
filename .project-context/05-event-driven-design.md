@@ -56,6 +56,7 @@ Typical consumers include:
 Delivery semantics (payment-service):
 
 - Events are published **after** the payment row is committed and are **at-least-once**: a retry after a failed or interrupted publish may send the same event again.
+- A payment abandoned in `PROCESSING` is settled by whichever request takes the claim over, or by the sweep as `FAILED` (#18). Either way exactly one `payment.completed` or `payment.failed` is owed, because settling is fenced by the claim token.
 - `eventId` is deterministic: UUID v5 of `"<paymentId>:<eventType>"` in a fixed namespace (`PAYMENT_EVENT_NAMESPACE` in `payments.service.ts`). A re-published `payment.completed` for a payment always has the same `eventId`, so consumers must deduplicate by `eventId`; the shared `KafkaConsumerService` does this per consumer group in Redis (see Reliability).
 - Each payment emits at most one event per type in normal operation; `publishedEventStatus` on the payment row tracks what was already published.
 - The payload shape `{ paymentId, orderId, amount, status }` and event type names are unchanged; `eventId` remains a UUID, so existing consumers are unaffected.

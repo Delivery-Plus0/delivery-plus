@@ -20,6 +20,7 @@ import { PaymentStatus } from '@food-delivery/shared';
 import { Payment, UQ_PAYMENTS_ACTIVE_ORDER, UQ_PAYMENTS_CUSTOMER_IDEMPOTENCY_KEY } from '../entities/payment.entity';
 import { PaymentsRepository, isUniqueViolation } from './payments.repository';
 import { Refund, RefundInitiator } from '../entities/refund.entity';
+import { PaymentProcessingClaim1700000000003 } from '../database/migrations/004-processing-claim';
 import { randomUUID } from 'crypto';
 
 const DATABASE_URL = process.env.PAYMENT_TEST_DATABASE_URL;
@@ -190,6 +191,45 @@ describeDb('PaymentsRepository (PostgreSQL integration)', () => {
     });
   });
 
+  describe('processing claims (#18)', () => {
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    it('a claim records when and by whom; a fresh claim cannot be taken over', async () => {
+      const p = await repo.create({ orderId: newOrderId(), customerId: 'c1', amount: '10.00' });
+
+      expect(await repo.claimProcessing(p.id, randomUUID())).toBe(true);
+      const claimed = await repo.findById(p.id);
+      expect(claimed?.status).toBe(PaymentStatus.PROCESSING);
+      expect(claimed?.processingClaimedAt).toBeInstanceOf(Date);
+      expect(await repo.reclaimExpiredProcessing(p.id, randomUUID(), 60_000)).toBe(false);
+    });
+
+    it('of many concurrent takeovers of an expired claim exactly one wins, and the old holder can no longer settle', async () => {
+      const p = await repo.create({ orderId: newOrderId(), customerId: 'c1', amount: '10.00' });
+      const oldToken = randomUUID();
+      await repo.claimProcessing(p.id, oldToken);
+      await sleep(20);
+
+      const tokens = Array.from({ length: 10 }, () => randomUUID());
+      const won = await Promise.all(tokens.map((token) => repo.reclaimExpiredProcessing(p.id, token, 10)));
+      expect(won.filter(Boolean)).toHaveLength(1);
+
+      expect(await repo.settleProcessing(p.id, oldToken, PaymentStatus.COMPLETED)).toBe(false);
+      const winner = tokens[won.indexOf(true)];
+      expect(await repo.settleProcessing(p.id, winner, PaymentStatus.COMPLETED)).toBe(true);
+      expect(await repo.findById(p.id)).toMatchObject({ status: PaymentStatus.COMPLETED, processingToken: null });
+    });
+
+    it('a row stuck before claims were recorded is reclaimable and listed as abandoned', async () => {
+      const p = await repo.create({ orderId: newOrderId(), customerId: 'c1', amount: '10.00' });
+      await ds.query(`UPDATE payments SET status = 'PROCESSING' WHERE id = $1`, [p.id]);
+
+      expect((await repo.findAbandonedProcessing(60_000, 10)).map((x) => x.id)).toContain(p.id);
+      expect(await repo.reclaimExpiredProcessing(p.id, randomUUID(), 60_000)).toBe(true);
+      expect((await repo.findAbandonedProcessing(60_000, 10)).map((x) => x.id)).not.toContain(p.id);
+    });
+  });
+
   describe('refunds (#56)', () => {
     const details = { initiatedBy: RefundInitiator.CUSTOMER, requestedBy: null, reason: 'You cancelled this order.', source: 'order.cancelled:e1' };
 
@@ -255,6 +295,8 @@ describeDb('migrations/20260917_payment_idempotency.sql', () => {
     for (let run = 0; run < 2; run++) {
       for (const sql of statements) await legacy.query(sql);
     }
+    // Later columns come from the TypeORM migrations (#18).
+    await new PaymentProcessingClaim1700000000003().up(legacy.createQueryRunner());
     await legacy.destroy();
 
     // 3. TypeORM must see no pending schema changes against the current entity.

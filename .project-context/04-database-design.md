@@ -104,6 +104,8 @@ Design notes:
 
 - `payments.orderId` and `payments.customerId` are indexed for lookup and reconciliation
 - at most one **active** payment (`PENDING`, `PROCESSING`, `COMPLETED`) per order, enforced by the partial unique index `UQ_payments_active_order`; `FAILED`/`REFUNDED` rows are excluded so a failed attempt can be retried
+- `payments.processingClaimedAt` / `processingToken` (#18): when and by whom the current `PROCESSING` claim was taken; an expired claim (or a null one, from before #18) can be taken over, and only the token holder can settle
+- `refunds` (#56): one row per refunded payment (`UQ_refunds_payment`), written with the payment's move to `REFUNDED`
 - `payments.idempotencyKey` stores the client's `Idempotency-Key`; unique per customer via the partial index `UQ_payments_customer_idempotency_key` (`("customerId", "idempotencyKey") WHERE "idempotencyKey" IS NOT NULL`)
 - `publishedEventStatus` / `orderSyncedStatus` record which status's Kafka event and order update have been applied, so retries only redo missing side effects; `sideEffectsLeaseUntil` is a short lease so concurrent retries don't both perform them
 - status changes use compare-and-set updates (`UPDATE ... WHERE id = ? AND status = ?`) instead of read-then-write, so concurrent requests cannot both move a payment out of the same state

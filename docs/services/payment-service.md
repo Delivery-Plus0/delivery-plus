@@ -64,7 +64,7 @@ Independently of the key, the database allows at most one payment per order in `
 | Current status | Behaviour |
 |---|---|
 | `PENDING` | Atomically claimed (`UPDATE ... WHERE status = 'PENDING'`), settled to `COMPLETED` or `FAILED`, then side effects run. Only one concurrent request can claim it. |
-| `PROCESSING` | `409 Conflict` — another request is settling it. Retry shortly. |
+| `PROCESSING` | Claim younger than `PAYMENT_PROCESSING_TIMEOUT_MS` (60 s): `409 Conflict`, another request is settling it; retry shortly. Older, or with no claim time (claimed before #18): this request takes the claim over atomically and settles the payment. |
 | `COMPLETED` / `FAILED` | Returns the payment as-is. The outcome never changes on retry, even if `simulateFailure` differs. Only side effects that failed earlier are re-attempted. |
 | `REFUNDED` | `409` invalid state transition (unchanged). |
 
@@ -91,7 +91,16 @@ Before settling a `PENDING` payment, `process` first finishes any creation side 
 
 - Events are **at-least-once**. A crash between a successful Kafka publish and writing `publishedEventStatus` causes the next retry to publish again. Every re-publish uses the same deterministic `eventId` (UUID v5 of `paymentId:eventType`), so consumers can deduplicate — see `.project-context/05-event-driven-design.md`.
 - The same crash window exists for the order update. If order-service rejects the repeated update as an invalid transition (the order is already `CONFIRMED`), the retry returns that error; the payment itself stays correct.
-- If a process dies after claiming `PROCESSING` and before settling, the payment stays `PROCESSING` and `process` returns `409`. A real provider integration would reconcile by querying the provider; with the simulator this needs manual repair.
+- A process that dies after claiming `PROCESSING` and before settling no longer leaves the payment stuck (#18). See [Stuck PROCESSING recovery](#stuck-processing-recovery-18).
+
+### Stuck PROCESSING recovery (#18)
+
+- **The claim:** claiming (`PENDING → PROCESSING`) stamps `processingClaimedAt` (database clock) and a fresh `processingToken`.
+- **Takeover:** a claim older than `PAYMENT_PROCESSING_TIMEOUT_MS` (default 60 000) counts as abandoned. A retry of `POST /payments/:id/process` takes it over with an atomic `UPDATE … WHERE "processingClaimedAt" < now() - timeout`. Of many concurrent takeovers exactly one wins; the others get `409`.
+- **Fencing:** settling is `UPDATE … WHERE status = 'PROCESSING' AND "processingToken" = <own token>`. A request whose claim was taken over writes nothing and returns whatever the new holder settled, so a payment is settled exactly once.
+- **No retry ever comes:** every `PAYMENT_SIDE_EFFECTS_SWEEP_MS`, a payment still in `PROCESSING` after `PAYMENT_PROCESSING_ABANDON_MS` (default 15 min) is taken over and settled `FAILED` ("Payment processing was interrupted, so you were not charged."). The usual side effects follow: `payment.failed`, the order moves to `FAILED`, and the customer is told.
+- **Deploying:** migration 004 adds both columns as nullable. Rows already stuck in `PROCESSING` have no claim time and count as abandoned, so they become recoverable right away instead of staying stuck.
+- **Simulator only:** "not charged" and re-deciding the outcome on a takeover are correct because the simulator charges nothing until it settles. A real gateway must instead look the charge up by its idempotency key in `settle` and in the sweep, so a takeover can never charge twice.
 
 ## Database migration workflow
 

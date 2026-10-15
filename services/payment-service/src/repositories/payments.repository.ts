@@ -63,6 +63,58 @@ export class PaymentsRepository {
   }
 
   /**
+   * #18: claims a PENDING payment for processing (PENDING → PROCESSING), stamping the claim time
+   * (database clock) and the claimant's token. True only for the one caller that made the change.
+   */
+  async claimProcessing(id: string, token: string): Promise<boolean> {
+    const result = await this.repo
+      .createQueryBuilder()
+      .update(Payment)
+      .set({ status: PaymentStatus.PROCESSING, processingClaimedAt: () => 'now()', processingToken: token })
+      .where('id = :id AND status = :pending', { id, pending: PaymentStatus.PENDING })
+      .execute();
+    return (result.affected ?? 0) === 1;
+  }
+
+  /**
+   * #18: takes over a PROCESSING claim that is older than `timeoutMs` (or has no claim time: claimed
+   * before it was recorded). Atomic, so of many concurrent takeovers exactly one wins; the previous
+   * holder's token stops being able to settle.
+   */
+  async reclaimExpiredProcessing(id: string, token: string, timeoutMs: number): Promise<boolean> {
+    const result = await this.repo
+      .createQueryBuilder()
+      .update(Payment)
+      .set({ processingClaimedAt: () => 'now()', processingToken: token })
+      .where('id = :id AND status = :processing', { id, processing: PaymentStatus.PROCESSING })
+      .andWhere(`("processingClaimedAt" IS NULL OR "processingClaimedAt" < now() - (:timeoutMs * interval '1 millisecond'))`, { timeoutMs })
+      .execute();
+    return (result.affected ?? 0) === 1;
+  }
+
+  /**
+   * #18: settles a PROCESSING payment, but only for the current claim holder (fencing): a request
+   * whose claim was taken over writes nothing. Clears the claim token.
+   */
+  async settleProcessing(id: string, token: string, to: PaymentStatus, failureReason?: string): Promise<boolean> {
+    const changes: Partial<Payment> = { status: to, processingToken: null };
+    if (failureReason !== undefined) changes.failureReason = failureReason;
+    const result = await this.repo.update({ id, status: PaymentStatus.PROCESSING, processingToken: token }, changes);
+    return (result.affected ?? 0) === 1;
+  }
+
+  /** #18: PROCESSING payments whose claim is older than `olderThanMs` (or unrecorded), oldest first. */
+  findAbandonedProcessing(olderThanMs: number, limit: number): Promise<Payment[]> {
+    return this.repo
+      .createQueryBuilder('p')
+      .where('p.status = :processing', { processing: PaymentStatus.PROCESSING })
+      .andWhere(`(p."processingClaimedAt" IS NULL OR p."processingClaimedAt" < now() - (:olderThanMs * interval '1 millisecond'))`, { olderThanMs })
+      .orderBy('p."processingClaimedAt"', 'ASC', 'NULLS FIRST')
+      .limit(limit)
+      .getMany();
+  }
+
+  /**
    * Atomically takes the side-effects lease if it is free or expired. Uses the
    * database clock so app-server clock skew cannot produce two holders.
    */

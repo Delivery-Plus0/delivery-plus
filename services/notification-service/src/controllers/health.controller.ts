@@ -1,4 +1,4 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { InjectConnection } from '@nestjs/typeorm';
 import { Connection } from 'typeorm';
@@ -23,11 +23,19 @@ export class HealthController {
   @Get('ready')
   @ApiOperation({ summary: 'Readiness check for the notification service' })
   async readiness() {
+    const checks: Record<string, 'ok' | 'error'> = { postgres: 'ok' };
+
     try {
       await this.connection.query('SELECT 1');
-      return { status: 'OK', database: 'connected' };
-    } catch (error) {
-      return { status: 'ERROR', database: 'disconnected' };
+    } catch {
+      checks.postgres = 'error';
     }
+
+    const healthy = Object.values(checks).every((v) => v === 'ok');
+    if (!healthy) {
+      throw new ServiceUnavailableException({ status: 'error', checks });
+    }
+
+    return { status: 'ok', checks };
   }
 }

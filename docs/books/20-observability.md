@@ -208,8 +208,8 @@ Orchestrators and load balancers act on health signals; wrong signals cause outa
 ### 3. Mental model — liveness protects the process; readiness protects the users.
 
 ### 4. Delivery Plus mapping
-- **CURRENT:** every service except the gateway exposes `/health`, `/health/live`, `/health/ready`; the gateway exposes `/health` and `/health/live`. Compose uses `/health`.
-- **PARTIAL:** readiness semantics differ per service; notification-service returns HTTP 200 with `status: "ERROR"` when the DB is down; Kafka-backed services don't check Kafka (#8).
+- **CURRENT:** every service except the gateway exposes `/health`, `/health/live`, `/health/ready`; the gateway exposes `/health` and `/health/live`. Compose probes `/health/ready`, and `/health` for the gateway.
+- **PARTIAL:** every `/health/ready` answers 503 when its PostgreSQL database (Redis for cart and tracking) is down; Kafka-backed services don't check Kafka yet (#8).
 - **NOT IMPLEMENTED:** graceful shutdown (#7).
 
 ### 5. Example

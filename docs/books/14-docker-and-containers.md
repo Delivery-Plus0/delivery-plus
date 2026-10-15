@@ -302,8 +302,8 @@ Compose builds a dependency graph; health checks are the edges' "ready" signals.
 
 ### 4. Delivery Plus mapping — **CURRENT**
 - Infrastructure health checks in `docker-compose.base.yml`: `pg_isready`, `redis-cli ping`, ZooKeeper `srvr`, `kafka-topics --list`.
-- Service health checks: `wget --spider -q http://localhost:<port>/health`, every 5 s, 10 retries; services `depends_on` PostgreSQL/Redis/Kafka (and other services) with `service_healthy`.
-- `/health` is a **liveness-style** check (process answers); `/health/ready` checks the database in some services; dependency-aware readiness is issue #8 (e.g. notification-service's `/health/ready` returns 200 with `status: "ERROR"` when the DB is down).
+- Service health checks: `wget --spider -q http://localhost:<port>/health/ready` (the api-gateway, which has no readiness route, uses `/health`), every 5 s, 10 retries; services `depends_on` PostgreSQL/Redis/Kafka (and other services) with `service_healthy`.
+- `/health` is a **liveness-style** check (process answers); `/health/ready` checks the service's PostgreSQL database (Redis for cart and tracking) and answers 503 when it is down; Kafka readiness and a gateway readiness route are still open in issue #8.
 - E2E overlay uses `ports: !override` / `!reset` to change published ports without copying the files.
 
 ### 5. Example

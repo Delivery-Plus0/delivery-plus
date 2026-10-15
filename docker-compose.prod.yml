@@ -78,7 +78,7 @@ services:
       INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:?INTERNAL_AUTH_SECRET must be set}
       USER_SERVICE_URL: http://user-service:3002
     healthcheck:
-      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3001/health']
+      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3001/health/ready']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -111,7 +111,7 @@ services:
       AWS_PUBLIC_BASE_URL: ${AWS_PUBLIC_BASE_URL:?AWS_PUBLIC_BASE_URL must be set}
       AWS_S3_FORCE_PATH_STYLE: ${AWS_S3_FORCE_PATH_STYLE:-false}
     healthcheck:
-      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3002/health']
+      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3002/health/ready']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -143,7 +143,7 @@ services:
       AWS_PUBLIC_BASE_URL: ${AWS_PUBLIC_BASE_URL:?AWS_PUBLIC_BASE_URL must be set}
       AWS_S3_FORCE_PATH_STYLE: ${AWS_S3_FORCE_PATH_STYLE:-false}
     healthcheck:
-      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3003/health']
+      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3003/health/ready']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -174,7 +174,7 @@ services:
       AWS_PUBLIC_BASE_URL: ${AWS_PUBLIC_BASE_URL:?AWS_PUBLIC_BASE_URL must be set}
       AWS_S3_FORCE_PATH_STYLE: ${AWS_S3_FORCE_PATH_STYLE:-false}
     healthcheck:
-      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3004/health']
+      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3004/health/ready']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -196,7 +196,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
       MENU_SERVICE_URL: http://menu-service:3004
     healthcheck:
-      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3005/health']
+      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3005/health/ready']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -226,7 +226,7 @@ services:
       INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:?INTERNAL_AUTH_SECRET must be set}
       INTERNAL_AUTH_SERVICE: order-service
     healthcheck:
-      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3006/health']
+      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3006/health/ready']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -253,7 +253,7 @@ services:
       KAFKA_BROKER: kafka:29092
       ORDER_SERVICE_URL: http://order-service:3006
     healthcheck:
-      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3007/health']
+      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3007/health/ready']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -282,7 +282,7 @@ services:
       RESTAURANT_SERVICE_URL: http://restaurant-service:3003
       USER_SERVICE_URL: http://user-service:3002
     healthcheck:
-      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3008/health']
+      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3008/health/ready']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -313,7 +313,7 @@ services:
       PHONE_VERIFICATION_REQUIRED: ${PHONE_VERIFICATION_REQUIRED:-false}
       KAFKA_BROKER: kafka:29092
     healthcheck:
-      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3009/health']
+      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3009/health/ready']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -337,7 +337,7 @@ services:
       DRIVER_SERVICE_URL: http://driver-service:3009
       KAFKA_BROKER: kafka:29092
     healthcheck:
-      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3010/health']
+      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3010/health/ready']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -364,7 +364,7 @@ services:
       REDIS_URL: redis://redis:6379
       KAFKA_BROKER: kafka:29092
     healthcheck:
-      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3011/health']
+      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3011/health/ready']
       interval: 5s
       timeout: 5s
       retries: 10

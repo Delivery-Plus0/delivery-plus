@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./assets/logo.png" alt="Delivery Plus" width="420">
+  <img src="./assets/logo_nest.png" alt="Delivery Plus" width="420">
 </p>
 
 <h3 align="center">A cloud-native, event-driven microservices platform for on-demand delivery</h3>

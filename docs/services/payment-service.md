@@ -85,6 +85,8 @@ A retry performs only the steps whose marker does not match the current status, 
 
 A short lease (`sideEffectsLeaseUntil`, 30 s, based on the database clock) ensures only one request performs side effects at a time. A retry arriving while another request holds it returns the settled payment (or `409` for a `PENDING` payment whose creation side effects are still running). If the holder crashes, the lease expires and a later retry takes over.
 
+**Lease ownership (#19).** Each acquisition stores a fresh `sideEffectsLeaseToken` (migration 005). Releasing the lease and writing `publishedEventStatus` / `orderSyncedStatus` all require that token (`UPDATE … WHERE "sideEffectsLeaseToken" = <own>`). A holder that stalled past its lease, while another request took it over, writes nothing and returns the payment as the new holder leaves it. An event it already published is published again by the new holder with the same deterministic `eventId`, so consumers drop the duplicate.
+
 Before settling a `PENDING` payment, `process` first finishes any creation side effects still owed, so the order always goes `CREATED → PAYMENT_PENDING → CONFIRMED/FAILED`.
 
 ### Delivery guarantees and known limits

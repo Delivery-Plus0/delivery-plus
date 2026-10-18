@@ -118,26 +118,45 @@ class FakePaymentsRepository {
   /** Lease state keyed by id; `now` is overridable to simulate expiry. */
   now = () => Date.now();
 
+  private leaseSeq = 0;
+
+  /** #19: same contract as the SQL: a token per acquisition, and every lease write needs it. */
   acquireSideEffectsLease = jest.fn(async (id: string, ttlMs: number) => {
     const row = this.rows.get(id);
-    if (!row) return false;
-    if (row.sideEffectsLeaseUntil && row.sideEffectsLeaseUntil.getTime() >= this.now()) return false;
-    row.sideEffectsLeaseUntil = new Date(this.now() + ttlMs);
+    if (!row) return null;
+    if (row.sideEffectsLeaseUntil && row.sideEffectsLeaseUntil.getTime() >= this.now()) return null;
+    const token = `lease-${++this.leaseSeq}`;
+    Object.assign(row, { sideEffectsLeaseUntil: new Date(this.now() + ttlMs), sideEffectsLeaseToken: token });
+    return token;
+  });
+
+  releaseSideEffectsLease = jest.fn(async (id: string, token: string) => {
+    const row = this.rows.get(id);
+    if (!row || row.sideEffectsLeaseToken !== token) return false;
+    Object.assign(row, { sideEffectsLeaseUntil: null, sideEffectsLeaseToken: null });
     return true;
   });
 
-  releaseSideEffectsLease = jest.fn(async (id: string) => {
-    const row = this.rows.get(id);
-    if (row) row.sideEffectsLeaseUntil = null;
+  markEventPublished = jest.fn(async (id: string, status: PaymentStatus, token: string) => {
+    const row = this.rows.get(id)!;
+    if (row.sideEffectsLeaseToken !== token) return false;
+    row.publishedEventStatus = status;
+    return true;
   });
 
-  markEventPublished = jest.fn(async (id: string, status: PaymentStatus) => {
-    this.rows.get(id)!.publishedEventStatus = status;
+  markOrderSynced = jest.fn(async (id: string, status: PaymentStatus, token: string) => {
+    const row = this.rows.get(id)!;
+    if (row.sideEffectsLeaseToken !== token) return false;
+    row.orderSyncedStatus = status;
+    return true;
   });
 
-  markOrderSynced = jest.fn(async (id: string, status: PaymentStatus) => {
-    this.rows.get(id)!.orderSyncedStatus = status;
-  });
+  /** Test helper: another worker takes the lease over (the current one expired). */
+  takeOverLease(id: string): string {
+    const token = `lease-${++this.leaseSeq}`;
+    Object.assign(this.rows.get(id)!, { sideEffectsLeaseUntil: new Date(this.now() + 30_000), sideEffectsLeaseToken: token });
+    return token;
+  }
 
   /** Refund records by paymentId (the unique index of the real table). */
   refunds = new Map<string, Refund>();
@@ -650,6 +669,63 @@ describe('PaymentsService', () => {
           OrderStatus.FAILED,
         ]);
       });
+    });
+  });
+
+  describe('side-effects lease fencing (#19)', () => {
+    it('a normal run acquires, writes both markers and releases with its own token', async () => {
+      const p = seedSynced(PaymentStatus.PENDING);
+
+      await service.processPayment(p.id, 'customer-1', { simulateFailure: false });
+
+      const token = await payments.acquireSideEffectsLease.mock.results[0].value;
+      expect(payments.markEventPublished).toHaveBeenCalledWith(p.id, PaymentStatus.COMPLETED, token);
+      expect(payments.markOrderSynced).toHaveBeenCalledWith(p.id, PaymentStatus.COMPLETED, token);
+      expect(payments.releaseSideEffectsLease).toHaveBeenCalledWith(p.id, token);
+      expect(payments.rows.get(p.id)).toMatchObject({ sideEffectsLeaseUntil: null, sideEffectsLeaseToken: null });
+    });
+
+    it('a worker whose lease was taken over during the publish writes no marker and leaves the new lease alone', async () => {
+      const p = payments.seed({ status: PaymentStatus.COMPLETED });
+      let newToken = '';
+      kafka.publish.mockImplementationOnce(async () => {
+        newToken = payments.takeOverLease(p.id); // the old worker stalled past its lease
+      });
+
+      const result = await service.processPayment(p.id, 'customer-1', {});
+
+      expect(result.publishedEventStatus).toBeNull();
+      expect(orderClient.updateOrderStatus).not.toHaveBeenCalled();
+      expect(payments.rows.get(p.id)).toMatchObject({ sideEffectsLeaseToken: newToken });
+      expect(payments.rows.get(p.id)!.sideEffectsLeaseUntil).not.toBeNull();
+    });
+
+    it('a worker whose lease was taken over during the order update does not write the sync marker', async () => {
+      const p = payments.seed({ status: PaymentStatus.COMPLETED, publishedEventStatus: PaymentStatus.COMPLETED });
+      let newToken = '';
+      orderClient.updateOrderStatus.mockImplementationOnce(async () => {
+        newToken = payments.takeOverLease(p.id);
+      });
+
+      const result = await service.processPayment(p.id, 'customer-1', {});
+
+      expect(result.orderSyncedStatus).toBeNull();
+      expect(payments.rows.get(p.id)!.sideEffectsLeaseToken).toBe(newToken);
+    });
+
+    it('the new holder finishes what the stale one could not record, with the same eventId', async () => {
+      const p = payments.seed({ status: PaymentStatus.COMPLETED });
+      kafka.publish.mockImplementationOnce(async () => {
+        payments.takeOverLease(p.id);
+      });
+      await service.processPayment(p.id, 'customer-1', {});
+      payments.rows.get(p.id)!.sideEffectsLeaseUntil = new Date(Date.now() - 1); // the new holder crashed too
+
+      const finished = await service.processPayment(p.id, 'customer-1', {});
+
+      expect(finished).toMatchObject({ publishedEventStatus: PaymentStatus.COMPLETED, orderSyncedStatus: PaymentStatus.COMPLETED });
+      const ids = kafka.publish.mock.calls.map(([, e]) => e.eventId);
+      expect(new Set(ids)).toEqual(new Set([paymentEventId(p.id, PaymentEventType.COMPLETED)]));
     });
   });
 

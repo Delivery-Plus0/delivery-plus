@@ -2161,14 +2161,7 @@
             "description": "Successful response"
           },
           "400": {
-            "description": "Bad request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
+            "description": "simulateFailure sent while test hooks are disabled"
           },
           "401": {
             "description": "Missing or invalid JWT"
@@ -2191,7 +2184,23 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "simulateFailure": {
+                    "type": "boolean",
+                    "description": "Test hook, test and E2E stacks only (PAYMENT_TEST_HOOKS=true): true forces a decline, false forces success. Anywhere else sending it returns 400 \"simulateFailure is a test hook and is disabled\". Clients must omit it."
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/payments/{id}": {

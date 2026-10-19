@@ -1,8 +1,9 @@
-import { ABANDONED_PROCESSING_REASON, PaymentsService, paymentEventId } from './payments.service';
+import { ABANDONED_PROCESSING_REASON, PaymentsService, SIMULATE_FAILURE_DISABLED, paymentEventId } from './payments.service';
 import { PaymentsRepository, CreatePaymentData, RefundDetails, RefundOutcome } from '../repositories/payments.repository';
 import { Refund, RefundInitiator } from '../entities/refund.entity';
 import { OrderServiceClient, OrderDto } from '../common/order-service.client';
 import {
+  BadRequestError,
   ConflictError,
   ForbiddenError,
   InvalidStateTransitionError,
@@ -231,7 +232,8 @@ describe('PaymentsService', () => {
   let orderClient: jest.Mocked<OrderServiceClient>;
   let kafka: { publish: jest.Mock };
 
-  const config = { paymentSuccessRate: 0.9, processingTimeoutMs: 60_000, processingAbandonMs: 900_000 } as never;
+  // The test hooks are on here, as on the test stack: most cases force an outcome with simulateFailure.
+  const config = { paymentSuccessRate: 0.9, paymentTestHooks: true, processingTimeoutMs: 60_000, processingAbandonMs: 900_000 } as never;
 
   const order = (overrides: Partial<OrderDto> = {}): OrderDto => ({
     id: 'order-1',
@@ -443,6 +445,45 @@ describe('PaymentsService', () => {
           service.createPayment('customer-1', { orderId: 'order-1' }, 'Bearer x', 'key-1'),
         ).rejects.toThrow('connection reset');
       });
+    });
+  });
+
+  describe('simulateFailure test hook (#201)', () => {
+    const withoutHooks = () =>
+      new PaymentsService(
+        payments as unknown as PaymentsRepository,
+        orderClient,
+        { paymentSuccessRate: 1, paymentTestHooks: false, processingTimeoutMs: 60_000, processingAbandonMs: 900_000 } as never,
+        kafka as unknown as KafkaProducerService,
+      );
+
+    it.each([false, true])('refuses simulateFailure: %s with 400 when PAYMENT_TEST_HOOKS is off, before touching the payment', async (simulateFailure) => {
+      const p = seedSynced(PaymentStatus.PENDING);
+
+      await expect(withoutHooks().processPayment(p.id, 'customer-1', { simulateFailure })).rejects.toThrow(
+        new BadRequestError(SIMULATE_FAILURE_DISABLED),
+      );
+      expect(payments.findById).not.toHaveBeenCalled();
+      expect(payments.rows.get(p.id)!.status).toBe(PaymentStatus.PENDING);
+      expect(kafka.publish).not.toHaveBeenCalled();
+    });
+
+    it('without the hook and without hooks, every payment succeeds (no random declines outside tests)', async () => {
+      const random = jest.spyOn(Math, 'random').mockReturnValue(0.999999);
+      try {
+        const p = seedSynced(PaymentStatus.PENDING);
+        await expect(withoutHooks().processPayment(p.id, 'customer-1', {})).resolves.toMatchObject({ status: PaymentStatus.COMPLETED });
+      } finally {
+        random.mockRestore();
+      }
+    });
+
+    it('with hooks on, the hook still forces the outcome both ways', async () => {
+      const declined = seedSynced(PaymentStatus.PENDING, { orderId: 'order-a' });
+      const forced = seedSynced(PaymentStatus.PENDING, { orderId: 'order-b' });
+
+      await expect(service.processPayment(declined.id, 'customer-1', { simulateFailure: true })).resolves.toMatchObject({ status: PaymentStatus.FAILED });
+      await expect(service.processPayment(forced.id, 'customer-1', { simulateFailure: false })).resolves.toMatchObject({ status: PaymentStatus.COMPLETED });
     });
   });
 

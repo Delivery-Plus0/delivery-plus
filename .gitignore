@@ -30,3 +30,4 @@ apis.md
 
 # E2E seed output (ids for UI tests; contains the test-only password)
 e2e-seed-manifest.json
+e2e-observability-report.json

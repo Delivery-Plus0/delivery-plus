@@ -16,7 +16,7 @@ import 'reflect-metadata';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { Column, CreateDateColumn, DataSource, Entity, Index, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
-import { PaymentStatus } from '@food-delivery/shared';
+import { PaymentStatus, STRICT_WHERE_VALUES } from '@food-delivery/shared';
 import { Payment, UQ_PAYMENTS_ACTIVE_ORDER, UQ_PAYMENTS_CUSTOMER_IDEMPOTENCY_KEY } from '../entities/payment.entity';
 import { PaymentsRepository, isUniqueViolation } from './payments.repository';
 import { Refund, RefundInitiator } from '../entities/refund.entity';
@@ -42,8 +42,17 @@ class LegacyPayment {
   @UpdateDateColumn() updatedAt!: Date;
 }
 
+/** The same strict where-value rule as every service's DataSource (F8, #204). */
 function dataSource(entities: Array<new () => object>, synchronize: boolean): DataSource {
-  return new DataSource({ type: 'postgres', url: DATABASE_URL, entities, synchronize, dropSchema: synchronize, poolSize: 10 });
+  return new DataSource({
+    type: 'postgres',
+    url: DATABASE_URL,
+    entities,
+    synchronize,
+    dropSchema: synchronize,
+    poolSize: 10,
+    invalidWhereValuesBehavior: STRICT_WHERE_VALUES,
+  });
 }
 
 describeDb('PaymentsRepository (PostgreSQL integration)', () => {
@@ -247,6 +256,25 @@ describeDb('PaymentsRepository (PostgreSQL integration)', () => {
       expect((await repo.findAbandonedProcessing(60_000, 10)).map((x) => x.id)).toContain(p.id);
       expect(await repo.reclaimExpiredProcessing(p.id, randomUUID(), 60_000)).toBe(true);
       expect((await repo.findAbandonedProcessing(60_000, 10)).map((x) => x.id)).not.toContain(p.id);
+    });
+  });
+
+  describe('undefined where values (F8, #204)', () => {
+    it('a lookup by an undefined id throws instead of returning an arbitrary payment', async () => {
+      await repo.create({ orderId: newOrderId(), customerId: 'c1', amount: '10.00' });
+      // Without the rule TypeORM drops `id: undefined` and returns the first row: this one.
+      expect(Number((await ds.query('SELECT count(*) AS n FROM payments'))[0].n)).toBe(1);
+
+      await expect(repo.findById(undefined as unknown as string)).rejects.toThrow(/Undefined value/);
+      await expect(repo.findByIdempotencyKey('c1', undefined as unknown as string)).rejects.toThrow(/Undefined value/);
+    });
+
+    it('an update with an undefined criterion throws and changes nothing', async () => {
+      const p = await repo.create({ orderId: newOrderId(), customerId: 'c1', amount: '10.00' });
+
+      await expect(repo.transition(undefined as unknown as string, PaymentStatus.PENDING, PaymentStatus.FAILED)).rejects.toThrow(/Undefined value/);
+
+      expect((await repo.findById(p.id))?.status).toBe(PaymentStatus.PENDING);
     });
   });
 

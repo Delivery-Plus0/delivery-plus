@@ -73,6 +73,7 @@ No workflow collects test coverage.
 
 | PR | Change |
 | --- | --- |
+| (#204) | Review findings closed. F3: unexpected (non-`AppError`, non-`HttpException`) errors return `500 Something went wrong`; the real error and stack are logged with the correlation id. F7: `RateLimiterService` counts and sets the window TTL in one Lua script, and repairs keys left without a TTL. F8: every service's DataSource sets `invalidWhereValuesBehavior: { undefined: 'throw' }` (`STRICT_WHERE_VALUES` from `shared`), so an undefined find/update/delete criterion throws instead of matching any row |
 | #129 | Customer notification at every stage: `customerId?` on payment and delivery payloads (delivery stores it, migration 004); handlers for `payment.completed`, `delivery.driver_assigned`, `delivery.picked_up`, `delivery.completed`; events without `customerId` are skipped; `npm run e2e` and `seed:e2e` assert them (closes #5) |
 | #128 | Owners can neither set nor lift `SUSPENDED`: owner status writes are compare-and-set against a non-suspended row (closes #125) |
 | #127 | Driver-release reconciliation sweep in delivery-service (`DRIVER_RECONCILE_SWEEP_MS`, `DRIVER_RECONCILE_GRACE_MS`) (#98) |

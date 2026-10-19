@@ -11,6 +11,13 @@ const AppDataSource = defaultDataSource;
 const databaseUrl = 'postgres://db.example.test:5432/order';
 
 describe('buildTypeOrmConfig', () => {
+  it('makes an undefined where value throw, and keeps it whatever options are passed (F8, #204)', () => {
+    expect(buildTypeOrmConfig(databaseUrl, []).invalidWhereValuesBehavior).toEqual({ undefined: 'throw' });
+    expect(buildTypeOrmConfig(databaseUrl, [], { invalidWhereValuesBehavior: { undefined: 'ignore' } }).invalidWhereValuesBehavior).toEqual({
+      undefined: 'throw',
+    });
+  });
+
   it('builds a production-safe PostgreSQL configuration for every order entity', () => {
     const config = buildTypeOrmConfig(databaseUrl, [Order, OrderItem]);
     expect(config).toMatchObject({

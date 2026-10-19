@@ -80,6 +80,13 @@ export class Payment {
   sideEffectsLeaseUntil?: Date | null;
 
   /**
+   * #19: who holds the side-effects lease. A holder whose lease expired and was taken over can no
+   * longer release it or write the published / synced markers (fencing).
+   */
+  @Column({ type: 'uuid', nullable: true })
+  sideEffectsLeaseToken?: string | null;
+
+  /**
    * #18: when the current PROCESSING claim was taken (database clock). A claim older than
    * PAYMENT_PROCESSING_TIMEOUT_MS was abandoned (its request crashed or timed out) and may be taken
    * over. Null on a PROCESSING row means it was claimed before this was recorded: also abandoned.

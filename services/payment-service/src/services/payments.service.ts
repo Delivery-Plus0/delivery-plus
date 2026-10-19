@@ -359,8 +359,8 @@ export class PaymentsService {
   private async completeSideEffects(payment: Payment, onBusy: OnBusy = 'return'): Promise<Payment> {
     if (!this.hasOwedSideEffects(payment)) return payment;
 
-    const leased = await this.payments.acquireSideEffectsLease(payment.id, SIDE_EFFECTS_LEASE_MS);
-    if (!leased) {
+    const lease = await this.payments.acquireSideEffectsLease(payment.id, SIDE_EFFECTS_LEASE_MS);
+    if (!lease) {
       if (onBusy === 'conflict') {
         throw new ConflictError(`Payment ${payment.id} is being finalized, please retry`);
       }
@@ -392,15 +392,22 @@ export class PaymentsService {
           },
         };
         await this.kafkaProducer.publish(TOPICS.PAYMENT_EVENTS, event);
-        await this.payments.markEventPublished(current.id, current.status);
+        if (!(await this.payments.markEventPublished(current.id, current.status, lease))) {
+          // #19: our lease expired and was taken over. The event is out (its eventId is deterministic,
+          // so a re-publish is deduplicated); the new holder records it and does the rest.
+          return this.leaseLost(payment.id, 'event marker');
+        }
       }
 
       if (current.orderSyncedStatus !== current.status) {
         if (effects.orderStatus) cancelledOrder = await this.syncOrder(current, effects.orderStatus);
-        await this.payments.markOrderSynced(current.id, current.status);
+        if (!(await this.payments.markOrderSynced(current.id, current.status, lease))) {
+          // The new holder repeats the order update (a same-status update is a no-op) and any refund.
+          return this.leaseLost(payment.id, 'order sync marker');
+        }
       }
     } finally {
-      await this.payments.releaseSideEffectsLease(payment.id);
+      await this.payments.releaseSideEffectsLease(payment.id, lease);
     }
 
     if (cancelledOrder) {
@@ -413,6 +420,12 @@ export class PaymentsService {
       });
     }
     return this.findOrThrow(payment.id);
+  }
+
+  /** #19: a stale lease holder stops writing and returns the payment as the new holder leaves it. */
+  private async leaseLost(paymentId: string, step: string): Promise<Payment> {
+    this.logger.warn(`Side-effects lease of payment ${paymentId} was taken over; not writing the ${step}`);
+    return this.findOrThrow(paymentId);
   }
 
   /**

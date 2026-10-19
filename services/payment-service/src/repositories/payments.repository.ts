@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
+import { randomUUID } from 'crypto';
 import { PaymentStatus } from '@food-delivery/shared';
 import { ACTIVE_PAYMENT_STATUSES, Payment } from '../entities/payment.entity';
 import { REFUND_PROVIDER_SIMULATED, Refund } from '../entities/refund.entity';
@@ -115,31 +116,39 @@ export class PaymentsRepository {
   }
 
   /**
-   * Atomically takes the side-effects lease if it is free or expired. Uses the
-   * database clock so app-server clock skew cannot produce two holders.
+   * Atomically takes the side-effects lease if it is free or expired, and returns this holder's
+   * token, or null when another holder has it. Uses the database clock so app-server clock skew
+   * cannot produce two holders. #19: every later write under the lease must present the token.
    */
-  async acquireSideEffectsLease(id: string, ttlMs: number): Promise<boolean> {
+  async acquireSideEffectsLease(id: string, ttlMs: number): Promise<string | null> {
+    const token = randomUUID();
     const result = await this.repo
       .createQueryBuilder()
       .update(Payment)
-      .set({ sideEffectsLeaseUntil: () => `now() + (:ttlMs * interval '1 millisecond')` })
+      .set({ sideEffectsLeaseUntil: () => `now() + (:ttlMs * interval '1 millisecond')`, sideEffectsLeaseToken: token })
       .where('id = :id', { id })
       .andWhere('("sideEffectsLeaseUntil" IS NULL OR "sideEffectsLeaseUntil" < now())')
       .setParameters({ ttlMs })
       .execute();
+    return (result.affected ?? 0) === 1 ? token : null;
+  }
+
+  /** #19: releases the lease only for its current holder; a stale holder's release changes nothing. */
+  async releaseSideEffectsLease(id: string, token: string): Promise<boolean> {
+    const result = await this.repo.update({ id, sideEffectsLeaseToken: token }, { sideEffectsLeaseUntil: null, sideEffectsLeaseToken: null });
     return (result.affected ?? 0) === 1;
   }
 
-  async releaseSideEffectsLease(id: string): Promise<void> {
-    await this.repo.update({ id }, { sideEffectsLeaseUntil: null });
+  /** #19: records the published event, only for the lease's current holder. False: the lease was taken over. */
+  async markEventPublished(id: string, status: PaymentStatus, token: string): Promise<boolean> {
+    const result = await this.repo.update({ id, sideEffectsLeaseToken: token }, { publishedEventStatus: status });
+    return (result.affected ?? 0) === 1;
   }
 
-  async markEventPublished(id: string, status: PaymentStatus): Promise<void> {
-    await this.repo.update({ id }, { publishedEventStatus: status });
-  }
-
-  async markOrderSynced(id: string, status: PaymentStatus): Promise<void> {
-    await this.repo.update({ id }, { orderSyncedStatus: status });
+  /** #19: records the order update, only for the lease's current holder. False: the lease was taken over. */
+  async markOrderSynced(id: string, status: PaymentStatus, token: string): Promise<boolean> {
+    const result = await this.repo.update({ id, sideEffectsLeaseToken: token }, { orderSyncedStatus: status });
+    return (result.affected ?? 0) === 1;
   }
 
   /** The order's payment that collected money (COMPLETED) or already gave it back (REFUNDED), if any. */

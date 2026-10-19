@@ -21,6 +21,7 @@ import { Payment, UQ_PAYMENTS_ACTIVE_ORDER, UQ_PAYMENTS_CUSTOMER_IDEMPOTENCY_KEY
 import { PaymentsRepository, isUniqueViolation } from './payments.repository';
 import { Refund, RefundInitiator } from '../entities/refund.entity';
 import { PaymentProcessingClaim1700000000003 } from '../database/migrations/004-processing-claim';
+import { PaymentSideEffectsLeaseToken1700000000004 } from '../database/migrations/005-side-effects-lease-token';
 import { randomUUID } from 'crypto';
 
 const DATABASE_URL = process.env.PAYMENT_TEST_DATABASE_URL;
@@ -171,23 +172,42 @@ describeDb('PaymentsRepository (PostgreSQL integration)', () => {
       expect(got.filter(Boolean)).toHaveLength(1);
     });
 
-    it('can be re-acquired after release or expiry', async () => {
+    it('can be re-acquired after release or expiry, each time with a new token', async () => {
       const p = await repo.create({ orderId: newOrderId(), customerId: 'c1', amount: '10.00' });
-      expect(await repo.acquireSideEffectsLease(p.id, 30_000)).toBe(true);
-      expect(await repo.acquireSideEffectsLease(p.id, 30_000)).toBe(false);
-      await repo.releaseSideEffectsLease(p.id);
-      expect(await repo.acquireSideEffectsLease(p.id, 1)).toBe(true);
+      const first = await repo.acquireSideEffectsLease(p.id, 30_000);
+      expect(first).toEqual(expect.any(String));
+      expect(await repo.acquireSideEffectsLease(p.id, 30_000)).toBeNull();
+      expect(await repo.releaseSideEffectsLease(p.id, first!)).toBe(true);
+      const second = await repo.acquireSideEffectsLease(p.id, 1);
       await new Promise((r) => setTimeout(r, 20));
-      expect(await repo.acquireSideEffectsLease(p.id, 30_000)).toBe(true);
+      const third = await repo.acquireSideEffectsLease(p.id, 30_000);
+      expect(new Set([first, second, third]).size).toBe(3);
     });
 
-    it('records published / synced status markers', async () => {
+    it('records published / synced status markers for the lease holder', async () => {
       const p = await repo.create({ orderId: newOrderId(), customerId: 'c1', amount: '10.00' });
-      await repo.markEventPublished(p.id, PaymentStatus.PENDING);
-      await repo.markOrderSynced(p.id, PaymentStatus.PENDING);
+      const token = (await repo.acquireSideEffectsLease(p.id, 30_000))!;
+      expect(await repo.markEventPublished(p.id, PaymentStatus.PENDING, token)).toBe(true);
+      expect(await repo.markOrderSynced(p.id, PaymentStatus.PENDING, token)).toBe(true);
       const stored = await repo.findById(p.id);
       expect(stored?.publishedEventStatus).toBe(PaymentStatus.PENDING);
       expect(stored?.orderSyncedStatus).toBe(PaymentStatus.PENDING);
+    });
+
+    it('#19: a holder whose lease expired and was taken over can neither write the markers nor release the new lease', async () => {
+      const p = await repo.create({ orderId: newOrderId(), customerId: 'c1', amount: '10.00' });
+      const stale = (await repo.acquireSideEffectsLease(p.id, 1))!;
+      await new Promise((r) => setTimeout(r, 20));
+      const current = (await repo.acquireSideEffectsLease(p.id, 30_000))!;
+
+      expect(await repo.markEventPublished(p.id, PaymentStatus.PENDING, stale)).toBe(false);
+      expect(await repo.markOrderSynced(p.id, PaymentStatus.PENDING, stale)).toBe(false);
+      expect(await repo.releaseSideEffectsLease(p.id, stale)).toBe(false);
+
+      const stored = await repo.findById(p.id);
+      expect(stored).toMatchObject({ publishedEventStatus: null, orderSyncedStatus: null, sideEffectsLeaseToken: current });
+      expect(stored?.sideEffectsLeaseUntil).not.toBeNull();
+      expect(await repo.acquireSideEffectsLease(p.id, 30_000)).toBeNull(); // still held by the current holder
     });
   });
 
@@ -265,8 +285,10 @@ describeDb('PaymentsRepository (PostgreSQL integration)', () => {
       expect((await repo.findCollectedByOrder(p.orderId))?.id).toBe(p.id);
 
       expect((await repo.findWithOwedSideEffects(0, 10)).map((x) => x.id)).toContain(p.id);
-      await repo.markEventPublished(p.id, PaymentStatus.COMPLETED);
-      await repo.markOrderSynced(p.id, PaymentStatus.COMPLETED);
+      const lease = (await repo.acquireSideEffectsLease(p.id, 30_000))!;
+      await repo.markEventPublished(p.id, PaymentStatus.COMPLETED, lease);
+      await repo.markOrderSynced(p.id, PaymentStatus.COMPLETED, lease);
+      await repo.releaseSideEffectsLease(p.id, lease);
       expect((await repo.findWithOwedSideEffects(0, 10)).map((x) => x.id)).not.toContain(p.id);
     });
   });
@@ -297,6 +319,7 @@ describeDb('migrations/20260917_payment_idempotency.sql', () => {
     }
     // Later columns come from the TypeORM migrations (#18).
     await new PaymentProcessingClaim1700000000003().up(legacy.createQueryRunner());
+    await new PaymentSideEffectsLeaseToken1700000000004().up(legacy.createQueryRunner());
     await legacy.destroy();
 
     // 3. TypeORM must see no pending schema changes against the current entity.

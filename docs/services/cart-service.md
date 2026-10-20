@@ -32,9 +32,20 @@ The cart is one JSON value in Redis (`cart:<userId>`, TTL `CART_TTL_SECONDS`). E
 
 - `CartRepository.read` returns the cart and the exact stored value it came from.
 - `CartRepository.replace` writes the new cart (or deletes the key for an empty cart) in one Lua script, **only if the stored value is still the one that was read** (or still absent).
-- If another request changed the cart first, the change is applied again to the newer cart, with a short random backoff, up to 50 times; then `409` *"Your cart changed at the same time"*. Errors from the change itself (another restaurant, the quantity cap) are final.
+- If another request changed the cart first, the change is applied again to the newer cart, with a short random backoff, up to 50 times; then `409 CartWriteConflict` (see [Error codes](#error-codes)). Errors from the change itself (another restaurant, the quantity cap) are final.
 - Checkout validation asks menu-service between its read and its write, so it re-runs (up to 5 times) when the cart changed meanwhile: an item added during checkout is never dropped.
 - `DELETE /cart` is a plain delete.
+
+## Error codes
+
+Clients must branch on `error`, not only on the status: two different 409s come from the same routes.
+
+| Status | `error` | When | What the client does |
+| --- | --- | --- | --- |
+| 409 | `Conflict` | `POST /cart/items` with an item from another restaurant than the cart's | Offer to start a new cart |
+| 409 | `CartWriteConflict` | Another request kept changing the same cart (50 lost writes in a row; checkout validation: 5) | Try again; never offer a new cart |
+| 409 | `CartChanged` | `POST /cart/validate`: the menu changed; `details.changes` lists what, and the cart is already updated | Show the changes and the new total |
+| 400 | `BadRequest` | Unavailable item, more than 20 of one item, item not in the cart, empty cart | Show the message |
 
 So a double tap on "add" or two devices adding at once both land, and concurrent quantity changes of one line add up exactly. The public API and the stored format are unchanged.
 

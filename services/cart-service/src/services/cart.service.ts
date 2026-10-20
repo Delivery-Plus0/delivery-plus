@@ -3,6 +3,7 @@ import {
   BadRequestError,
   CartChange,
   CartChangedError,
+  CartWriteConflictError,
   ConflictError,
   MAX_CART_ITEM_QUANTITY,
   NotFoundError,
@@ -23,7 +24,7 @@ const MAX_VALIDATE_ATTEMPTS = 5;
 
 const backoff = (attempt: number) => new Promise((resolve) => setTimeout(resolve, Math.random() * Math.min(2 * attempt, 20)));
 
-const cartChangedConcurrently = () => new ConflictError('Your cart changed at the same time. Please try again.');
+const cartChangedConcurrently = () => new CartWriteConflictError();
 
 /**
  * Every change to a cart is read → change → compare-and-set write (F6, #205): the write applies only if

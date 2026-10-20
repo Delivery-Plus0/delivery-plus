@@ -1810,6 +1810,16 @@
           },
           "403": {
             "description": "Forbidden"
+          },
+          "409": {
+            "description": "Conflict: the cart holds items from another restaurant (offer to start a new cart); CartWriteConflict: the cart kept changing at the same time (just try again)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1845,6 +1855,16 @@
           },
           "403": {
             "description": "Forbidden"
+          },
+          "409": {
+            "description": "CartWriteConflict: the cart kept changing at the same time; try again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "parameters": [
@@ -1888,6 +1908,16 @@
           },
           "403": {
             "description": "Forbidden"
+          },
+          "409": {
+            "description": "CartWriteConflict: the cart kept changing at the same time; try again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "parameters": [

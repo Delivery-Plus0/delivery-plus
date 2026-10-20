@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Redis } from 'ioredis';
-import { ConflictError, CartChangedError } from '@food-delivery/shared';
+import { CartChangedError, CartWriteConflictError, ConflictError } from '@food-delivery/shared';
 import { CartService } from './cart.service';
 import { CartRepository } from '../repositories/cart.repository';
 import { MenuItemDetails, MenuServiceClient } from '../common/menu-service.client';
@@ -122,13 +122,36 @@ describe.each(backends)('CartService concurrent writes (F6, #205) on %s', (_name
 });
 
 describe('CartService when a cart never stops changing', () => {
-  it('gives up with 409 instead of retrying forever', async () => {
+  it('gives up with 409 CartWriteConflict instead of retrying forever', async () => {
     const carts = new InMemoryCarts();
     const repository = carts.asRepository();
     repository.replace.mockResolvedValue(false); // always lost to another writer
 
-    await expect(new CartService(repository, menu()).addItem('user-1', { menuItemId: 'item-0', quantity: 1 })).rejects.toBeInstanceOf(ConflictError);
+    const error = await new CartService(repository, menu()).addItem('user-1', { menuItemId: 'item-0', quantity: 1 }).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(CartWriteConflictError);
+    expect(error).toMatchObject({ statusCode: 409, error: 'CartWriteConflict' });
     expect(repository.replace).toHaveBeenCalledTimes(50);
+  });
+
+  it('keeps the different-restaurant 409 as its own code, distinct from CartWriteConflict', async () => {
+    const carts = new InMemoryCarts();
+    carts.seed('user-1', { userId: 'user-1', restaurantId: 'rest-2', items: [{ menuItemId: 'x', name: 'X', price: 5, quantity: 1 }], updatedAt: 't' });
+
+    const error = await new CartService(carts.asRepository(), menu()).addItem('user-1', { menuItemId: 'item-0', quantity: 1 }).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ConflictError);
+    expect(error).not.toBeInstanceOf(CartWriteConflictError);
+    expect(error).toMatchObject({ statusCode: 409, error: 'Conflict' });
+  });
+
+  it('answers CartWriteConflict from checkout validation too when the cart never settles', async () => {
+    const carts = new InMemoryCarts();
+    carts.seed('user-1', { userId: 'user-1', restaurantId: 'rest-1', items: [{ menuItemId: 'item-0', name: 'Old', price: 10, quantity: 1 }], updatedAt: 't' });
+    const repository = carts.asRepository();
+    repository.replace.mockResolvedValue(false);
+
+    await expect(new CartService(repository, menu()).validateForCheckout('user-1')).rejects.toMatchObject({ statusCode: 409, error: 'CartWriteConflict' });
   });
 });
 

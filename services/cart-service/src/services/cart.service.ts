@@ -16,6 +16,20 @@ import { Cart, CartItem, CartWithTotal, emptyCart, withTotal } from '../entities
 /** Prices compared in whole piasters, so 12.5 and 12.50 are the same price. */
 const toPiasters = (price: number) => Math.round(price * 100);
 
+/** F6 (#205): how often a write that lost a race to another write on the same cart is retried. */
+const MAX_WRITE_ATTEMPTS = 50;
+/** Checkout validation calls menu-service per item, so it re-runs fewer times. */
+const MAX_VALIDATE_ATTEMPTS = 5;
+
+const backoff = (attempt: number) => new Promise((resolve) => setTimeout(resolve, Math.random() * Math.min(2 * attempt, 20)));
+
+const cartChangedConcurrently = () => new ConflictError('Your cart changed at the same time. Please try again.');
+
+/**
+ * Every change to a cart is read → change → compare-and-set write (F6, #205): the write applies only if
+ * the cart is still exactly what was read, otherwise the change is re-applied to the newer cart. Two
+ * requests at once (a double tap, two devices) both land instead of one overwriting the other.
+ */
 @Injectable()
 export class CartService {
   constructor(
@@ -35,32 +49,32 @@ export class CartService {
       throw new BadRequestError(`Menu item ${item.name} is not currently available`);
     }
 
-    let cart = (await this.cartRepository.find(userId)) ?? emptyCart(userId);
+    return this.mutate(userId, (stored) => {
+      const cart = stored ?? emptyCart(userId);
 
-    if (cart.items.length > 0 && cart.restaurantId && cart.restaurantId !== item.restaurantId) {
-      throw new ConflictError(
-        'Cart already contains items from a different restaurant. Clear the cart first.',
-      );
-    }
+      if (cart.items.length > 0 && cart.restaurantId && cart.restaurantId !== item.restaurantId) {
+        throw new ConflictError(
+          'Cart already contains items from a different restaurant. Clear the cart first.',
+        );
+      }
 
-    const existing = cart.items.find((i) => i.menuItemId === dto.menuItemId);
-    if (existing && existing.quantity + dto.quantity > MAX_CART_ITEM_QUANTITY) {
-      throw new BadRequestError(`You can order at most ${MAX_CART_ITEM_QUANTITY} of one item`);
-    }
-    if (existing) {
-      existing.quantity += dto.quantity;
-    } else {
-      cart.items.push({
-        menuItemId: item.id,
-        name: item.name,
-        price: item.price,
-        quantity: dto.quantity,
-      });
-    }
+      const existing = cart.items.find((i) => i.menuItemId === dto.menuItemId);
+      if (existing && existing.quantity + dto.quantity > MAX_CART_ITEM_QUANTITY) {
+        throw new BadRequestError(`You can order at most ${MAX_CART_ITEM_QUANTITY} of one item`);
+      }
+      if (existing) {
+        existing.quantity += dto.quantity;
+      } else {
+        cart.items.push({
+          menuItemId: item.id,
+          name: item.name,
+          price: item.price,
+          quantity: dto.quantity,
+        });
+      }
 
-    cart = { ...cart, restaurantId: item.restaurantId, updatedAt: new Date().toISOString() };
-    await this.cartRepository.save(cart);
-    return withTotal(cart);
+      return { ...cart, restaurantId: item.restaurantId };
+    });
   }
 
   async updateItemQuantity(
@@ -68,25 +82,27 @@ export class CartService {
     menuItemId: string,
     dto: UpdateCartItemDto,
   ): Promise<CartWithTotal> {
-    const cart = await this.requireCart(userId);
-    const index = cart.items.findIndex((i) => i.menuItemId === menuItemId);
-    if (index === -1) {
-      throw new BadRequestError(`Item ${menuItemId} is not in the cart`);
-    }
+    return this.mutate(userId, (stored) => {
+      const cart = requireCart(stored);
+      const index = cart.items.findIndex((i) => i.menuItemId === menuItemId);
+      if (index === -1) {
+        throw new BadRequestError(`Item ${menuItemId} is not in the cart`);
+      }
 
-    if (dto.quantity === 0) {
-      cart.items.splice(index, 1);
-    } else {
-      cart.items[index].quantity = dto.quantity;
-    }
-
-    return this.persistOrClear(cart);
+      if (dto.quantity === 0) {
+        cart.items.splice(index, 1);
+      } else {
+        cart.items[index].quantity = dto.quantity;
+      }
+      return cart;
+    });
   }
 
   async removeItem(userId: string, menuItemId: string): Promise<CartWithTotal> {
-    const cart = await this.requireCart(userId);
-    cart.items = cart.items.filter((i) => i.menuItemId !== menuItemId);
-    return this.persistOrClear(cart);
+    return this.mutate(userId, (stored) => {
+      const cart = requireCart(stored);
+      return { ...cart, items: cart.items.filter((i) => i.menuItemId !== menuItemId) };
+    });
   }
 
   async clearCart(userId: string): Promise<void> {
@@ -98,9 +114,21 @@ export class CartService {
    * order-service prices the order from. Changed → the cart is brought up to date (current price and
    * name; unavailable, archived, deleted or foreign items taken out; quantities capped) and
    * CartChangedError lists what changed, so the customer sees the new total before paying it.
+   *
+   * The correction is written only if the cart didn't change while menu-service was being asked
+   * (F6); otherwise the check runs again on the newer cart, so an item added meanwhile isn't lost.
    */
   async validateForCheckout(userId: string): Promise<CartWithTotal> {
-    const cart = await this.cartRepository.find(userId);
+    for (let attempt = 1; attempt <= MAX_VALIDATE_ATTEMPTS; attempt++) {
+      const result = await this.validateOnce(userId);
+      if (result !== 'retry') return result;
+      await backoff(attempt);
+    }
+    throw cartChangedConcurrently();
+  }
+
+  private async validateOnce(userId: string): Promise<CartWithTotal | 'retry'> {
+    const { cart, version } = await this.cartRepository.read(userId);
     if (!cart || cart.items.length === 0) return withTotal(cart ?? emptyCart(userId));
 
     const changes: CartChange[] = [];
@@ -129,9 +157,10 @@ export class CartService {
     }
 
     if (changes.length === 0 && !refreshed) return withTotal(cart);
-    const updated = await this.persistOrClear({ ...cart, items: kept });
+    const next = toStored({ ...cart, items: kept });
+    if (!(await this.cartRepository.replace(userId, version, next))) return 'retry';
     if (changes.length > 0) throw new CartChangedError(changes);
-    return updated; // only names changed: nothing the customer pays differs
+    return withTotal(next ?? emptyCart(userId)); // only names changed: nothing the customer pays differs
   }
 
   /** The item as menu-service has it now, or null when it no longer exists. */
@@ -144,23 +173,32 @@ export class CartService {
     }
   }
 
-  private async requireCart(userId: string): Promise<Cart> {
-    const cart = await this.cartRepository.find(userId);
-    if (!cart) {
-      throw new BadRequestError('Cart is empty');
+  /**
+   * Applies `change` to the stored cart and writes the result with compare-and-set; when another
+   * write got there first, `change` runs again on the newer cart. Errors from `change` (an item from
+   * another restaurant, the quantity limit) are final and not retried.
+   */
+  private async mutate(userId: string, change: (cart: Cart | null) => Cart): Promise<CartWithTotal> {
+    for (let attempt = 1; attempt <= MAX_WRITE_ATTEMPTS; attempt++) {
+      const { cart, version } = await this.cartRepository.read(userId);
+      const next = toStored(change(cart));
+      if (await this.cartRepository.replace(userId, version, next)) {
+        return withTotal(next ?? emptyCart(userId));
+      }
+      await backoff(attempt);
     }
-    return cart;
+    throw cartChangedConcurrently();
   }
+}
 
-  private async persistOrClear(cart: Cart): Promise<CartWithTotal> {
-    if (cart.items.length === 0) {
-      await this.cartRepository.delete(cart.userId);
-      const empty = emptyCart(cart.userId);
-      return withTotal(empty);
-    }
-
-    const updated = { ...cart, updatedAt: new Date().toISOString() };
-    await this.cartRepository.save(updated);
-    return withTotal(updated);
+function requireCart(cart: Cart | null): Cart {
+  if (!cart) {
+    throw new BadRequestError('Cart is empty');
   }
+  return cart;
+}
+
+/** What to store: nothing for an empty cart (its key is deleted), else the cart stamped now. */
+function toStored(cart: Cart): Cart | null {
+  return cart.items.length === 0 ? null : { ...cart, updatedAt: new Date().toISOString() };
 }

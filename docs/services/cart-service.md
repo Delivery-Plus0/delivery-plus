@@ -26,6 +26,18 @@ From `services/cart-service/src/controllers/cart.controller.ts`:
   - A menu-service outage is an error, never a "removed" item.
 - **Why refuse instead of charging the new price:** the customer always pays the total they were shown. After a 409 the app re-reads the cart and quote, and the customer places the order again.
 
+## Concurrent writes (F6, #205)
+
+The cart is one JSON value in Redis (`cart:<userId>`, TTL `CART_TTL_SECONDS`). Every change (add, quantity, remove, and the checkout correction) is read → change → **compare-and-set** write:
+
+- `CartRepository.read` returns the cart and the exact stored value it came from.
+- `CartRepository.replace` writes the new cart (or deletes the key for an empty cart) in one Lua script, **only if the stored value is still the one that was read** (or still absent).
+- If another request changed the cart first, the change is applied again to the newer cart, with a short random backoff, up to 50 times; then `409` *"Your cart changed at the same time"*. Errors from the change itself (another restaurant, the quantity cap) are final.
+- Checkout validation asks menu-service between its read and its write, so it re-runs (up to 5 times) when the cart changed meanwhile: an item added during checkout is never dropped.
+- `DELETE /cart` is a plain delete.
+
+So a double tap on "add" or two devices adding at once both land, and concurrent quantity changes of one line add up exactly. The public API and the stored format are unchanged.
+
 ## Dependencies
 - Uses Redis via `CartRepository`
 - Calls `menu-service` to validate item existence and price/availability via `src/common/menu-service.client.ts`

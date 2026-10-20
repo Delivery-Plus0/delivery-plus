@@ -7,10 +7,22 @@ Handles simulated payment creation, processing, and status tracking for orders.
 From `services/payment-service/src/controllers/payments.controller.ts` (exposed through the gateway under `/api/payments`):
 
 - `POST /payments` – create a payment for an order (moves the order to `PAYMENT_PENDING`). Accepts an optional `Idempotency-Key` header.
-- `POST /payments/:id/process` – simulate processing and settle to success or failure. Retry-safe.
+- `POST /payments/:id/process` – simulate processing and settle to success or failure. Retry-safe. The body is empty for clients; `simulateFailure` is a test hook (see [The payment simulator](#the-payment-simulator-201)).
 - `GET /payments/:id` – get payment status
 - `POST /payments/:id/refund` – support (ADMIN) refund of a completed payment, in full, with an optional `reason`. Repeating it returns the refunded payment.
 - `GET /payments/:id/refund` – the payment's refund record (the paying customer or ADMIN); 404 when not refunded
+
+## The payment simulator (#201)
+
+There is no real payment provider yet (#223, #224), so payments are simulated. Three rules keep the simulator from being abused or shipped by accident:
+
+- **Clients can't choose the outcome.** `simulateFailure` (`true` forces a decline, `false` forces success) is accepted only when `PAYMENT_TEST_HOOKS=true`. Otherwise sending it at all is `400 simulateFailure is a test hook and is disabled`. Only `docker-compose.test.yml` and `docker-compose.e2e.yml` turn the hooks on.
+- **No random declines outside tests.** `PAYMENT_SUCCESS_RATE` defaults to `1`. A value below `1` is refused at startup unless `PAYMENT_TEST_HOOKS=true`.
+- **Not in production by accident.** With `NODE_ENV=production` the service refuses to start. The exception is `PAYMENT_SIMULATOR_IN_PRODUCTION=true` (a closed demo), which logs a warning at startup. `PAYMENT_TEST_HOOKS=true` is refused in production in every case.
+  - `docker-compose.prod.yml` does not set the override.
+  - The all-in-one local `docker-compose.yml` does, because it runs with `NODE_ENV=production`.
+
+The rules live in `loadSimulatorConfig` in `src/config/app-config.ts`, modeled on user-service's `SMS_PROVIDER=test` guard.
 
 ## Refunds (#56)
 
@@ -65,7 +77,9 @@ Independently of the key, the database allows at most one payment per order in `
 |---|---|
 | `PENDING` | Atomically claimed (`UPDATE ... WHERE status = 'PENDING'`), settled to `COMPLETED` or `FAILED`, then side effects run. Only one concurrent request can claim it. |
 | `PROCESSING` | Claim younger than `PAYMENT_PROCESSING_TIMEOUT_MS` (60 s): `409 Conflict`, another request is settling it; retry shortly. Older, or with no claim time (claimed before #18): this request takes the claim over atomically and settles the payment. |
-| `COMPLETED` / `FAILED` | Returns the payment as-is. The outcome never changes on retry, even if `simulateFailure` differs. Only side effects that failed earlier are re-attempted. |
+| `COMPLETED` / `FAILED` | Returns the payment as-is. The outcome never changes on retry, even if `simulateFailure` differs (test stacks). Only side effects that failed earlier are re-attempted. |
+
+With test hooks off, a request that carries `simulateFailure` is refused with `400` before the payment is read (#201).
 | `REFUNDED` | `409` invalid state transition (unchanged). |
 
 ### Shared internal client contract
@@ -147,7 +161,9 @@ From `services/payment-service/src/config/app-config.ts`:
 - `JWT_SECRET`
 - `ORDER_SERVICE_URL` (default: `http://localhost:3006`)
 - `KAFKA_BROKER` (used in Docker Compose as `kafka:29092`)
-- `PAYMENT_SUCCESS_RATE` (default: `0.9`)
+- `PAYMENT_SUCCESS_RATE` (default: `1`; below `1` only with `PAYMENT_TEST_HOOKS=true`)
+- `PAYMENT_TEST_HOOKS` (default: `false`; `true` only on the test and E2E stacks; refused in production)
+- `PAYMENT_SIMULATOR_IN_PRODUCTION` (default: `false`; `true` lets the simulator start with `NODE_ENV=production` for a closed demo, with a warning)
 - `PORT` (default: `3007`)
 - `NODE_ENV` (default: `development`)
 

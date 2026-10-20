@@ -65,7 +65,7 @@ Open findings from the 2026-10-01 code review (mostly not filed as issues yet; t
 
 - Every service connects to PostgreSQL as the `postgres` superuser, and the runtime image has no `USER` (runs as root).
 - The rate limiter fails closed (5xx) when Redis is down.
-- Behind the gateway, anonymous rate limits are shared by everyone: the gateway doesn't forward the client IP and services don't trust a proxy, so `request.ip` is the gateway's address. `/auth/login` and `/auth/register` (5 per minute) are therefore platform-wide limits today. `/auth/refresh` and `/auth/logout` avoid this by keying on the session (#34).
+- Rate limits count the client IP that the gateway forwards (`x-delivery-plus-client-ip`, replaced on every request, #203). Behind a load balancer that becomes the balancer's address until the deploy work (#221) passes the original through. Before #203, anonymous limits were shared by everyone.
 - Correlation ids propagate only from auth-service to user-service, not across other HTTP calls or Kafka.
 - Media: a verified S3 object can be orphaned if the owning service's database write fails after the copy (see [15-media-and-storage.md](./15-media-and-storage.md)).
 - `.gitignore` has no entry for local agent settings such as `.claude/`, so they show as untracked; stage files explicitly rather than with `git add -A`.

@@ -375,7 +375,7 @@
     },
     "/api/auth/verify-email": {
       "post": {
-        "summary": "Verify an email address with a token",
+        "summary": "Verify an email address with the 6-digit code from the verification email",
         "tags": [
           "auth"
         ],
@@ -407,7 +407,7 @@
             }
           },
           "401": {
-            "description": "Unauthorized"
+            "description": "Invalid or expired verification code (wrong, used, expired or invalidated): ask for a new one"
           },
           "403": {
             "description": "Forbidden"
@@ -428,14 +428,14 @@
     },
     "/api/auth/resend-verification": {
       "post": {
-        "summary": "Resend email verification",
+        "summary": "Email a new verification code (one a minute per address)",
         "tags": [
           "auth"
         ],
         "operationId": "auth_post_api_auth_resend_verification",
         "responses": {
           "200": {
-            "description": "Verification email queued or resent",
+            "description": "The same answer whether or not the address has an account",
             "content": {
               "application/json": {
                 "schema": {
@@ -464,6 +464,19 @@
           },
           "403": {
             "description": "Forbidden"
+          },
+          "429": {
+            "description": "Too soon: one code a minute per address, 5 an hour; and 20 an hour per client IP"
+          },
+          "503": {
+            "description": "EmailUnavailable: email is not set up yet, or the provider failed (show \"try again later\")",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "security": [],
@@ -4696,7 +4709,9 @@
             "format": "email"
           },
           "token": {
-            "type": "string"
+            "type": "string",
+            "pattern": "^\\d{6}$",
+            "description": "#203: the 6-digit code from the email. It works once, for 10 minutes; the 5th wrong code invalidates it."
           }
         }
       },

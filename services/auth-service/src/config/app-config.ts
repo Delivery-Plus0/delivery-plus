@@ -1,3 +1,5 @@
+import type { SesSettings } from '../email/ses-email-sender';
+
 export const APP_CONFIG = Symbol('APP_CONFIG');
 
 export interface AppConfig {
@@ -13,7 +15,18 @@ export interface AppConfig {
   emailVerificationRequired: boolean;
   maxFailedLoginAttempts: number;
   lockoutMinutes: number;
+  /** #203: how long an emailed verification code works (10 minutes by default). */
   verificationTokenTtlMinutes: number;
+  /** #203: wrong codes allowed per code before it is invalidated. */
+  verificationMaxAttempts: number;
+  /** #203: seconds before another verification email can be sent to the same address. */
+  verificationResendCooldownSeconds: number;
+  /** #203: which EmailSender sends the codes. */
+  emailProvider: EmailProvider;
+  /** #203: HMAC secret the codes are stored under. */
+  emailCodeHashSecret: string;
+  /** #203: Amazon SES settings, when emailProvider is `ses`. */
+  ses: SesSettings | null;
   /** #34: a refresh session lives this long after its last use (sliding). */
   refreshTokenTtlDays: number;
   /** #34: how often expired and revoked sessions are deleted (0 disables the job). */
@@ -25,6 +38,8 @@ export interface AppConfig {
   /** #202: test and dev stacks only, the super admin created at startup (refused in production). */
   testAdmin: { email: string; password: string } | null;
 }
+
+export type EmailProvider = 'disabled' | 'test' | 'ses';
 
 export function loadConfig(): AppConfig {
   const required = ['DATABASE_URL', 'JWT_SECRET'];
@@ -47,7 +62,10 @@ export function loadConfig(): AppConfig {
     emailVerificationRequired: parseBoolean(process.env.EMAIL_VERIFICATION_REQUIRED, false),
     maxFailedLoginAttempts: parsePositiveInt('MAX_FAILED_LOGIN_ATTEMPTS', 5),
     lockoutMinutes: parsePositiveInt('LOCKOUT_MINUTES', 15),
-    verificationTokenTtlMinutes: parseInt(process.env.VERIFICATION_TOKEN_TTL_MINUTES || '60', 10),
+    verificationTokenTtlMinutes: parsePositiveInt('VERIFICATION_TOKEN_TTL_MINUTES', 10),
+    verificationMaxAttempts: parsePositiveInt('VERIFICATION_MAX_ATTEMPTS', 5),
+    verificationResendCooldownSeconds: parsePositiveInt('VERIFICATION_RESEND_COOLDOWN_SECONDS', 60),
+    ...loadEmailConfig(process.env.NODE_ENV || 'development', parseBoolean(process.env.EMAIL_VERIFICATION_REQUIRED, false)),
     refreshTokenTtlDays: parsePositiveInt('REFRESH_TOKEN_TTL_DAYS', 30),
     sessionCleanupIntervalMs: parseNonNegativeInt('SESSION_CLEANUP_INTERVAL_MS', 3_600_000),
     sessionRetentionDays: parsePositiveInt('SESSION_RETENTION_DAYS', 30),
@@ -58,6 +76,63 @@ export function loadConfig(): AppConfig {
       .filter(Boolean),
     testAdmin: loadTestAdmin(process.env.NODE_ENV || 'development'),
   };
+}
+
+const LOCAL_EMAIL_CODE_SECRET = 'local-email-code-development-only';
+
+/**
+ * #203: which EmailSender runs, mirroring user-service's SMS_PROVIDER guard (#153).
+ * - `disabled` (default): nothing is sent; resending answers 503.
+ * - `test`: codes go to Redis for E2E runs. Refused in production.
+ * - `ses`: Amazon SES; needs AWS_REGION and SES_FROM_ADDRESS (credentials only from the AWS provider chain).
+ * In production, EMAIL_VERIFICATION_REQUIRED=true needs a real provider (nobody could verify otherwise),
+ * and a provider needs its own EMAIL_CODE_HASH_SECRET.
+ */
+export function loadEmailConfig(
+  nodeEnv: string,
+  emailVerificationRequired: boolean,
+  env: NodeJS.ProcessEnv = process.env,
+): Pick<AppConfig, 'emailProvider' | 'emailCodeHashSecret' | 'ses'> {
+  const provider = (env.EMAIL_PROVIDER || 'disabled').trim().toLowerCase();
+  if (provider !== 'disabled' && provider !== 'test' && provider !== 'ses') {
+    throw new Error(`Unsupported EMAIL_PROVIDER "${provider}": use disabled, test or ses`);
+  }
+  const production = nodeEnv === 'production';
+  if (provider === 'test' && production) {
+    throw new Error('EMAIL_PROVIDER=test is for isolated test environments and cannot run in production');
+  }
+  if (provider === 'disabled' && emailVerificationRequired && production) {
+    throw new Error('EMAIL_VERIFICATION_REQUIRED=true needs a real EMAIL_PROVIDER in production: nobody could verify');
+  }
+
+  let ses: SesSettings | null = null;
+  if (provider === 'ses') {
+    const missing = ['AWS_REGION', 'SES_FROM_ADDRESS'].filter((key) => !env[key]?.trim());
+    if (missing.length > 0) throw new Error(`EMAIL_PROVIDER=ses needs ${missing.join(' and ')}`);
+    ses = {
+      region: (env.AWS_REGION as string).trim(),
+      fromAddress: (env.SES_FROM_ADDRESS as string).trim(),
+      configurationSet: env.SES_CONFIGURATION_SET?.trim() || undefined,
+      timeoutMs: positiveIntFrom(env, 'EMAIL_SEND_TIMEOUT_MS', 5000),
+    };
+  }
+
+  const secret = env.EMAIL_CODE_HASH_SECRET;
+  if (production && provider !== 'disabled') {
+    if (!secret) throw new Error('Missing required environment variables: EMAIL_CODE_HASH_SECRET');
+    if (secret === LOCAL_EMAIL_CODE_SECRET || secret.length < 32) {
+      throw new Error('EMAIL_CODE_HASH_SECRET must be a real secret of at least 32 characters in production');
+    }
+  }
+  return { emailProvider: provider, emailCodeHashSecret: secret || LOCAL_EMAIL_CODE_SECRET, ses };
+}
+
+function positiveIntFrom(env: NodeJS.ProcessEnv, key: string, fallback: number): number {
+  const raw = env[key];
+  if (raw === undefined || raw === '') return fallback;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value <= 0) throw new Error(`Invalid ${key}: ${raw}`);
+  return value;
 }
 
 /**

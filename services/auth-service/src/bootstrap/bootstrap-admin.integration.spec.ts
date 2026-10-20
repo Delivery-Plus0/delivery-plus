@@ -18,6 +18,7 @@ import { UuidPrimaryKeyDefaults1700000000001 } from '../database/migrations/002-
 import { AuthSecurityFields1700000000002 } from '../database/migrations/003-auth-security-fields';
 import { AuthSessions1700000000003 } from '../database/migrations/004-auth-sessions';
 import { AccountStatusStaffPermissions1700000000004 } from '../database/migrations/005-account-status-staff-permissions';
+import { EmailVerificationCodes1700000000005 } from '../database/migrations/006-email-verification-codes';
 import { BootstrapRefusedError, bootstrapAdmin } from './bootstrap-admin';
 import { main } from './cli';
 
@@ -38,6 +39,7 @@ describeDb('bootstrapAdmin (PostgreSQL integration, #202)', () => {
           AuthSecurityFields1700000000002,
           AuthSessions1700000000003,
           AccountStatusStaffPermissions1700000000004,
+          EmailVerificationCodes1700000000005,
         ],
         poolSize: 10,
       }),

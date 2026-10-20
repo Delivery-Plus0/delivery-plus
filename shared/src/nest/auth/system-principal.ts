@@ -46,6 +46,19 @@ export function systemSecretForVerification(env: NodeJS.ProcessEnv = process.env
   return (env.NODE_ENV || 'development') === 'production' ? undefined : LOCAL_SYSTEM_JWT_SECRET;
 }
 
+/**
+ * The client's address as the gateway saw it (#203). Set by the gateway on every proxied request after
+ * removing any copy the client sent. Behind the gateway, `request.ip` is the gateway itself.
+ */
+export const CLIENT_IP_HEADER = 'x-delivery-plus-client-ip';
+
+/** The caller's IP: the gateway's record of it for proxied requests, else the socket address. */
+export function clientIpOf(request: { headers?: Record<string, unknown>; ip?: string }): string {
+  const forwarded = request.headers?.[CLIENT_IP_HEADER];
+  if (cameThroughGateway(request.headers) && typeof forwarded === 'string' && forwarded) return forwarded;
+  return request.ip || 'unknown-ip';
+}
+
 /** True when the request was proxied by the public gateway. */
 export function cameThroughGateway(headers: Record<string, unknown> | undefined): boolean {
   return Boolean(headers && headers[GATEWAY_MARKER_HEADER]);

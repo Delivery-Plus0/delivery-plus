@@ -306,6 +306,37 @@ async function assertAccountSuspension() {
   await clearRateLimits();
 }
 
+/**
+ * Verification email (#203): register → the test sender's email in Redis carries a 6-digit code →
+ * a wrong code is refused → the right one verifies → login works. Resending within a minute is 429.
+ */
+async function assertEmailVerification() {
+  const email = `e2e.verify.${Date.now()}@example.com`;
+  await axios.post(`${API_URL}/api/auth/register`, { email, password: 'password123', fullName: 'E2E Verify' }, { headers: { 'Accept-Language': 'en' } });
+
+  const redis = new Redis(REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 2 });
+  await redis.connect();
+  const stored = await redis.get(`test:email:${email}`).finally(() => redis.disconnect());
+  const sent = stored ? (JSON.parse(stored) as { subject: string; text: string; html: string }) : null;
+  const code = sent?.text.match(/\b\d{6}\b/)?.[0];
+  if (!sent || !code || !sent.html.includes(code) || sent.subject !== 'Your Delivery Plus verification code') {
+    throw new Error(`Verification email: none or no code in it (${stored ? 'stored' : 'missing'})`);
+  }
+
+  // Registering sent a code a moment ago: asking again within a minute is refused.
+  const resendTooSoon = await outcomeOf(axios.post(`${API_URL}/api/auth/resend-verification`, { email }));
+  const wrong = code === '000000' ? '000001' : '000000';
+  const wrongCode = await outcomeOf(axios.post(`${API_URL}/api/auth/verify-email`, { email, token: wrong }));
+  const verified = await outcomeOf(axios.post(`${API_URL}/api/auth/verify-email`, { email, token: code }));
+  const reused = await outcomeOf(axios.post(`${API_URL}/api/auth/verify-email`, { email, token: code }));
+  const login = await outcomeOf(axios.post(`${API_URL}/api/auth/login`, { email, password: 'password123' }));
+
+  const got = { resendTooSoon: resendTooSoon.status, wrongCode: wrongCode.status, verified: verified.status, reused: reused.status, login: login.status };
+  const want = { resendTooSoon: 429, wrongCode: 401, verified: 200, reused: 401, login: 200 };
+  if (JSON.stringify(got) !== JSON.stringify(want)) throw new Error(`Email verification: got ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`);
+  console.log('Email verification: the code arrives by the test sender; resend within a minute 429; a wrong code 401, the right one verifies once, login 200');
+}
+
 async function runE2E() {
   console.log('Starting E2E test...');
 
@@ -337,6 +368,7 @@ async function runE2E() {
     await assertNoSelfRegisteredAdmin();
     await assertRefreshSessions();
     await assertAccountSuspension();
+    await assertEmailVerification();
 
     // 1. Get Restaurants
     const restaurantsRes = await axios.get(`${API_URL}/api/restaurants`, customerAuth);

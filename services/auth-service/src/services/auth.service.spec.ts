@@ -5,11 +5,13 @@ import { JwtService } from '@nestjs/jwt';
 import { UserRole, ConflictError, ForbiddenError, UnauthorizedError, RateLimitGuard, RATE_LIMIT_KEY } from '@food-delivery/shared';
 import { SELF_SERVICE_ROLES } from '../dto/register.dto';
 import * as bcrypt from 'bcrypt';
-import { createHash } from 'node:crypto';
 import { loadConfig, loadTestAdmin } from '../config/app-config';
 import { AuthController } from '../controllers/auth.controller';
 import { SessionsService } from './sessions.service';
 import { StaffPermissionsRepository } from '../repositories/staff-permissions.repository';
+import { EmailSender, EmailUnavailableError } from '../email/email-sender';
+import { hashVerificationCode } from '../email/verification-email';
+import { RateLimiterService } from '@food-delivery/shared';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -18,6 +20,8 @@ describe('AuthService', () => {
   let jwtService: jest.Mocked<JwtService>;
   let sessions: jest.Mocked<SessionsService>;
   let staffPermissions: jest.Mocked<StaffPermissionsRepository>;
+  let emailSender: jest.Mocked<EmailSender>;
+  let rateLimiter: jest.Mocked<RateLimiterService>;
 
   beforeEach(() => {
     credentials = {
@@ -28,6 +32,9 @@ describe('AuthService', () => {
       recordFailedLogin: jest.fn(),
       resetFailureState: jest.fn(),
       deleteById: jest.fn(),
+      setVerificationCode: jest.fn(),
+      consumeVerificationCode: jest.fn(),
+      recordWrongVerificationCode: jest.fn(),
     } as unknown as jest.Mocked<CredentialsRepository>;
 
     userServiceClient = {
@@ -48,6 +55,8 @@ describe('AuthService', () => {
     } as unknown as jest.Mocked<SessionsService>;
 
     staffPermissions = { listFor: jest.fn().mockResolvedValue(['users.manage']) } as unknown as jest.Mocked<StaffPermissionsRepository>;
+    emailSender = { enabled: true, send: jest.fn().mockResolvedValue(undefined) } as unknown as jest.Mocked<EmailSender>;
+    rateLimiter = { incrementAndCheck: jest.fn().mockResolvedValue(true) } as unknown as jest.Mocked<RateLimiterService>;
 
     service = new AuthService(credentials, userServiceClient, jwtService, {
       serviceName: 'auth-service',
@@ -62,13 +71,18 @@ describe('AuthService', () => {
       emailVerificationRequired: false,
       maxFailedLoginAttempts: 5,
       lockoutMinutes: 15,
-      verificationTokenTtlMinutes: 60,
+      verificationTokenTtlMinutes: 10,
       refreshTokenTtlDays: 30,
       sessionCleanupIntervalMs: 0,
       sessionRetentionDays: 30,
       internalAuthAllowedServices: [],
       testAdmin: null,
-    }, sessions, staffPermissions);
+      verificationMaxAttempts: 5,
+      verificationResendCooldownSeconds: 60,
+      emailProvider: 'test',
+      emailCodeHashSecret: 'local-email-code-development-only',
+      ses: null,
+    }, sessions, staffPermissions, emailSender, rateLimiter);
   });
 
   describe('config validation', () => {
@@ -555,7 +569,7 @@ describe('AuthService', () => {
       service = new AuthService(credentials, userServiceClient, jwtService, {
         ...service['config'],
         emailVerificationRequired: true,
-      }, sessions, staffPermissions);
+      }, sessions, staffPermissions, emailSender, rateLimiter);
 
       credentials.findByEmail.mockResolvedValue({
         id: 'u1',
@@ -608,7 +622,7 @@ describe('AuthService', () => {
     });
 
     it('register returns no tokens while email verification is required, and starts no session', async () => {
-      service = new AuthService(credentials, userServiceClient, jwtService, { ...service['config'], emailVerificationRequired: true }, sessions, staffPermissions);
+      service = new AuthService(credentials, userServiceClient, jwtService, { ...service['config'], emailVerificationRequired: true }, sessions, staffPermissions, emailSender, rateLimiter);
       credentials.findByEmail.mockResolvedValue(null);
       credentials.create.mockResolvedValue(credential({ id: 'new-user', emailVerified: false }));
       userServiceClient.createProfile.mockResolvedValue(undefined);
@@ -659,127 +673,131 @@ describe('AuthService', () => {
     });
   });
 
-  describe('email verification', () => {
-    it('accepts a valid verification token and clears it after success', async () => {
-      const token = 'token-123';
-      const tokenHash = createHash('sha256').update(token).digest('hex');
-      credentials.findByEmail.mockResolvedValue({
+  describe('email verification by code (#203)', () => {
+    const SECRET = 'test-email-code-secret';
+    const unverified = (overrides: Record<string, unknown> = {}) =>
+      ({
         id: 'u1',
         email: 'verify@example.com',
-        passwordHash: 'hash',
         role: UserRole.CUSTOMER,
         emailVerified: false,
-        failedLoginCount: 0,
-        lockedUntil: null,
-        verificationTokenHash: tokenHash,
-        verificationTokenExpiresAt: new Date(Date.now() + 60_000),
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
-      credentials.update.mockResolvedValue({} as any);
-
-      await expect(service.verifyEmail({ email: 'verify@example.com', token })).resolves.toEqual({
-        message: 'Email verified successfully',
-      });
-
-      expect(credentials.update).toHaveBeenCalledWith(
-        'u1',
-        expect.objectContaining({
-          emailVerified: true,
-          verificationTokenHash: null,
-          verificationTokenExpiresAt: null,
-        }),
-      );
-    });
-
-    it('rejects expired verification tokens', async () => {
-      const token = 'token-123';
-      const tokenHash = createHash('sha256').update(token).digest('hex');
-      credentials.findByEmail.mockResolvedValue({
-        id: 'u1',
-        email: 'verify@example.com',
-        passwordHash: 'hash',
-        role: UserRole.CUSTOMER,
-        emailVerified: false,
-        failedLoginCount: 0,
-        lockedUntil: null,
-        verificationTokenHash: tokenHash,
-        verificationTokenExpiresAt: new Date(Date.now() - 1000),
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
-
-      await expect(service.verifyEmail({ email: 'verify@example.com', token })).rejects.toThrow(
-        'Invalid or expired verification token',
-      );
-    });
-
-    it('rejects wrong verification tokens', async () => {
-      credentials.findByEmail.mockResolvedValue({
-        id: 'u1',
-        email: 'verify@example.com',
-        passwordHash: 'hash',
-        role: UserRole.CUSTOMER,
-        emailVerified: false,
-        failedLoginCount: 0,
-        lockedUntil: null,
-        verificationTokenHash: createHash('sha256').update('other-token').digest('hex'),
-        verificationTokenExpiresAt: new Date(Date.now() + 60_000),
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
-
-      await expect(service.verifyEmail({ email: 'verify@example.com', token: 'token-123' })).rejects.toThrow(
-        'Invalid or expired verification token',
-      );
-    });
-
-    it('rejects already-used verification tokens independently of expiry', async () => {
-      credentials.findByEmail.mockResolvedValue({
-        id: 'u1',
-        email: 'verify@example.com',
-        passwordHash: 'hash',
-        role: UserRole.CUSTOMER,
-        emailVerified: false,
-        failedLoginCount: 0,
-        lockedUntil: null,
-        verificationTokenHash: null,
-        verificationTokenExpiresAt: new Date(Date.now() + 60_000),
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
-
-      await expect(service.verifyEmail({ email: 'verify@example.com', token: 'token-123' })).rejects.toThrow(
-        'Invalid or expired verification token',
-      );
-    });
-
-    it('issues a safe resend-verification response for existing accounts', async () => {
-      credentials.findByEmail.mockResolvedValue({
-        id: 'u1',
-        email: 'resend@example.com',
-        passwordHash: 'hash',
-        role: UserRole.CUSTOMER,
-        emailVerified: false,
-        failedLoginCount: 0,
-        lockedUntil: null,
         verificationTokenHash: null,
         verificationTokenExpiresAt: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
-      credentials.update.mockResolvedValue({} as any);
+        ...overrides,
+      }) as any;
+    const withCode = (code: string, expiresInMs = 60_000) =>
+      unverified({ verificationTokenHash: hashVerificationCode(code, 'u1', SECRET), verificationTokenExpiresAt: new Date(Date.now() + expiresInMs) });
+    const context = { correlationId: 'corr-1', locale: 'en' as const, clientIp: '203.0.113.7' };
 
-      const result = await service.resendVerification({ email: 'resend@example.com' });
+    beforeEach(() => {
+      service['config'].emailCodeHashSecret = SECRET;
+    });
 
-      expect(credentials.update).toHaveBeenCalledWith(
-        'u1',
-        expect.objectContaining({
-          verificationTokenHash: expect.any(String),
-          verificationTokenExpiresAt: expect.any(Date),
-        }),
-      );
-      expect(result).toEqual({ message: 'If that account exists, a verification email has been sent' });
+    it('register emails a 6-digit code and stores only its HMAC', async () => {
+      credentials.findByEmail.mockResolvedValue(null);
+      credentials.create.mockResolvedValue(unverified());
+      userServiceClient.createProfile.mockResolvedValue(undefined);
+
+      const result = await service.register({ email: 'verify@example.com', password: 'valid-password', fullName: 'V' }, 'corr-1', { locale: 'en' });
+
+      expect(emailSender.send).toHaveBeenCalledTimes(1);
+      const [message, sendContext] = emailSender.send.mock.calls[0];
+      const code = message.text.match(/\b\d{6}\b/)?.[0] as string;
+      expect(code).toMatch(/^\d{6}$/);
+      expect(message).toMatchObject({ to: 'verify@example.com', subject: 'Your Delivery Plus verification code' });
+      expect(message.html).toContain(code);
+      expect(sendContext).toEqual({ correlationId: 'corr-1' });
+      const [id, storedHash, expiresAt] = credentials.setVerificationCode.mock.calls[0];
+      expect(id).toBe('u1');
+      expect(storedHash).toBe(hashVerificationCode(code, 'u1', SECRET));
+      expect(storedHash).not.toContain(code);
+      expect((expiresAt as Date).getTime() - Date.now()).toBeLessThanOrEqual(10 * 60_000);
+      expect(JSON.stringify(result)).not.toContain(code);
+    });
+
+    it('register still succeeds when the email fails or email is disabled', async () => {
+      credentials.findByEmail.mockResolvedValue(null);
+      credentials.create.mockResolvedValue(unverified());
+      userServiceClient.createProfile.mockResolvedValue(undefined);
+      emailSender.send.mockRejectedValueOnce(new EmailUnavailableError());
+
+      await expect(service.register({ email: 'verify@example.com', password: 'valid-password', fullName: 'V' })).resolves.toMatchObject({ userId: 'u1' });
+
+      Object.assign(emailSender, { enabled: false });
+      emailSender.send.mockClear();
+      await expect(service.register({ email: 'verify@example.com', password: 'valid-password', fullName: 'V' })).resolves.toMatchObject({ userId: 'u1' });
+      expect(emailSender.send).not.toHaveBeenCalled();
+    });
+
+    it('verifies with the right code, once (compare-and-set on the stored hash)', async () => {
+      credentials.findByEmail.mockResolvedValue(withCode('123456'));
+      credentials.consumeVerificationCode.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+
+      await expect(service.verifyEmail({ email: 'verify@example.com', token: '123456' })).resolves.toEqual({ message: 'Email verified successfully' });
+      expect(credentials.consumeVerificationCode).toHaveBeenCalledWith('u1', hashVerificationCode('123456', 'u1', SECRET), expect.any(Date));
+      // A second request racing the first loses the compare-and-set.
+      await expect(service.verifyEmail({ email: 'verify@example.com', token: '123456' })).rejects.toThrow('Invalid or expired verification code');
+    });
+
+    it.each([['a wrong code', '654321'], ['a malformed code', '12ab56'], ['the hex token of the old scheme', 'a'.repeat(64)]])(
+      'counts %s as a wrong attempt (the 5th invalidates the code)',
+      async (_label, token) => {
+        credentials.findByEmail.mockResolvedValue(withCode('123456'));
+
+        await expect(service.verifyEmail({ email: 'verify@example.com', token })).rejects.toThrow('Invalid or expired verification code');
+        expect(credentials.recordWrongVerificationCode).toHaveBeenCalledWith('u1', 5);
+        expect(credentials.consumeVerificationCode).not.toHaveBeenCalled();
+      },
+    );
+
+    it('refuses an expired code, a used one and an unknown email the same way, without counting', async () => {
+      credentials.findByEmail.mockResolvedValueOnce(withCode('123456', -1)).mockResolvedValueOnce(unverified()).mockResolvedValueOnce(null);
+
+      for (let i = 0; i < 3; i++) {
+        await expect(service.verifyEmail({ email: 'verify@example.com', token: '123456' })).rejects.toThrow('Invalid or expired verification code');
+      }
+      expect(credentials.recordWrongVerificationCode).not.toHaveBeenCalled();
+    });
+
+    it('resend emails a fresh code to an unverified account', async () => {
+      credentials.findByEmail.mockResolvedValue(unverified());
+
+      await expect(service.resendVerification({ email: 'verify@example.com' }, context)).resolves.toEqual({
+        message: 'If that account exists, a verification email has been sent',
+      });
+      expect(credentials.setVerificationCode).toHaveBeenCalled();
+      expect(emailSender.send).toHaveBeenCalledWith(expect.objectContaining({ to: 'verify@example.com' }), { correlationId: 'corr-1' });
+    });
+
+    it('resend answers the same for unknown and already-verified addresses, sending nothing', async () => {
+      credentials.findByEmail.mockResolvedValueOnce(null).mockResolvedValueOnce(unverified({ emailVerified: true }));
+
+      for (const email of ['nobody@example.com', 'verify@example.com']) {
+        await expect(service.resendVerification({ email }, context)).resolves.toEqual({ message: 'If that account exists, a verification email has been sent' });
+      }
+      expect(emailSender.send).not.toHaveBeenCalled();
+    });
+
+    it('applies the cooldown and the per-email and per-IP limits before looking the account up', async () => {
+      rateLimiter.incrementAndCheck.mockResolvedValueOnce(true).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+
+      await expect(service.resendVerification({ email: 'Nobody@Example.com' }, context)).rejects.toMatchObject({ statusCode: 429 });
+      expect(credentials.findByEmail).not.toHaveBeenCalled();
+      const keys = rateLimiter.incrementAndCheck.mock.calls.map(([key, limit, windowSeconds]) => [key.replace(/[0-9a-f]{64}/, '<email>'), limit, windowSeconds]);
+      expect(keys).toEqual([
+        ['ratelimit:verification-resend:ip:203.0.113.7', 20, 3600],
+        ['ratelimit:verification-resend:email-hour:<email>', 5, 3600],
+        ['ratelimit:verification-resend:cooldown:<email>', 1, 60],
+      ]);
+      // The address is never part of a key in clear.
+      expect(JSON.stringify(rateLimiter.incrementAndCheck.mock.calls)).not.toMatch(/nobody@example\.com/i);
+    });
+
+    it('resend answers 503 EmailUnavailable for everyone while email is disabled', async () => {
+      Object.assign(emailSender, { enabled: false });
+
+      await expect(service.resendVerification({ email: 'verify@example.com' }, context)).rejects.toMatchObject({ statusCode: 503, error: 'EmailUnavailable' });
+      expect(credentials.findByEmail).not.toHaveBeenCalled();
     });
   });
 });

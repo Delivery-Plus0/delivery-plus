@@ -24,6 +24,7 @@ import { UuidPrimaryKeyDefaults1700000000001 } from '../database/migrations/002-
 import { AuthSecurityFields1700000000002 } from '../database/migrations/003-auth-security-fields';
 import { AuthSessions1700000000003 } from '../database/migrations/004-auth-sessions';
 import { AccountStatusStaffPermissions1700000000004 } from '../database/migrations/005-account-status-staff-permissions';
+import { EmailVerificationCodes1700000000005 } from '../database/migrations/006-email-verification-codes';
 import { StaffPermission } from '../entities/staff-permission.entity';
 
 const DATABASE_URL = process.env.AUTH_TEST_DATABASE_URL;
@@ -40,7 +41,7 @@ describeDb('SessionsRepository (PostgreSQL integration, #34)', () => {
   beforeAll(async () => {
     ds = new DataSource(
       buildTypeOrmConfig(DATABASE_URL as string, [Credential, AuthSession, StaffPermission], {
-        migrations: [InitialSchema1700000000000, UuidPrimaryKeyDefaults1700000000001, AuthSecurityFields1700000000002, AuthSessions1700000000003, AccountStatusStaffPermissions1700000000004],
+        migrations: [InitialSchema1700000000000, UuidPrimaryKeyDefaults1700000000001, AuthSecurityFields1700000000002, AuthSessions1700000000003, AccountStatusStaffPermissions1700000000004, EmailVerificationCodes1700000000005],
         poolSize: 10,
       }),
     );

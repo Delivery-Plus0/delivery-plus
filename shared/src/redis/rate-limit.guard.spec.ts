@@ -98,6 +98,22 @@ describe('RateLimitGuard', () => {
     ]);
   });
 
+  it('counts anonymous callers by the client IP the gateway forwarded, never by a header without the marker (#203)', async () => {
+    const limiter = fakeLimiter();
+    const guard = new RateLimitGuard(new Reflector(), limiter as unknown as RateLimiterService);
+    const anonymous = (headers: Record<string, string>) =>
+      ({
+        getClass: () => ClassLimitedController,
+        getHandler: () => ClassLimitedController.prototype.addItem,
+        switchToHttp: () => ({ getRequest: () => ({ headers, ip: '10.0.0.2', route: { path: '/addItem' } }) }),
+      }) as unknown as ExecutionContext;
+
+    await guard.canActivate(anonymous({ 'x-delivery-plus-gateway': '1', 'x-delivery-plus-client-ip': '203.0.113.7' }));
+    await guard.canActivate(anonymous({ 'x-delivery-plus-client-ip': '203.0.113.8' }));
+
+    expect(limiter.incrementAndCheck.mock.calls.map(([key]) => key)).toEqual(['ratelimit:/addItem:203.0.113.7', 'ratelimit:/addItem:10.0.0.2']);
+  });
+
   it('does nothing when no limit is declared anywhere', async () => {
     const limiter = fakeLimiter();
     const guard = new RateLimitGuard(new Reflector(), limiter as unknown as RateLimiterService);

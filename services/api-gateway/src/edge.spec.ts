@@ -1,7 +1,7 @@
 import express from 'express';
 import { createServer, IncomingHttpHeaders, request as httpRequest, Server } from 'node:http';
 import { AddressInfo } from 'node:net';
-import { GATEWAY_MARKER_HEADER } from '@food-delivery/shared';
+import { CLIENT_IP_HEADER, GATEWAY_MARKER_HEADER } from '@food-delivery/shared';
 import { claimedRole, edgePolicy } from './edge';
 
 /**
@@ -71,6 +71,13 @@ describe('gateway edge policy (#202)', () => {
     await fetch(`${gatewayUrl}/api/orders/1`, { headers: { [GATEWAY_MARKER_HEADER]: value, 'X-Delivery-Plus-Gateway': value } });
 
     expect(received[0][GATEWAY_MARKER_HEADER]).toBe('1');
+  });
+
+  it('forwards the real client address and replaces one the client supplied (#203)', async () => {
+    await fetch(`${gatewayUrl}/api/orders/1`, { headers: { [CLIENT_IP_HEADER]: '198.51.100.9' } });
+
+    expect(received[0][CLIENT_IP_HEADER]).toMatch(/127.0.0.1/);
+    expect(received[0][CLIENT_IP_HEADER]).not.toContain('198.51.100.9');
   });
 
   it('refuses a bearer token claiming the SYSTEM role and never proxies it', async () => {

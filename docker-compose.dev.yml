@@ -140,6 +140,8 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/auth_service
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:-local-development-only}
+      # #203: verification emails go to Redis (test:email:<address>); refused in production.
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-test}
       # #202: the local stack's super admin (all permissions) for `npm run e2e`; refused in production.
       TEST_ADMIN_EMAIL: ${TEST_ADMIN_EMAIL:-qa.admin@delivery-plus.test}
       TEST_ADMIN_PASSWORD: ${TEST_ADMIN_PASSWORD:-Qa-Only-Admin-Passw0rd!}

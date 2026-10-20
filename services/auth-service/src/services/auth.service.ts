@@ -1,8 +1,20 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
-import { createHash, randomBytes } from 'node:crypto';
-import { AccountSuspendedError, ConflictError, ForbiddenError, NotFoundError, UnauthorizedError, generateCorrelationId } from '@food-delivery/shared';
+import { createHash } from 'node:crypto';
+import { Logger } from '@nestjs/common';
+import {
+  AccountSuspendedError,
+  AppError,
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+  RateLimiterService,
+  UnauthorizedError,
+  generateCorrelationId,
+} from '@food-delivery/shared';
+import { EmailSender, EmailUnavailableError } from '../email/email-sender';
+import { EmailLocale, buildVerificationEmail, hashVerificationCode, newVerificationCode, verificationCodeMatches } from '../email/verification-email';
 import { CredentialsRepository } from '../repositories/credentials.repository';
 import { UserServiceClient } from '../common/user-service.client';
 import { RegisterDto, SELF_SERVICE_ROLES } from '../dto/register.dto';
@@ -18,8 +30,21 @@ import { InvalidRefreshTokenError, SessionContext, SessionsService } from './ses
 
 const SALT_ROUNDS = 10;
 
+/** #203: resend limits, counted whether or not the address has an account, so a 429 reveals nothing. */
+const RESEND_PER_EMAIL_PER_HOUR = 5;
+const RESEND_PER_IP_PER_HOUR = 20;
+const GENERIC_RESEND_MESSAGE = 'If that account exists, a verification email has been sent';
+const INVALID_CODE_MESSAGE = 'Invalid or expired verification code';
+
+export interface VerificationRequestContext {
+  correlationId: string;
+  locale: EmailLocale;
+  clientIp: string;
+}
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly credentials: CredentialsRepository,
     private readonly userServiceClient: UserServiceClient,
@@ -27,6 +52,8 @@ export class AuthService {
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     private readonly sessions: SessionsService,
     private readonly staffPermissions: StaffPermissionsRepository,
+    private readonly emailSender: EmailSender,
+    private readonly rateLimiter: RateLimiterService,
   ) {}
 
   /**
@@ -37,7 +64,7 @@ export class AuthService {
   async register(
     dto: RegisterDto,
     correlationId = generateCorrelationId(),
-    context: SessionContext = {},
+    context: SessionContext & { locale?: EmailLocale } = {},
   ): Promise<AuthResponseDto | VerificationRequiredResponseDto> {
     const role = this.resolveRegistrationRole(dto.role);
     const existing = await this.credentials.findByEmail(dto.email);
@@ -46,7 +73,6 @@ export class AuthService {
     }
 
     const passwordHash = await bcrypt.hash(dto.password, SALT_ROUNDS);
-    const verificationToken = this.generateVerificationToken();
 
     const credential = await this.credentials.create({
       email: dto.email,
@@ -56,8 +82,9 @@ export class AuthService {
       failedLoginCount: 0,
       lockedUntil: null,
       lastFailedLoginAt: null,
-      verificationTokenHash: this.hashToken(verificationToken),
-      verificationTokenExpiresAt: this.addMinutes(new Date(), this.config.verificationTokenTtlMinutes),
+      // The code is created when it is emailed, just below (#203).
+      verificationTokenHash: null,
+      verificationTokenExpiresAt: null,
     });
 
     try {
@@ -73,6 +100,17 @@ export class AuthService {
     } catch (err) {
       await this.credentials.deleteById(credential.id);
       throw err;
+    }
+
+    // #203: email the code. Registration never fails because of email: the account exists, and the
+    // user can ask for another code.
+    if (this.emailSender.enabled) {
+      try {
+        await this.sendVerificationCode(credential, context.locale ?? 'ar', correlationId);
+        await this.rateLimiter.incrementAndCheck(this.resendCooldownKey(credential.email), 1, this.config.verificationResendCooldownSeconds);
+      } catch (error) {
+        this.logger.warn(`Verification email not sent at registration (correlation ${correlationId}): ${error instanceof AppError ? error.error : 'error'}`);
+      }
     }
 
     if (this.config.emailVerificationRequired) {
@@ -191,41 +229,75 @@ export class AuthService {
     await this.sessions.revokeAll(credentialId, 'logout_all');
   }
 
-  async verifyEmail(dto: VerifyEmailDto): Promise<{ message: string }> {
+  /**
+   * #203: checks the 6-digit code from the email (sent in `token`). It works once, for
+   * VERIFICATION_TOKEN_TTL_MINUTES; a wrong code counts, and the attempt that reaches
+   * VERIFICATION_MAX_ATTEMPTS invalidates the code. Every failure is the same 401.
+   */
+  async verifyEmail(dto: VerifyEmailDto, now = new Date()): Promise<{ message: string }> {
     const credential = await this.credentials.findByEmail(dto.email);
-    if (!credential) {
-      throw new UnauthorizedError('Invalid or expired verification token');
+    const code = dto.token.trim();
+    if (!credential || !credential.verificationTokenHash || !credential.verificationTokenExpiresAt || credential.verificationTokenExpiresAt <= now) {
+      // Same work as a real check, so the answer time doesn't tell whether the account exists.
+      hashVerificationCode(code, credential?.id ?? 'none', this.config.emailCodeHashSecret);
+      throw new UnauthorizedError(INVALID_CODE_MESSAGE);
     }
 
-    const isExpired = !credential.verificationTokenExpiresAt || credential.verificationTokenExpiresAt.getTime() <= Date.now();
-    const isValid = credential.verificationTokenHash && this.hashToken(dto.token) === credential.verificationTokenHash && !isExpired;
-
-    if (!isValid) {
-      throw new UnauthorizedError('Invalid or expired verification token');
+    if (!verificationCodeMatches(code, credential.id, this.config.emailCodeHashSecret, credential.verificationTokenHash)) {
+      await this.credentials.recordWrongVerificationCode(credential.id, this.config.verificationMaxAttempts);
+      throw new UnauthorizedError(INVALID_CODE_MESSAGE);
     }
-
-    await this.credentials.update(credential.id, {
-      emailVerified: true,
-      verificationTokenHash: null,
-      verificationTokenExpiresAt: null,
-    });
-
+    if (!(await this.credentials.consumeVerificationCode(credential.id, credential.verificationTokenHash, now))) {
+      throw new UnauthorizedError(INVALID_CODE_MESSAGE);
+    }
     return { message: 'Email verified successfully' };
   }
 
-  async resendVerification(dto: ResendVerificationDto): Promise<{ message: string }> {
-    const credential = await this.credentials.findByEmail(dto.email);
-    if (!credential || credential.emailVerified) {
-      return { message: 'If that account exists, a verification email has been sent' };
+  /**
+   * #203: emails a new code. The limits run first and count every address, known or not: one email per
+   * VERIFICATION_RESEND_COOLDOWN_SECONDS and RESEND_PER_EMAIL_PER_HOUR per address, RESEND_PER_IP_PER_HOUR
+   * per client IP. 503 when email isn't set up (for everyone) or the provider failed.
+   */
+  async resendVerification(dto: ResendVerificationDto, context: VerificationRequestContext): Promise<{ message: string }> {
+    if (!this.emailSender.enabled) {
+      throw new EmailUnavailableError('Email verification is not available yet. Please try again later.');
+    }
+    const emailKey = this.emailKey(dto.email);
+    const allowed =
+      (await this.rateLimiter.incrementAndCheck(`ratelimit:verification-resend:ip:${context.clientIp}`, RESEND_PER_IP_PER_HOUR, 3600)) &&
+      (await this.rateLimiter.incrementAndCheck(`ratelimit:verification-resend:email-hour:${emailKey}`, RESEND_PER_EMAIL_PER_HOUR, 3600)) &&
+      (await this.rateLimiter.incrementAndCheck(this.resendCooldownKey(dto.email), 1, this.config.verificationResendCooldownSeconds));
+    if (!allowed) {
+      throw new AppError(429, 'TooManyRequests', 'Please wait a minute before asking for another code.');
     }
 
-    const token = this.generateVerificationToken();
-    await this.credentials.update(credential.id, {
-      verificationTokenHash: this.hashToken(token),
-      verificationTokenExpiresAt: this.addMinutes(new Date(), this.config.verificationTokenTtlMinutes),
-    });
+    const credential = await this.credentials.findByEmail(dto.email);
+    if (!credential || credential.emailVerified) {
+      return { message: GENERIC_RESEND_MESSAGE };
+    }
+    await this.sendVerificationCode(credential, context.locale, context.correlationId);
+    return { message: GENERIC_RESEND_MESSAGE };
+  }
 
-    return { message: 'If that account exists, a verification email has been sent' };
+  /** Stores a new code (HMAC, attempts reset) and emails it. The code itself is never logged or returned. */
+  private async sendVerificationCode(credential: Credential, locale: EmailLocale, correlationId: string): Promise<void> {
+    const now = new Date();
+    const code = newVerificationCode();
+    await this.credentials.setVerificationCode(
+      credential.id,
+      hashVerificationCode(code, credential.id, this.config.emailCodeHashSecret),
+      this.addMinutes(now, this.config.verificationTokenTtlMinutes),
+      now,
+    );
+    await this.emailSender.send(buildVerificationEmail(credential.email, code, locale, this.config.verificationTokenTtlMinutes), { correlationId });
+  }
+
+  private emailKey(email: string): string {
+    return createHash('sha256').update(email.trim().toLowerCase()).digest('hex');
+  }
+
+  private resendCooldownKey(email: string): string {
+    return `ratelimit:verification-resend:cooldown:${this.emailKey(email)}`;
   }
 
   /**
@@ -271,13 +343,6 @@ export class AuthService {
     };
   }
 
-  private generateVerificationToken(): string {
-    return randomBytes(32).toString('hex');
-  }
-
-  private hashToken(value: string): string {
-    return createHash('sha256').update(value).digest('hex');
-  }
 
   private addMinutes(date: Date, minutes: number): Date {
     return new Date(date.getTime() + minutes * 60_000);

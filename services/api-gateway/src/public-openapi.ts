@@ -23,8 +23,8 @@ export const SERVICE_DEFINITIONS = [
       { method: 'post', path: '/logout', summary: 'Sign out this device (always 204)', auth: false, statusCode: 204 },
       { method: 'post', path: '/logout-all', summary: 'Sign out on every device', auth: true, statusCode: 204 },
       { method: 'patch', path: '/users/:id/status', summary: 'Suspend or reactivate an account (staff with users.manage; suspending ends its sessions)', auth: true, statusCode: 200 },
-      { method: 'post', path: '/verify-email', summary: 'Verify an email address with a token', auth: false, statusCode: 200 },
-      { method: 'post', path: '/resend-verification', summary: 'Resend email verification', auth: false, statusCode: 200 },
+      { method: 'post', path: '/verify-email', summary: 'Verify an email address with the 6-digit code from the verification email', auth: false, statusCode: 200 },
+      { method: 'post', path: '/resend-verification', summary: 'Email a new verification code (one a minute per address)', auth: false, statusCode: 200 },
       { method: 'get', path: '/me', summary: 'Get the current authenticated user', auth: true, statusCode: 200 },
     ],
   },
@@ -440,7 +440,11 @@ const baseSchemas = {
     required: ['email', 'token'],
     properties: {
       email: { type: 'string', format: 'email' },
-      token: { type: 'string' },
+      token: {
+        type: 'string',
+        pattern: '^\\d{6}$',
+        description: '#203: the 6-digit code from the email. It works once, for 10 minutes; the 5th wrong code invalidates it.',
+      },
     },
   },
   ResendVerificationRequest: {
@@ -835,6 +839,7 @@ export function generatePublicOpenApiDocument() {
             'application/json': { schema: { type: 'object', properties: { message: { type: 'string' } } } },
           },
         };
+        operation.responses['401'] = { description: 'Invalid or expired verification code (wrong, used, expired or invalidated): ask for a new one' };
       }
 
       if (route.method === 'post' && service.service === 'auth' && route.path === '/resend-verification') {
@@ -845,10 +850,15 @@ export function generatePublicOpenApiDocument() {
           },
         };
         operation.responses[String(route.statusCode || 200)] = {
-          description: 'Verification email queued or resent',
+          description: 'The same answer whether or not the address has an account',
           content: {
             'application/json': { schema: { type: 'object', properties: { message: { type: 'string' } } } },
           },
+        };
+        operation.responses['429'] = { description: 'Too soon: one code a minute per address, 5 an hour; and 20 an hour per client IP' };
+        operation.responses['503'] = {
+          description: 'EmailUnavailable: email is not set up yet, or the provider failed (show "try again later")',
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } },
         };
       }
 

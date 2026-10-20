@@ -1,5 +1,5 @@
 import { NextFunction, Request, Response } from 'express';
-import { GATEWAY_MARKER_HEADER, UserRole } from '@food-delivery/shared';
+import { CLIENT_IP_HEADER, GATEWAY_MARKER_HEADER, UserRole } from '@food-delivery/shared';
 
 /** The role a bearer JWT claims, read without verifying it (the services verify signatures). */
 export function claimedRole(authorization: string | undefined): string | undefined {
@@ -18,12 +18,17 @@ export function claimedRole(authorization: string | undefined): string | undefin
  * Runs on every request before it is proxied (#202):
  * - The gateway marker is removed from whatever the client sent and set again, so every proxied
  *   request carries exactly the gateway's value and a client can't make itself look internal.
+ * - The client IP header is replaced the same way, so rate limits count real clients (#203).
  * - A bearer token that claims the SYSTEM role is refused here: service identities never come from
  *   the internet. The services refuse SYSTEM tokens on marked requests as well.
  */
 export function edgePolicy(request: Request, response: Response, next: NextFunction): void {
   delete request.headers[GATEWAY_MARKER_HEADER];
   request.headers[GATEWAY_MARKER_HEADER] = '1';
+  // #203: the client's address for per-IP limits, replaced the same way. Behind a load balancer this
+  // becomes the balancer's address until M5 (#221) passes the original through.
+  delete request.headers[CLIENT_IP_HEADER];
+  request.headers[CLIENT_IP_HEADER] = request.socket.remoteAddress ?? 'unknown-ip';
 
   if (claimedRole(request.headers.authorization) === UserRole.SYSTEM) {
     response.status(401).json({ statusCode: 401, error: 'Unauthorized', message: 'Service tokens are not accepted here' });

@@ -4,6 +4,8 @@ import {
   JwtAuthGuard,
   CurrentUser,
   JwtPayload,
+  clientIpOf,
+  generateCorrelationId,
   PermissionsGuard,
   RateLimit,
   RateLimitGuard,
@@ -22,6 +24,13 @@ import { AuthResponseDto, VerificationRequiredResponseDto } from '../dto/auth-re
 import { RefreshTokenDto } from '../dto/session.dto';
 import { RequestWithContext } from '@food-delivery/shared';
 import { SessionContext, sessionIdOf } from '../services/sessions.service';
+import { EmailLocale, localeFrom } from '../email/verification-email';
+
+/** #203: the verification email's language, from Accept-Language (Arabic by default, like the apps). */
+function localeOf(req: RequestWithContext): EmailLocale {
+  const header = (req as unknown as { headers: Record<string, string | string[] | undefined> }).headers['accept-language'];
+  return localeFrom(typeof header === 'string' ? header : undefined);
+}
 
 /** What a session records about the client; the app id comes from the body. */
 function sessionContext(req: { headers: Record<string, string | string[] | undefined> }): SessionContext {
@@ -39,7 +48,7 @@ export class AuthController {
   @RateLimit({ limit: 5, windowSeconds: 60 })
   @ApiOperation({ summary: 'Register a new user (creates credentials + profile); signs in unless email verification is required' })
   register(@Body() dto: RegisterDto, @Req() req: RequestWithContext): Promise<AuthResponseDto | VerificationRequiredResponseDto> {
-    return this.authService.register(dto, req.correlationId, sessionContext(req as never));
+    return this.authService.register(dto, req.correlationId, { ...sessionContext(req as never), locale: localeOf(req) });
   }
 
   @Post('login')
@@ -93,8 +102,12 @@ export class AuthController {
   @RateLimit({ limit: 5, windowSeconds: 60 })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Resend a verification email if the account is not already verified' })
-  resendVerification(@Body() dto: ResendVerificationDto): Promise<{ message: string }> {
-    return this.authService.resendVerification(dto);
+  resendVerification(@Body() dto: ResendVerificationDto, @Req() req: RequestWithContext): Promise<{ message: string }> {
+    return this.authService.resendVerification(dto, {
+      correlationId: req.correlationId ?? generateCorrelationId(),
+      locale: localeOf(req),
+      clientIp: clientIpOf(req as never),
+    });
   }
 
   /** #202: suspend or reactivate a customer, owner or driver (staff with users.manage). */

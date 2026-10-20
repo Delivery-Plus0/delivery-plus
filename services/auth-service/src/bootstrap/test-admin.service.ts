@@ -21,7 +21,7 @@ export class TestAdminService implements OnApplicationBootstrap {
     if (!this.config.testAdmin) return;
     try {
       const admin = await bootstrapAdmin(this.dataSource, this.config.testAdmin);
-      this.logger.log(`Created the test super admin ${admin.email}`);
+      this.logger.log(`Created the test super admin (${admin.userId})`);
     } catch (error) {
       if (error instanceof BootstrapRefusedError && error.message.startsWith('Staff already exist')) return;
       this.logger.error(`Could not create the test super admin: ${error instanceof Error ? error.message : String(error)}`);

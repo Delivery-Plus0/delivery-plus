@@ -47,12 +47,13 @@ services:
       AWS_S3_PUBLIC_ENDPOINT: http://localhost:9100
       AWS_PUBLIC_BASE_URL: http://localhost:9100/delivery-plus-media
 
-  # payment-service declines ~10% of payments at random by default (PAYMENT_SUCCESS_RATE=0.9).
   # UI checkout tests must be deterministic, so every payment succeeds unless a test forces a
   # decline via the API (`simulateFailure: true`, used by seed:e2e for the FAILED scenario).
+  # #201: that hook needs PAYMENT_TEST_HOOKS=true, set only here and in docker-compose.test.yml.
   payment-service:
     environment:
       PAYMENT_SUCCESS_RATE: '1'
+      PAYMENT_TEST_HOOKS: 'true'
 
   # Auto-dispatch retries deliveries still waiting for a driver every AUTO_DISPATCH_SWEEP_MS
   # (default 15000). UI tests wait for "driver comes online -> assigned", so retry faster here.

@@ -604,6 +604,29 @@ export function generatePublicOpenApiDocument() {
         };
       }
 
+      // #201: the only field is a test hook, refused outside the test and E2E stacks.
+      if (route.method === 'post' && service.service === 'payments' && route.path === '/:id/process') {
+        operation.requestBody = {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  simulateFailure: {
+                    type: 'boolean',
+                    description:
+                      'Test hook, test and E2E stacks only (PAYMENT_TEST_HOOKS=true): true forces a decline, false forces success. ' +
+                      'Anywhere else sending it returns 400 "simulateFailure is a test hook and is disabled". Clients must omit it.',
+                  },
+                },
+              },
+            },
+          },
+        };
+        operation.responses['400'] = { description: 'simulateFailure sent while test hooks are disabled' };
+      }
+
       // #53/#56: optional reasons on platform cancellations and support refunds; the refund audit record.
       if (route.method === 'post' && (route.path === '/:id/cancel' || route.path === '/:id/refund') && ['deliveries', 'payments'].includes(service.service)) {
         operation.requestBody = {

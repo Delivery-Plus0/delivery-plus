@@ -335,11 +335,18 @@ async function seedOrders(
 
   async function seedFailedPayment() {
     log('• Failed payment (Cairo Kitchen)');
-    await placeOrder(
-      customer,
-      [{ item: item('Cairo Kitchen', 'Koshari'), quantity: 1 }],
-      'failure',
-    );
+    try {
+      await placeOrder(
+        customer,
+        [{ item: item('Cairo Kitchen', 'Koshari'), quantity: 1 }],
+        'failure',
+      );
+    } catch (error) {
+      // A forced decline is a test hook (#201). Without PAYMENT_TEST_HOOKS=true, skip this example.
+      const message = (error as { response?: { data?: { message?: unknown } } }).response?.data?.message;
+      if (typeof message !== 'string' || !message.includes('simulateFailure is a test hook')) throw error;
+      log('  skipped: forcing a decline needs PAYMENT_TEST_HOOKS=true (test and E2E stacks only)');
+    }
   }
 
   async function seedPreparing() {

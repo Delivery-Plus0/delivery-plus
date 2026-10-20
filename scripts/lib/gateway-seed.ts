@@ -299,9 +299,11 @@ export async function placeOrder(
   const payment = await post<Payment>('/api/payments', { orderId: order.id }, customer);
   await waitForOrder(order.id, customer, 'PAYMENT_PENDING');
 
+  // A decline needs the simulateFailure test hook (PAYMENT_TEST_HOOKS=true, #201); a success needs
+  // nothing, so seeding also works on stacks without the hooks.
   await post(
     `/api/payments/${payment.id}/process`,
-    { simulateFailure: paymentOutcome === 'failure' },
+    paymentOutcome === 'failure' ? { simulateFailure: true } : {},
     customer,
   );
   return waitForOrder(order.id, customer, paymentOutcome === 'failure' ? 'FAILED' : 'CONFIRMED');

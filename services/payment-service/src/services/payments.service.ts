@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
+  BadRequestError,
   ConflictError,
   ForbiddenError,
   InvalidStateTransitionError,
@@ -70,6 +71,9 @@ export const SIDE_EFFECTS_LEASE_MS = 30_000;
 
 /** #18: why a payment abandoned in PROCESSING ends FAILED. True for the simulator: nothing was charged. */
 export const ABANDONED_PROCESSING_REASON = 'Payment processing was interrupted, so you were not charged.';
+
+/** #201: the answer to `simulateFailure` when PAYMENT_TEST_HOOKS is off. */
+export const SIMULATE_FAILURE_DISABLED = 'simulateFailure is a test hook and is disabled';
 
 /** What to do when side effects are owed but another request holds the lease. */
 type OnBusy = 'return' | 'conflict';
@@ -160,6 +164,10 @@ export class PaymentsService {
    *   previously failed (Kafka publish, order update) are re-attempted.
    */
   async processPayment(paymentId: string, requesterId: string, dto: ProcessPaymentDto): Promise<Payment> {
+    // #201: forcing an outcome is a test hook. Without it any client could make every payment succeed.
+    if (dto.simulateFailure !== undefined && !this.config.paymentTestHooks) {
+      throw new BadRequestError(SIMULATE_FAILURE_DISABLED);
+    }
     const payment = await this.findOrThrow(paymentId);
 
     if (payment.customerId !== requesterId) {

@@ -130,7 +130,8 @@ async function seed() {
     const payment = (await axios.post(`${API_URL}/api/payments`, { orderId: order.id }, customerAuth)).data;
     await waitForOrder(order.id, customerAuth, 'PAYMENT_PENDING');
     console.log('Processing payment...');
-    await axios.post(`${API_URL}/api/payments/${payment.id}/process`, { simulateFailure: false }, customerAuth);
+    // No simulateFailure: it is a test hook (#201), and every payment succeeds by default.
+    await axios.post(`${API_URL}/api/payments/${payment.id}/process`, {}, customerAuth);
     await waitForOrder(order.id, customerAuth, 'CONFIRMED');
     await axios.patch(`${API_URL}/api/orders/${order.id}/status`, { status: 'PREPARING' }, ownerAuth);
     // Auto-dispatch picks the most recently updated AVAILABLE driver: cycle ours just before "ready".

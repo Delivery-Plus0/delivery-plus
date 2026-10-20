@@ -18,7 +18,9 @@ The shared package is structured around common concerns, including:
 - event topic constants
 - reusable errors and utilities
 - logging helpers
-- NestJS wrappers (JWT and role guards, correlation-id middleware, HTTP exception filter)
+- NestJS wrappers (JWT and role guards, correlation-id middleware, HTTP exception filter: unexpected errors return a generic 500 and are logged in full, #204)
+- `RateLimiterService`: one atomic Lua script per hit (count + window TTL, #204)
+- `STRICT_WHERE_VALUES`: the TypeORM `invalidWhereValuesBehavior` every service's DataSource uses, so an `undefined` where value throws (#204)
 - internal service authentication (HMAC request signing and verification helpers)
 - Redis helpers: `RedisModule` (provides the shared `REDIS_CLIENT`), `CacheService`, `RateLimiterService` and `RateLimitGuard`
 - Kafka helpers: `KafkaModule`, `KafkaProducerService`, `KafkaConsumerService`

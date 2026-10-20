@@ -298,6 +298,10 @@ services:
       - JWT_SECRET=${JWT_SECRET:-local-development-only}
       - KAFKA_BROKER=kafka:29092
       - ORDER_SERVICE_URL=http://order-service:3006
+      # #201: payment-service refuses to start in production with only the payment simulator.
+      # This all-in-one local stack is a closed demo, so it opts in explicitly (startup logs a warning).
+      # docker-compose.prod.yml does not: a real deployment stays blocked until a real provider exists.
+      - PAYMENT_SIMULATOR_IN_PRODUCTION=true
     healthcheck:
       test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3007/health/ready']
       interval: 5s

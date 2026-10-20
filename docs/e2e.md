@@ -9,7 +9,7 @@ repo, e.g. `delivery-plus-customer-app/e2e`).
 | Files | `base` + `dev` | `base` + `test` + `e2e` |
 | Gateway | `:3000` | `:3100` |
 | Object storage | `:9000` | `:9100` (public media URLs point here) |
-| Payments | 90% succeed at random | always succeed (`PAYMENT_SUCCESS_RATE=1`) |
+| Payments | always succeed; `simulateFailure` is refused (400) | always succeed; tests force a decline with `simulateFailure` (`PAYMENT_TEST_HOOKS=true`, #201) |
 
 Both stacks can run at the same time.
 

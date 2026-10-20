@@ -309,7 +309,8 @@ async function runE2E() {
     );
 
     // 6. Process (settle) the payment. simulateFailure: false forces the
-    // simulated-success branch rather than leaving it to PAYMENT_SUCCESS_RATE.
+    // simulated-success branch. It is a test hook: the test stack sets
+    // PAYMENT_TEST_HOOKS=true; anywhere else it is a 400 (#201).
     const processedPayment = await axios.post(
       `${API_URL}/api/payments/${paymentId}/process`,
       { simulateFailure: false },

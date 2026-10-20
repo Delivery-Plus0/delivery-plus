@@ -773,9 +773,10 @@ async function runE2E() {
     console.log('Item images: two uploads ordered, first is the primary; removing it promotes the next; customers see it; GIF 400');
 
     // Driver profile (#147): the vehicle only changes while offline (the driver is AVAILABLE here).
+    // Only a VERIFIED driver can be online (#206); the test stack verifies seeded drivers (DRIVER_AUTO_VERIFY).
     const vehicleWhileOnline = await statusOf(axios.patch(`${API_URL}/api/drivers/me/vehicle`, { vehicleType: 'Car', licensePlate: 'E2E-1' }, driverAuth));
     const ownProfile = (await axios.get(`${API_URL}/api/drivers/me`, driverAuth)).data;
-    if (vehicleWhileOnline !== 409 || !['PENDING', 'VERIFIED', 'REJECTED'].includes(ownProfile.verificationStatus)) {
+    if (vehicleWhileOnline !== 409 || ownProfile.verificationStatus !== 'VERIFIED') {
       throw new Error(`Driver profile: vehicle change while online got ${vehicleWhileOnline}, verification ${ownProfile.verificationStatus}`);
     }
     console.log(`Driver profile: vehicle change while online 409; verification ${ownProfile.verificationStatus}`);

@@ -3,6 +3,7 @@ import {
   ConflictError,
   PhoneNotVerifiedError,
   DRIVER_TRANSITIONS,
+  DriverNotVerifiedError,
   DriverStatus,
   ForbiddenError,
   InvalidStateTransitionError,
@@ -27,6 +28,11 @@ import { UpdateVehicleDto, UpdateVerificationDto } from '../dto/driver-profile.d
  * a late delivery.completed could free a driver who is already on their next delivery.
  *
  * Drivers themselves only go online/offline; they cannot leave BUSY (see driver-transition-rules).
+ *
+ * Only a driver an admin has VERIFIED is ever put on the road (#206): going online is refused,
+ * auto-dispatch never lists or claims them, and a rejection (or a re-review back to PENDING) takes an
+ * online driver offline. A busy driver who loses verification finishes the current job and is then
+ * released to OFFLINE instead of AVAILABLE.
  */
 @Injectable()
 export class DriversService {
@@ -45,6 +51,8 @@ export class DriversService {
       userId,
       vehicleType: dto.vehicleType,
       licensePlate: dto.licensePlate,
+      // Test stacks only (DRIVER_AUTO_VERIFY, refused in production): there is no admin to verify seeded drivers yet.
+      ...(this.config.autoVerifyDrivers ? { verificationStatus: 'VERIFIED' as const, verifiedAt: new Date() } : {}),
     });
   }
 
@@ -62,7 +70,14 @@ export class DriversService {
     return updated;
   }
 
-  /** Admin review (#147): VERIFIED records when; PENDING and REJECTED clear it. */
+  /**
+   * Admin review (#147): VERIFIED records when; PENDING and REJECTED clear it.
+   *
+   * #206: a driver who is no longer VERIFIED and is online goes OFFLINE. The verification is written
+   * first, so from that moment no claim or go-online can succeed (their compare-and-set needs
+   * VERIFIED); then an AVAILABLE driver is moved to OFFLINE (compare-and-set, a no-op otherwise).
+   * A BUSY driver keeps the current job and is released to OFFLINE when it ends.
+   */
   async setVerification(id: string, dto: UpdateVerificationDto, now = new Date()): Promise<Driver> {
     await this.getById(id);
     const updated = await this.drivers.updateVerification(id, {
@@ -71,7 +86,10 @@ export class DriversService {
       verifiedAt: dto.status === 'VERIFIED' ? now : null,
     });
     if (!updated) throw new NotFoundError(`Driver ${id} not found`);
-    return updated;
+    if (dto.status === 'VERIFIED') return updated;
+
+    const offline = await this.drivers.transitionStatus(id, DriverStatus.AVAILABLE, DriverStatus.OFFLINE);
+    return offline ?? (await this.getById(id));
   }
 
   async getByUserId(userId: string): Promise<Driver> {
@@ -124,11 +142,14 @@ export class DriversService {
   }
 
   /**
-   * OFFLINE → AVAILABLE for the driver. With the #153 gate on, only a driver with a verified phone can
-   * start a shift; one already online stays online (the check guards the transition, not the state).
+   * OFFLINE → AVAILABLE for the driver. Only a VERIFIED driver can (#206), checked before the phone so
+   * an unreviewed driver isn't asked to verify a phone first. With the #153 gate on, only a driver with
+   * a verified phone can start a shift; one already online stays online (the phone check guards the
+   * transition, not the state).
    */
   async goOnline(userId: string, requesterRole: UserRole, authHeader: string): Promise<Driver> {
     const driver = await this.getByUserId(userId);
+    assertCanGoOnline(driver);
     if (this.config.phoneVerificationRequired && driver.status !== DriverStatus.AVAILABLE) {
       const profile = await this.userClient.getOwnProfile(authHeader);
       if (!profile.phoneVerifiedAt) throw new PhoneNotVerifiedError('Verify your phone number to go online.');
@@ -146,14 +167,24 @@ export class DriversService {
 
   /**
    * The single path for every status change, in a fixed order:
-   * 1. Repeating the current AVAILABLE/OFFLINE status is a no-op (safe retries). BUSY never is.
-   * 2. The transition must exist in DRIVER_TRANSITIONS (409 otherwise).
-   * 3. The caller's role must be allowed to make it (403 otherwise; a DRIVER can only go online/offline).
-   * 4. The write is compare-and-set. If another writer changed the status between our read and our
-   *    write (e.g. two assignments claiming the same driver), the loser gets a 409 instead of
-   *    silently overwriting.
+   * 1. Verification (#206): going online needs VERIFIED (403 DriverNotVerified, whoever asks); a claim
+   *    of a driver who isn't VERIFIED is a 409, so auto-dispatch moves on to the next driver.
+   * 2. Repeating the current AVAILABLE/OFFLINE status is a no-op (safe retries). BUSY never is.
+   * 3. The transition must exist in DRIVER_TRANSITIONS (409 otherwise).
+   * 4. The caller's role must be allowed to make it (403 otherwise; a DRIVER can only go online/offline).
+   * 5. Releasing a BUSY driver who is no longer VERIFIED writes OFFLINE instead of AVAILABLE (#206).
+   * 6. The write is compare-and-set, and AVAILABLE/BUSY also need VERIFIED at write time. If another
+   *    writer changed the driver between our read and our write (e.g. two assignments claiming the
+   *    same driver), the loser gets a 409 instead of silently overwriting. If only the verification
+   *    changed, the request is decided again once on the fresh row.
    */
-  private async transition(driver: Driver, target: DriverStatus, requesterRole: UserRole): Promise<Driver> {
+  private async transition(driver: Driver, target: DriverStatus, requesterRole: UserRole, reread = false): Promise<Driver> {
+    if (target === DriverStatus.BUSY && driver.verificationStatus !== 'VERIFIED') {
+      throw new ConflictError(`Driver ${driver.id} is not verified and cannot be assigned`);
+    }
+    if (target === DriverStatus.AVAILABLE && driver.status !== DriverStatus.BUSY) {
+      assertCanGoOnline(driver);
+    }
     if (driver.status === target && IDEMPOTENT_STATUSES.includes(target)) {
       return driver;
     }
@@ -168,13 +199,25 @@ export class DriversService {
       );
     }
 
-    const updated = await this.drivers.transitionStatus(driver.id, driver.status, target);
+    const releasedTo =
+      driver.status === DriverStatus.BUSY && target === DriverStatus.AVAILABLE && driver.verificationStatus !== 'VERIFIED'
+        ? DriverStatus.OFFLINE
+        : target;
+    const updated = await this.drivers.transitionStatus(driver.id, driver.status, releasedTo);
     if (updated) return updated;
 
     const current = await this.getById(driver.id);
-    if (current.status === target && IDEMPOTENT_STATUSES.includes(target)) {
+    if (current.status === releasedTo && IDEMPOTENT_STATUSES.includes(releasedTo)) {
       return current;
+    }
+    if (!reread && current.status === driver.status && current.verificationStatus !== driver.verificationStatus) {
+      return this.transition(current, target, requesterRole, true);
     }
     throw new InvalidStateTransitionError('Driver', current.status, target);
   }
+}
+
+/** #206: going online needs an admin-VERIFIED driver. */
+function assertCanGoOnline(driver: Driver): void {
+  if (driver.verificationStatus !== 'VERIFIED') throw new DriverNotVerifiedError(driver.verificationStatus);
 }

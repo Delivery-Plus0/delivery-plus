@@ -52,7 +52,7 @@ export class DriversController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.DRIVER)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Go online (OFFLINE -> AVAILABLE; no-op if already AVAILABLE; 403 while BUSY)' })
+  @ApiOperation({ summary: 'Go online (OFFLINE -> AVAILABLE; no-op if already AVAILABLE; 403 DriverNotVerified unless VERIFIED, #206; 403 while BUSY)' })
   goOnline(@CurrentUser() user: JwtPayload, @Headers('authorization') authHeader: string) {
     return this.driversService.goOnline(user.sub, user.role, authHeader);
   }

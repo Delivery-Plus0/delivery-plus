@@ -154,6 +154,10 @@ async function seed() {
     console.error('Seed failed:');
     if (error.response) console.error(error.response.status, error.response.data);
     else console.error(error.message);
+    if (error.response?.data?.error === 'DriverNotVerified') {
+      // #206: no admin exists to verify the seeded driver; the dev and test overlays set DRIVER_AUTO_VERIFY=true.
+      console.error('The seeded driver is not VERIFIED. Run driver-service with DRIVER_AUTO_VERIFY=true (refused in production).');
+    }
     process.exit(1);
   }
 }

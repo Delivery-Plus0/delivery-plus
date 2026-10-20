@@ -90,6 +90,23 @@ export class PhoneNotVerifiedError extends AppError {
 }
 
 /**
+ * #206: only a driver an admin has VERIFIED can go online. `details.verificationStatus` (PENDING or
+ * REJECTED) lets the driver app show "waiting for review" or "not approved".
+ */
+export class DriverNotVerifiedError extends AppError {
+  constructor(verificationStatus: string) {
+    super(
+      403,
+      'DriverNotVerified',
+      verificationStatus === 'REJECTED'
+        ? 'Your driver account was not approved, so you cannot go online.'
+        : 'Your driver account is waiting for review. You can go online once it is approved.',
+      { verificationStatus },
+    );
+  }
+}
+
+/**
  * #153: whether ordering and going online need a verified phone. Off unless PHONE_VERIFICATION_REQUIRED=true;
  * turn it on only together with a real SMS provider, or nobody could verify.
  */

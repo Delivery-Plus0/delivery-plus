@@ -1,8 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { FindOptionsWhere, Repository } from 'typeorm';
 import { DriverStatus } from '@food-delivery/shared';
 import { Driver } from '../entities/driver.entity';
+
+/** #206: the statuses that put a driver on the road. Only a VERIFIED driver can be moved into them. */
+export const ON_DUTY_STATUSES: readonly DriverStatus[] = [DriverStatus.AVAILABLE, DriverStatus.BUSY];
 
 @Injectable()
 export class DriversRepository {
@@ -19,16 +22,24 @@ export class DriversRepository {
     return this.repo.findOne({ where: { userId } });
   }
 
-  create(data: Pick<Driver, 'userId' | 'vehicleType' | 'licensePlate'>): Promise<Driver> {
+  create(
+    data: Pick<Driver, 'userId' | 'vehicleType' | 'licensePlate'> & Partial<Pick<Driver, 'verificationStatus' | 'verifiedAt'>>,
+  ): Promise<Driver> {
     return this.repo.save(this.repo.create(data));
   }
 
   /**
    * Compare-and-set: moves the driver from `from` to `to` only if it is still in `from`.
    * Returns the updated driver, or null when another writer changed the status first.
+   *
+   * Going online (AVAILABLE) or being claimed (BUSY) also needs the driver to still be VERIFIED at the
+   * moment of the write (#206), so a driver rejected between the caller's read and this write is
+   * never put on the road.
    */
   async transitionStatus(id: string, from: DriverStatus, to: DriverStatus): Promise<Driver | null> {
-    const result = await this.repo.update({ id, status: from }, { status: to });
+    const where: FindOptionsWhere<Driver> = { id, status: from };
+    if (ON_DUTY_STATUSES.includes(to)) where.verificationStatus = 'VERIFIED';
+    const result = await this.repo.update(where, { status: to });
     return result.affected ? this.findById(id) : null;
   }
 
@@ -43,9 +54,10 @@ export class DriversRepository {
     return this.findById(id);
   }
 
+  /** Drivers auto-dispatch may claim: online and VERIFIED (#206). */
   findAvailable(page: number, limit: number): Promise<[Driver[], number]> {
     return this.repo.findAndCount({
-      where: { status: DriverStatus.AVAILABLE },
+      where: { status: DriverStatus.AVAILABLE, verificationStatus: 'VERIFIED' },
       order: { updatedAt: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,

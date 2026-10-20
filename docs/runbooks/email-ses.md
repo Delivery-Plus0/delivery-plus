@@ -1,6 +1,6 @@
 # Runbook: send verification emails through Amazon SES
 
-auth-service sends the email-verification code (#203) through Amazon SES when `EMAIL_PROVIDER=ses`. This runbook covers the one-time AWS setup and the settings. Bounce and complaint handling and the suppression list are follow-up work (see "Not covered yet").
+auth-service sends the email-verification code (#203) through Amazon SES when `EMAIL_PROVIDER=ses`. This runbook covers the one-time AWS setup and the settings. Bounce and complaint handling and the suppression list are follow-up work (#242, see "Not covered yet").
 
 ## What auth-service needs
 
@@ -95,4 +95,4 @@ Attach this to auth-service's role. Replace the region, account id and domain.
 
 ## Not covered yet
 
-Bounce and complaint processing, plus honouring the SES suppression list, are tracked in a Production 5 follow-up issue. Until it lands, watch the SES reputation dashboard. SES pauses sending if the bounce rate goes over 10 % or the complaint rate over 0.5 %.
+Bounce and complaint processing, plus honouring the SES suppression list, are tracked in #242 (Production 5). Until it lands, watch the SES reputation dashboard. SES pauses sending if the bounce rate goes over 10 % or the complaint rate over 0.5 %.

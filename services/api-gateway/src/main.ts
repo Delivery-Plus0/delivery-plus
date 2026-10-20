@@ -4,6 +4,7 @@ import { createProxyMiddleware } from 'http-proxy-middleware';
 import { SwaggerModule } from '@nestjs/swagger';
 import { NextFunction, Request, Response } from 'express';
 import { isBlockedInternalRoute } from './route-policy';
+import { edgePolicy } from './edge';
 
 export const PROXIES = {
   '/api/auth': process.env.AUTH_SERVICE_URL || 'http://localhost:3001',
@@ -110,6 +111,9 @@ async function bootstrap() {
 
     next();
   });
+
+  // #202: an unspoofable "came through the gateway" marker, and no SYSTEM tokens from outside.
+  app.use(edgePolicy);
 
   const swaggerOptions = {
     explorer: true,

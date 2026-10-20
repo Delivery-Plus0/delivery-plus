@@ -82,6 +82,16 @@ export class CartChangedError extends AppError {
   }
 }
 
+/**
+ * #202: the account is suspended. Returned only after the password (or refresh token) checked out, so
+ * it reveals nothing to someone who doesn't hold the account. Apps show a dedicated screen.
+ */
+export class AccountSuspendedError extends AppError {
+  constructor(message = 'This account is suspended. Contact support.') {
+    super(403, 'AccountSuspended', message);
+  }
+}
+
 /** #153: the action needs a verified phone; clients answer it by showing the verification step. */
 export class PhoneNotVerifiedError extends AppError {
   constructor(message = 'Verify your phone number to continue.') {

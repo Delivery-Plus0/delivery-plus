@@ -15,6 +15,7 @@ From `services/auth-service/src/controllers/auth.controller.ts`:
 - `POST /auth/logout-all` – sign out every device (access token required).
 - `POST /auth/verify-email`, `POST /auth/resend-verification` – email verification.
 - `GET /auth/me` – return the current user payload from the bearer token.
+- `PATCH /auth/users/:id/status` – suspend or reactivate an account (staff with `users.manage`, see [Account status](#account-status-202)).
 
 Internal only (blocked at the gateway, HMAC per ADR 001), from `src/controllers/internal-sessions.controller.ts`:
 
@@ -81,6 +82,28 @@ Login and register accept an optional `appId` (`customer`, `driver`, `restaurant
 - Only services listed in `AUTH_INTERNAL_ALLOWED_SERVICES` may call it (empty by default: nobody). `401` for a missing, wrong, expired or replayed signature or a caller not on the list; `400` for another reason or a malformed id.
 - Inside auth-service (#35's password change and reset, #202's suspension) call `SessionsService.revokeAll(credentialId, reason, exceptSessionId?)` directly. The current session's id is the access token's `sid` claim.
 
+## Account status (#202)
+
+- `credentials.status` is `ACTIVE` (default) or `SUSPENDED`, with `suspendedAt` and `suspendedReason`.
+- **Suspended accounts:**
+  - `POST /auth/login` answers `403 AccountSuspended`, but only after the password checked out. A wrong password stays `401`, so a stranger learns nothing.
+  - `POST /auth/refresh` answers `403 AccountSuspended` too, including for a session the suspension ended, so the apps can show the suspended screen.
+- **Suspending** ends every refresh session (`revokedReason: suspended`). Access tokens already issued expire within `JWT_EXPIRES_IN`.
+- **Reactivating** restores login. The sessions the suspension ended stay ended.
+- **`PATCH /auth/users/:id/status`** `{ status, reason? }` → `200 { userId, status, suspendedAt, suspendedReason, sessionsRevoked }`.
+  - It needs an ADMIN token with `users.manage`.
+  - `403` for your own account, for a staff account (staff are managed with the staff tools, #216), or without the permission; `404` for an unknown user.
+  - This is the minimal staff action the admin console (#215) builds on.
+
+## Staff permissions (#202)
+
+- Staff have role `ADMIN`. What each person may do is in `staff_permissions` (`credentialId`, `permission`).
+- **The ten permissions:** `support.read`, `support.act`, `ops.read`, `ops.act`, `finance.read`, `finance.act`, `onboarding.review`, `users.manage`, `staff.manage`, `audit.read` (`STAFF_PERMISSIONS` in `shared`).
+- **In tokens:** staff access tokens carry `perms`, read fresh at every login and refresh, so a change applies within one access-token lifetime. Other tokens carry none.
+- **Enforcement:** routes require permissions with `@RequirePermissions(...)` and `PermissionsGuard` from `shared`. `perms` on a non-staff token is ignored.
+- **The first super admin** (every permission) is created out of band: see [docs/runbooks/bootstrap-admin.md](../runbooks/bootstrap-admin.md).
+  - Test and dev stacks create theirs at startup from `TEST_ADMIN_EMAIL` and `TEST_ADMIN_PASSWORD`; auth-service refuses those variables in production.
+
 ## Dependencies
 - Calls `user-service` internally for user profile creation via `src/common/user-service.client.ts`, signing the request with the internal HMAC contract
 - Requires `DATABASE_URL` and `JWT_SECRET`
@@ -104,6 +127,8 @@ From `services/auth-service/src/config/app-config.ts` and `docker-compose.yml`:
 - `NODE_ENV` (default: `development`)
 - `INTERNAL_AUTH_SECRET` (required in production; local Compose provides a development-only default)
 - `EMAIL_VERIFICATION_REQUIRED` (default: `false`)
+- `TEST_ADMIN_EMAIL`, `TEST_ADMIN_PASSWORD` (test and dev stacks only; refused in production): the super admin created at startup
+- For the bootstrap CLI only: `BOOTSTRAP_ADMIN_EMAIL`, optional `BOOTSTRAP_ADMIN_PASSWORD` (otherwise prompted)
 
 ## Notes
 The auth service validates credentials and issues JSON Web Tokens; downstream access control is enforced with shared guards from `@food-delivery/shared`. Its profile-creation call uses HMAC service authentication with a service identity, timestamp, nonce, and body-bound signature. A shared `INTERNAL_AUTH_SECRET` must be rotated through deployment configuration, not source code.

@@ -144,7 +144,14 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden"
+            "description": "AccountSuspended: the account is suspended (show the suspended screen)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "security": [],
@@ -199,7 +206,14 @@
             }
           },
           "403": {
-            "description": "Forbidden"
+            "description": "AccountSuspended: the account is suspended (show the suspended screen)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "429": {
             "description": "Too many refreshes for this session"
@@ -292,6 +306,71 @@
             "bearerAuth": []
           }
         ]
+      }
+    },
+    "/api/auth/users/{id}/status": {
+      "patch": {
+        "summary": "Suspend or reactivate an account (staff with users.manage; suspending ends its sessions)",
+        "tags": [
+          "auth"
+        ],
+        "operationId": "auth_patch_api_auth_users_id_status",
+        "responses": {
+          "200": {
+            "description": "The account status now",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountStatusResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Not staff, no users.manage permission, a staff account, or your own account"
+          },
+          "404": {
+            "description": "No such user"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountStatusRequest"
+              }
+            }
+          }
+        }
       }
     },
     "/api/auth/verify-email": {
@@ -3479,7 +3558,7 @@
     },
     "/api/drivers/available": {
       "get": {
-        "summary": "List the drivers dispatch may claim: available and verified (admin/system only)",
+        "summary": "List the drivers dispatch may claim: available and verified (services only, SYSTEM token; not callable through the gateway)",
         "tags": [
           "drivers"
         ],
@@ -3559,7 +3638,7 @@
     },
     "/api/drivers/{id}/status": {
       "patch": {
-        "summary": "Set a driver status as admin",
+        "summary": "Claim or release a driver (services only, SYSTEM token; not callable through the gateway)",
         "tags": [
           "drivers"
         ],
@@ -4078,6 +4157,63 @@
               "admin"
             ],
             "description": "#34: the app signing in, recorded on the session."
+          }
+        }
+      },
+      "AccountStatusRequest": {
+        "type": "object",
+        "description": "#202: staff with users.manage. Staff accounts and your own account are refused (403).",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "SUSPENDED"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 300,
+            "description": "Why it is suspended; for staff, not shown to the user."
+          }
+        }
+      },
+      "AccountStatusResponse": {
+        "type": "object",
+        "required": [
+          "userId",
+          "status",
+          "suspendedAt",
+          "suspendedReason",
+          "sessionsRevoked"
+        ],
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "SUSPENDED"
+            ]
+          },
+          "suspendedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "suspendedReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "sessionsRevoked": {
+            "type": "integer",
+            "description": "Refresh sessions ended by this change."
           }
         }
       },

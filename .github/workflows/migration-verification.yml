@@ -142,6 +142,7 @@ jobs:
           check auth_service         "select count(*) from information_schema.tables where table_name='credentials'" "table credentials"
           check auth_service         "select count(*) from pg_indexes where indexname='UQ_credentials_email'" "index UQ_credentials_email"
           check auth_service         "select count(*) from information_schema.tables where table_name='auth_sessions'" "table auth_sessions"
+          check auth_service         "select count(*) from information_schema.tables where table_name='staff_permissions'" "table staff_permissions"
 
           check user_service         "select count(*) from information_schema.tables where table_name='user_profiles'" "table user_profiles"
 
@@ -182,16 +183,17 @@ jobs:
           psql -h localhost -U postgres -c "CREATE DATABASE driver_service_repository_test"
           npm test --workspace=services/driver-service
 
-      # #34: refresh-token rotation and family revocation are conditional UPDATEs, so
-      # sessions.repository.integration.spec.ts runs the auth migrations and the session
-      # repository against this Postgres, concurrency included.
+      # #34: refresh-token rotation and family revocation are conditional UPDATEs, and #202:
+      # the first-admin bootstrap is a locked transaction, so sessions.repository.integration.spec.ts
+      # and bootstrap-admin.integration.spec.ts run against this Postgres, concurrency included.
       - name: Run auth-service Postgres session test
         env:
           PGPASSWORD: postgres
           AUTH_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/auth_service_session_test
         run: |
           psql -h localhost -U postgres -c "CREATE DATABASE auth_service_session_test"
-          npm test --workspace=services/auth-service
+          # One database for both auth Postgres specs (sessions, first-admin bootstrap): run them one at a time.
+          npm test --workspace=services/auth-service -- --runInBand
 
       - name: Collect diagnostics
         if: failure()

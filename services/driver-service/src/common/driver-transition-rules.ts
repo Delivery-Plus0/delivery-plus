@@ -3,7 +3,7 @@ import { DriverStatus, UserRole } from '@food-delivery/shared';
 /**
  * The only transitions a DRIVER may make on their own profile: going online and offline.
  *
- * Everything else is ADMIN-only. delivery-service holds an ADMIN system token and performs the
+ * Everything else is for SYSTEM and ADMIN (#202). delivery-service holds a SYSTEM token and performs the
  * assignment claim (AVAILABLE -> BUSY) and the release (BUSY -> AVAILABLE) itself, so a driver
  * cannot make themselves AVAILABLE while on a delivery and pick up a second one.
  */
@@ -13,7 +13,7 @@ const DRIVER_SELF_TRANSITIONS: ReadonlyArray<readonly [DriverStatus, DriverStatu
 ];
 
 export function isRoleAllowedForTransition(from: DriverStatus, to: DriverStatus, role: UserRole): boolean {
-  if (role === UserRole.ADMIN) return true;
+  if (role === UserRole.SYSTEM || role === UserRole.ADMIN) return true;
   if (role !== UserRole.DRIVER) return false;
   return DRIVER_SELF_TRANSITIONS.some(([allowedFrom, allowedTo]) => allowedFrom === from && allowedTo === to);
 }

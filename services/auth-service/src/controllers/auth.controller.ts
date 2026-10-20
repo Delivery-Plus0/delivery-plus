@@ -1,6 +1,18 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
-import { JwtAuthGuard, CurrentUser, JwtPayload, RateLimit, RateLimitGuard } from '@food-delivery/shared';
+import {
+  JwtAuthGuard,
+  CurrentUser,
+  JwtPayload,
+  PermissionsGuard,
+  RateLimit,
+  RateLimitGuard,
+  RequirePermissions,
+  Roles,
+  RolesGuard,
+  UserRole,
+} from '@food-delivery/shared';
+import { UpdateAccountStatusDto } from '../dto/account-status.dto';
 import { AuthService } from '../services/auth.service';
 import { RegisterDto } from '../dto/register.dto';
 import { LoginDto } from '../dto/login.dto';
@@ -83,6 +95,17 @@ export class AuthController {
   @ApiOperation({ summary: 'Resend a verification email if the account is not already verified' })
   resendVerification(@Body() dto: ResendVerificationDto): Promise<{ message: string }> {
     return this.authService.resendVerification(dto);
+  }
+
+  /** #202: suspend or reactivate a customer, owner or driver (staff with users.manage). */
+  @Patch('users/:id/status')
+  @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
+  @Roles(UserRole.ADMIN)
+  @RequirePermissions('users.manage')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Suspend or reactivate an account (staff with users.manage). Suspending ends its sessions' })
+  setAccountStatus(@Param('id', new ParseUUIDPipe()) id: string, @Body() dto: UpdateAccountStatusDto, @CurrentUser() actor: JwtPayload) {
+    return this.authService.setAccountStatus(id, dto.status, dto.reason?.trim() || null, actor.sub);
   }
 
   @Get('me')

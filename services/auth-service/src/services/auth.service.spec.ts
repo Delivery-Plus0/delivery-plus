@@ -6,9 +6,10 @@ import { UserRole, ConflictError, ForbiddenError, UnauthorizedError, RateLimitGu
 import { SELF_SERVICE_ROLES } from '../dto/register.dto';
 import * as bcrypt from 'bcrypt';
 import { createHash } from 'node:crypto';
-import { loadConfig } from '../config/app-config';
+import { loadConfig, loadTestAdmin } from '../config/app-config';
 import { AuthController } from '../controllers/auth.controller';
 import { SessionsService } from './sessions.service';
+import { StaffPermissionsRepository } from '../repositories/staff-permissions.repository';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -16,6 +17,7 @@ describe('AuthService', () => {
   let userServiceClient: jest.Mocked<UserServiceClient>;
   let jwtService: jest.Mocked<JwtService>;
   let sessions: jest.Mocked<SessionsService>;
+  let staffPermissions: jest.Mocked<StaffPermissionsRepository>;
 
   beforeEach(() => {
     credentials = {
@@ -45,6 +47,8 @@ describe('AuthService', () => {
       end: jest.fn(),
     } as unknown as jest.Mocked<SessionsService>;
 
+    staffPermissions = { listFor: jest.fn().mockResolvedValue(['users.manage']) } as unknown as jest.Mocked<StaffPermissionsRepository>;
+
     service = new AuthService(credentials, userServiceClient, jwtService, {
       serviceName: 'auth-service',
       port: 3001,
@@ -63,7 +67,8 @@ describe('AuthService', () => {
       sessionCleanupIntervalMs: 0,
       sessionRetentionDays: 30,
       internalAuthAllowedServices: [],
-    }, sessions);
+      testAdmin: null,
+    }, sessions, staffPermissions);
   });
 
   describe('config validation', () => {
@@ -158,6 +163,14 @@ describe('AuthService', () => {
         sessionRetentionDays: 30,
         internalAuthAllowedServices: [],
       });
+    });
+
+    it('creates a test admin only from both TEST_ADMIN_* values, and never in production (#202)', () => {
+      expect(loadTestAdmin('test', {})).toBeNull();
+      expect(loadTestAdmin('test', { TEST_ADMIN_EMAIL: ' qa.admin@x.test ', TEST_ADMIN_PASSWORD: 'p'.repeat(12) })).toEqual({ email: 'qa.admin@x.test', password: 'p'.repeat(12) });
+      expect(() => loadTestAdmin('test', { TEST_ADMIN_EMAIL: 'qa.admin@x.test' })).toThrow('Set both');
+      expect(() => loadTestAdmin('production', { TEST_ADMIN_EMAIL: 'a@x.test', TEST_ADMIN_PASSWORD: 'p'.repeat(12) })).toThrow('bootstrap CLI');
+      expect(loadTestAdmin('production', {})).toBeNull();
     });
 
     it('reads the session settings and the internal callers list', () => {
@@ -542,7 +555,7 @@ describe('AuthService', () => {
       service = new AuthService(credentials, userServiceClient, jwtService, {
         ...service['config'],
         emailVerificationRequired: true,
-      }, sessions);
+      }, sessions, staffPermissions);
 
       credentials.findByEmail.mockResolvedValue({
         id: 'u1',
@@ -595,7 +608,7 @@ describe('AuthService', () => {
     });
 
     it('register returns no tokens while email verification is required, and starts no session', async () => {
-      service = new AuthService(credentials, userServiceClient, jwtService, { ...service['config'], emailVerificationRequired: true }, sessions);
+      service = new AuthService(credentials, userServiceClient, jwtService, { ...service['config'], emailVerificationRequired: true }, sessions, staffPermissions);
       credentials.findByEmail.mockResolvedValue(null);
       credentials.create.mockResolvedValue(credential({ id: 'new-user', emailVerified: false }));
       userServiceClient.createProfile.mockResolvedValue(undefined);

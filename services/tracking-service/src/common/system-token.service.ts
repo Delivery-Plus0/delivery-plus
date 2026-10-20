@@ -1,15 +1,14 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { UserRole } from '@food-delivery/shared';
+import { SYSTEM_TOKEN_TTL, UserRole } from '@food-delivery/shared';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 
 /**
- * Mints a short-lived service-account JWT so tracking-service can read driver
- * profiles (driver.id -> userId), which are no longer public.
+ * Mints the short-lived SYSTEM token tracking-service sends to read driver profiles (driver.id -> userId) (#202, F5).
  *
- * SIMPLIFICATION: same pattern/limitation as delivery-service's and
- * payment-service's SystemTokenService — a stand-in for a proper
- * service-identity/mTLS scheme.
+ * `role: SYSTEM`, signed with SYSTEM_JWT_SECRET (never the user tokens' JWT_SECRET), valid for
+ * SYSTEM_TOKEN_TTL. The receiving service accepts it only on routes that allow UserRole.SYSTEM and only
+ * when the request did not come through the public gateway.
  */
 @Injectable()
 export class SystemTokenService {
@@ -20,8 +19,8 @@ export class SystemTokenService {
 
   async mint(): Promise<string> {
     const token = await this.jwtService.signAsync(
-      { sub: 'system:tracking-service', email: 'tracking-service@internal', role: UserRole.ADMIN },
-      { secret: this.config.jwtSecret, expiresIn: '5m' },
+      { sub: 'system:tracking-service', email: 'tracking-service@internal', role: UserRole.SYSTEM },
+      { secret: this.config.systemJwtSecret, expiresIn: SYSTEM_TOKEN_TTL },
     );
     return `Bearer ${token}`;
   }

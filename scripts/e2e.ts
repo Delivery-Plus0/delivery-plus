@@ -1,10 +1,16 @@
 import axios from 'axios';
+import { createHmac } from 'node:crypto';
 import { Redis } from 'ioredis';
 import { uploadImage } from './lib/gateway-seed';
 
 const API_URL = process.env.API_URL || 'http://localhost:3000';
 // docker-compose.test.yml publishes Redis; its user-service keeps texted codes there (SMS_PROVIDER=test, #153).
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
+// The test and dev stacks' super admin (TEST_ADMIN_* in their compose overlays, #202).
+const ADMIN_EMAIL = process.env.TEST_ADMIN_EMAIL || 'qa.admin@delivery-plus.test';
+const ADMIN_PASSWORD = process.env.TEST_ADMIN_PASSWORD || 'Qa-Only-Admin-Passw0rd!';
+// The test stack's SYSTEM_JWT_SECRET fallback: used only to prove the gateway refuses a real SYSTEM token.
+const SYSTEM_JWT_SECRET = process.env.SYSTEM_JWT_SECRET || 'local-system-jwt-development-only';
 
 // NOTE (CI tooling fix): this script previously could not get past the second
 // or third step against the current API. Every service runs a global
@@ -215,6 +221,91 @@ async function assertRefreshSessions() {
   console.log('Refresh sessions: refresh rotates, reuse ends the session, logout and logout-all revoke (401 on refresh)');
 }
 
+/** Clears the rate-limit counters (test Redis only). /auth/login allows 5 a minute for every client behind the gateway. */
+async function clearRateLimits() {
+  const redis = new Redis(REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 2 });
+  await redis
+    .connect()
+    .then(async () => {
+      const keys = await redis.keys('ratelimit:*');
+      if (keys.length) await redis.del(...keys);
+    })
+    .finally(() => redis.disconnect());
+}
+
+/** An HS256 JWT, signed like SystemTokenService does. */
+function signJwt(claims: object, secret: string): string {
+  const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString('base64url');
+  const unsigned = `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode(claims)}`;
+  return `${unsigned}.${createHmac('sha256', secret).update(unsigned).digest('base64url')}`;
+}
+
+/** Status and error code of a request, whether it succeeded or failed. */
+async function outcomeOf(request: Promise<{ status: number }>): Promise<{ status: number; error?: string }> {
+  try {
+    return { status: (await request).status };
+  } catch (error: any) {
+    if (!error.response) throw error;
+    return { status: error.response.status, error: error.response.data?.error };
+  }
+}
+
+/**
+ * Account status and the SYSTEM principal (#202): staff tokens carry their permissions; suspending an
+ * account ends its sessions and refuses login and refresh with 403 AccountSuspended (a wrong password
+ * stays 401); reactivating lets the user sign in again. A real SYSTEM token never gets through the
+ * gateway, and a staff token can't use a service-only route.
+ */
+async function assertAccountSuspension() {
+  await clearRateLimits();
+  const bearer = (token: string) => ({ headers: { Authorization: `Bearer ${token}` } });
+  const admin = (await axios.post(`${API_URL}/api/auth/login`, { email: ADMIN_EMAIL, password: ADMIN_PASSWORD })).data;
+  const claims = JSON.parse(Buffer.from(admin.accessToken.split('.')[1], 'base64url').toString('utf8'));
+  if (claims.role !== 'ADMIN' || claims.perms?.length !== 10 || !claims.perms.includes('users.manage')) {
+    throw new Error(`Admin token: role ${claims.role}, perms ${JSON.stringify(claims.perms)}`);
+  }
+
+  const email = `e2e.suspend.${Date.now()}@example.com`;
+  const user = (await axios.post(`${API_URL}/api/auth/register`, { email, password: 'password123', fullName: 'E2E Suspended' })).data;
+  const status = (body: object) => axios.patch(`${API_URL}/api/auth/users/${user.userId}/status`, body, bearer(admin.accessToken));
+
+  const suspended = (await status({ status: 'SUSPENDED', reason: 'E2E check' })).data;
+  const refreshAfter = await outcomeOf(axios.post(`${API_URL}/api/auth/refresh`, { refreshToken: user.refreshToken }));
+  const loginAfter = await outcomeOf(axios.post(`${API_URL}/api/auth/login`, { email, password: 'password123' }));
+  const wrongPassword = await outcomeOf(axios.post(`${API_URL}/api/auth/login`, { email, password: 'wrong-password' }));
+  await status({ status: 'ACTIVE' });
+  const loginAgain = await outcomeOf(axios.post(`${API_URL}/api/auth/login`, { email, password: 'password123' }));
+  const oldSession = await outcomeOf(axios.post(`${API_URL}/api/auth/refresh`, { refreshToken: user.refreshToken }));
+
+  const systemToken = signJwt({ sub: 'system:e2e', email: 'e2e@internal', role: 'SYSTEM', exp: Math.floor(Date.now() / 1000) + 60 }, SYSTEM_JWT_SECRET);
+  const systemThroughGateway = await outcomeOf(axios.get(`${API_URL}/api/drivers/available`, bearer(systemToken)));
+  const staffOnServiceRoute = await outcomeOf(axios.get(`${API_URL}/api/drivers/available`, bearer(admin.accessToken)));
+
+  const got = {
+    suspended: [suspended.status, suspended.sessionsRevoked],
+    refreshAfter,
+    loginAfter,
+    wrongPassword: wrongPassword.status,
+    loginAgain: loginAgain.status,
+    oldSession,
+    systemThroughGateway: systemThroughGateway.status,
+    staffOnServiceRoute: staffOnServiceRoute.status,
+  };
+  const want = {
+    suspended: ['SUSPENDED', 1],
+    refreshAfter: { status: 403, error: 'AccountSuspended' },
+    loginAfter: { status: 403, error: 'AccountSuspended' },
+    wrongPassword: 401,
+    loginAgain: 200,
+    oldSession: { status: 401, error: 'InvalidRefreshToken' },
+    systemThroughGateway: 401,
+    staffOnServiceRoute: 403,
+  };
+  if (JSON.stringify(got) !== JSON.stringify(want)) throw new Error(`Account status: got ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`);
+  console.log('Account status: staff perms in the token; suspension ends sessions (403 AccountSuspended), reactivation restores login; SYSTEM token refused at the gateway');
+  await clearRateLimits();
+}
+
 async function runE2E() {
   console.log('Starting E2E test...');
 
@@ -245,6 +336,7 @@ async function runE2E() {
     // 0. Registration is a privilege boundary.
     await assertNoSelfRegisteredAdmin();
     await assertRefreshSessions();
+    await assertAccountSuspension();
 
     // 1. Get Restaurants
     const restaurantsRes = await axios.get(`${API_URL}/api/restaurants`, customerAuth);

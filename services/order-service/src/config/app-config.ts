@@ -1,4 +1,4 @@
-import { phoneVerificationRequired } from '@food-delivery/shared';
+import { phoneVerificationRequired, loadSystemJwtSecret } from '@food-delivery/shared';
 import { PricingPolicy, pricingFromEnv } from '../common/pricing';
 
 export const APP_CONFIG = Symbol('APP_CONFIG');
@@ -9,6 +9,8 @@ export interface AppConfig {
   nodeEnv: string;
   databaseUrl: string;
   jwtSecret: string;
+  /** #202: signs/verifies service-to-service SYSTEM tokens; required in production (see loadSystemJwtSecret). */
+  systemJwtSecret: string;
   cartServiceUrl: string;
   restaurantServiceUrl: string;
   userServiceUrl: string;
@@ -33,6 +35,7 @@ export function loadConfig(): AppConfig {
     nodeEnv: process.env.NODE_ENV || 'development',
     databaseUrl: process.env.DATABASE_URL as string,
     jwtSecret: process.env.JWT_SECRET as string,
+    systemJwtSecret: loadSystemJwtSecret(process.env.NODE_ENV || 'development'),
     cartServiceUrl: process.env.CART_SERVICE_URL || 'http://localhost:3005',
     restaurantServiceUrl: process.env.RESTAURANT_SERVICE_URL || 'http://localhost:3003',
     userServiceUrl: process.env.USER_SERVICE_URL || 'http://localhost:3002',

@@ -113,7 +113,7 @@ CI is split across six workflows in `.github/workflows/`, all running on Node 22
 | `security.yml` (Security) | CodeQL, `npm audit` (blocking on critical), Trivy filesystem and secret scan |
 | `docker.yml` (Docker Build) | Builds and Trivy-scans every service image |
 | `integration.yml` (Integration) | Boots the full Compose test stack, seeds data (`npm run seed`), runs the critical-path workflow (`npm run e2e`) |
-| `migration-verification.yml` | Runs every PostgreSQL service's migrations on fresh databases; runs the driver-service repository test (#206) and the payment SQL upgrade test against real Postgres |
+| `migration-verification.yml` | Runs every PostgreSQL service's migrations on fresh databases; runs the auth-service session test (#34), the driver-service repository test (#206) and the payment SQL upgrade test against real Postgres |
 
 No workflow collects coverage or enforces a coverage threshold.
 
@@ -122,6 +122,7 @@ No workflow collects coverage or enforces a coverage threshold.
 Some specs run against a real backend only when an environment variable is set, and are skipped or fake-backed otherwise, so `npm test` works with no infrastructure:
 
 - `PAYMENT_TEST_DATABASE_URL`: payment-service repository integration test against a disposable Postgres database (run in `migration-verification.yml`).
+- `AUTH_TEST_DATABASE_URL`: auth-service session test (#34: refresh rotation compare-and-set under concurrency, family revocation, cleanup) against a disposable Postgres database (run in `migration-verification.yml`).
 - `DRIVER_TEST_DATABASE_URL`: driver-service repository integration test (#206: migration 004, the VERIFIED-only dispatch list and claim compare-and-set) against a disposable Postgres database (run in `migration-verification.yml`).
 - `REDIS_TEST_URL`: the shared `DurableEventIdempotencyService` suite also runs its behavior tests against real Redis (run in `ci.yml`), exercising the Lua scripts that the in-memory fake only imitates.
 

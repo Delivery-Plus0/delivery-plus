@@ -1,6 +1,7 @@
 import { EgyptianMobile, UserRole } from '@food-delivery/shared';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEmail, IsIn, IsOptional, IsString, MinLength } from 'class-validator';
+import { SessionAppField } from './session.dto';
 
 /**
  * Roles a caller may choose for themselves at public registration. An allow-list, so a role added
@@ -13,7 +14,7 @@ export const SELF_SERVICE_ROLES: readonly UserRole[] = [
   UserRole.DRIVER,
 ];
 
-export class RegisterDto {
+export class RegisterDto extends SessionAppField {
   @ApiProperty({
     description: 'Email address for the new account.',
     example: 'customer@example.com',

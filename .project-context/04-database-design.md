@@ -15,7 +15,7 @@ The service-level database design matches the entity models in each service and 
 
 | Service | Persistence store | Core domain tables | Key design notes |
 | --- | --- | --- | --- |
-| auth-service | PostgreSQL | credentials | Stores user credentials and canonical `userId` identity |
+| auth-service | PostgreSQL | credentials, auth_sessions | Stores user credentials and canonical `userId` identity; one refresh session per sign-in, rotated in place (#34) |
 | user-service | PostgreSQL | user_profiles | Stores profile detail keyed by the same `id` as auth credentials, plus `authCredentialId` and `createdByService` |
 | restaurant-service | PostgreSQL | restaurants | Restaurant ownership and operating state |
 | menu-service | PostgreSQL | menu_items | Catalog data keyed by restaurant and optional category |

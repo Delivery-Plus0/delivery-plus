@@ -8,6 +8,12 @@ export const RATE_LIMIT_KEY = 'RATE_LIMIT';
 export interface RateLimitOptions {
   limit: number;
   windowSeconds: number;
+  /**
+   * Who the limit applies to, when neither the user id nor the IP is right. Behind the gateway every
+   * anonymous caller has the gateway's IP, so a route like `/auth/refresh` keys on the session in the
+   * body instead (#34). Returning undefined falls back to the user id, then the IP.
+   */
+  key?: (request: { body?: unknown; headers?: Record<string, unknown> }) => string | undefined;
 }
 
 @Injectable()
@@ -27,8 +33,8 @@ export class RateLimitGuard implements CanActivate {
     if (!options) return true;
 
     const request = context.switchToHttp().getRequest();
-    // Use user ID if authenticated, else use IP address
-    const identifier = request.user?.sub || request.ip || 'unknown-ip';
+    // The route's own key if it has one, else the user ID if authenticated, else the IP address
+    const identifier = options.key?.(request) || request.user?.sub || request.ip || 'unknown-ip';
     
     // Key structure: ratelimit:{path}:{identifier}
     const path = request.route.path;

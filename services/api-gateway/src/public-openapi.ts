@@ -18,7 +18,10 @@ export const SERVICE_DEFINITIONS = [
     publicPrefix: '/api/auth',
     routes: [
       { method: 'post', path: '/register', summary: 'Register a new account', auth: false, statusCode: 201 },
-      { method: 'post', path: '/login', summary: 'Login and receive a JWT', auth: false, statusCode: 200 },
+      { method: 'post', path: '/login', summary: 'Login and receive an access token and a refresh token', auth: false, statusCode: 200 },
+      { method: 'post', path: '/refresh', summary: 'Exchange a refresh token for a new pair (single use; reuse ends the session)', auth: false, statusCode: 200 },
+      { method: 'post', path: '/logout', summary: 'Sign out this device (always 204)', auth: false, statusCode: 204 },
+      { method: 'post', path: '/logout-all', summary: 'Sign out on every device', auth: true, statusCode: 204 },
       { method: 'post', path: '/verify-email', summary: 'Verify an email address with a token', auth: false, statusCode: 200 },
       { method: 'post', path: '/resend-verification', summary: 'Resend email verification', auth: false, statusCode: 200 },
       { method: 'get', path: '/me', summary: 'Get the current authenticated user', auth: true, statusCode: 200 },
@@ -258,6 +261,23 @@ const baseSchemas = {
     properties: {
       email: { type: 'string', format: 'email' },
       password: { type: 'string', format: 'password' },
+      appId: { type: 'string', enum: ['customer', 'driver', 'restaurant', 'admin'], description: '#34: the app signing in, recorded on the session.' },
+    },
+  },
+  RefreshTokenRequest: {
+    type: 'object',
+    required: ['refreshToken'],
+    properties: {
+      refreshToken: { type: 'string', maxLength: 200, description: 'The latest refresh token. Each one works once.' },
+    },
+  },
+  VerificationRequiredResponse: {
+    type: 'object',
+    description: '#34: register while email verification is required. No tokens until the email is verified and the user logs in.',
+    required: ['userId', 'verificationRequired'],
+    properties: {
+      userId: { type: 'string', format: 'uuid' },
+      verificationRequired: { type: 'boolean', enum: [true] },
     },
   },
   RegisterRequest: {
@@ -270,6 +290,7 @@ const baseSchemas = {
       phone: { type: 'string', nullable: true },
       // ADMIN is deliberately absent: it cannot be self-assigned at registration.
       role: { type: 'string', enum: ['CUSTOMER', 'RESTAURANT_OWNER', 'DRIVER'] },
+      appId: { type: 'string', enum: ['customer', 'driver', 'restaurant', 'admin'], description: '#34: the app signing up, recorded on the session.' },
     },
   },
   CreateOrderRequest: {
@@ -410,9 +431,13 @@ const baseSchemas = {
   },
   AuthResponse: {
     type: 'object',
-    required: ['accessToken', 'userId', 'email', 'role'],
+    description: '#34: a short-lived access token (Bearer) and a single-use refresh token.',
+    required: ['accessToken', 'accessTokenExpiresAt', 'refreshToken', 'refreshTokenExpiresAt', 'userId', 'email', 'role'],
     properties: {
-      accessToken: { type: 'string' },
+      accessToken: { type: 'string', description: 'JWT for Authorization: Bearer. 15 minutes by default.' },
+      accessTokenExpiresAt: { type: 'string', format: 'date-time' },
+      refreshToken: { type: 'string', description: 'Opaque. Send it to POST /api/auth/refresh; it works once.' },
+      refreshTokenExpiresAt: { type: 'string', format: 'date-time', description: '30 days after the last refresh by default (sliding).' },
       userId: { type: 'string' },
       email: { type: 'string', format: 'email' },
       role: { type: 'string', enum: ['CUSTOMER', 'RESTAURANT_OWNER', 'DRIVER', 'ADMIN'] },
@@ -701,11 +726,38 @@ export function generatePublicOpenApiDocument() {
           },
         };
         operation.responses[String(route.statusCode || 201)] = {
-          description: 'Registration successful',
+          description: 'Registered. Signed in (AuthResponse), or, while email verification is required, VerificationRequiredResponse with no tokens',
           content: {
-            'application/json': { schema: { $ref: '#/components/schemas/AuthResponse' } },
+            'application/json': {
+              schema: { oneOf: [{ $ref: '#/components/schemas/AuthResponse' }, { $ref: '#/components/schemas/VerificationRequiredResponse' }] },
+            },
           },
         };
+      }
+
+      // #34: refresh rotates the token; logout ends the session of a refresh token.
+      if (route.method === 'post' && service.service === 'auth' && (route.path === '/refresh' || route.path === '/logout')) {
+        operation.requestBody = {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/RefreshTokenRequest' } } },
+        };
+        if (route.path === '/refresh') {
+          operation.responses['200'] = {
+            description: 'A new access token and a new refresh token; the one sent no longer works',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/AuthResponse' } } },
+          };
+          operation.responses['401'] = {
+            description: 'InvalidRefreshToken: unknown, expired, revoked or already used (reusing one ends its session). Sign in again',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } },
+          };
+          operation.responses['429'] = { description: 'Too many refreshes for this session' };
+        } else {
+          operation.responses['204'] = { description: 'Signed out (also returned for an unknown token)' };
+        }
+      }
+
+      if (route.method === 'post' && service.service === 'auth' && route.path === '/logout-all') {
+        operation.responses['204'] = { description: 'Every session of the user ended. Access tokens already issued expire on their own' };
       }
 
       if (route.method === 'post' && service.service === 'auth' && route.path === '/login') {

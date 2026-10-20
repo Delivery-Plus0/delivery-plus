@@ -75,7 +75,15 @@ This means the platform often relies on consistent user identifiers while still 
 - JWT validation and role guards are shared by the domain services.
 - Roles are `CUSTOMER`, `RESTAURANT_OWNER`, `DRIVER`, and `ADMIN`.
 - **Public registration picks the role on the server.** `RegisterDto.role` accepts only `SELF_SERVICE_ROLES` (`CUSTOMER`, `RESTAURANT_OWNER`, `DRIVER`; omitted or null → `CUSTOMER`). `AuthService.register` re-checks the same allow-list before touching the database (403), so `ADMIN` can never be self-assigned (#105, found in the 2026-10-01 review). There is no admin-provisioning endpoint: admins are created out of band. The only ADMIN principals in normal operation are service system tokens.
-- Email verification (off by default: `EMAIL_VERIFICATION_REQUIRED=false`) and failed-login lockout (5 attempts → 15 minutes, generic "Invalid email or password") are implemented.
+- Email verification (off by default: `EMAIL_VERIFICATION_REQUIRED=false`) and failed-login lockout (5 attempts → 15 minutes, generic "Invalid email or password") are implemented. While verification is required, register returns `{ userId, verificationRequired: true }` and no tokens (#34).
+- **Sessions (#34).** Login (and register, when verification is off) returns a 15-minute access JWT and an opaque refresh token `<sessionId>.<secret>`.
+  - Sessions live in auth-service Postgres (`auth_sessions`); only `sha256(secret)` is stored and compared in constant time.
+  - `POST /auth/refresh` rotates the token in a compare-and-set UPDATE and re-reads the role. Reusing a rotated token revokes the whole session (theft detection). Every failure is `401 InvalidRefreshToken`.
+  - `POST /auth/logout` ends one session; `POST /auth/logout-all` ends all of the user's sessions. Access tokens are not revoked: they expire within 15 minutes.
+  - Access tokens carry `sid` (the session id), so a password change can keep only the current session (#35).
+  - `POST /internal/auth/users/:id/revoke-sessions` (HMAC, callers in `AUTH_INTERNAL_ALLOWED_SERVICES`) ends sessions for password change/reset, suspension and staff actions.
+  - A periodic job deletes sessions that ended more than `SESSION_RETENTION_DAYS` ago.
+  - Details and the client contract: [docs/services/auth-service.md](../docs/services/auth-service.md#sessions-34).
 - Ownership is enforced per object in each service (orders, payments, deliveries, tracking, notifications). Drivers may only move themselves between OFFLINE and AVAILABLE; claim and release are system-token (ADMIN) operations (#33).
 - **Driver locations are untrusted claims (#60).**
   - A report is accepted only while the driver has an active delivery, resolved from their own token, and is stored bound to it. Reads only use positions bound to the delivery being read.
@@ -87,9 +95,7 @@ This means the platform often relies on consistent user identifiers while still 
 
 The current auth implementation is intentionally minimal and is tracked as a managed backlog in the issue registry. The current documented gaps are:
 
-- refresh-token lifecycle and rotation
-- logout and token revocation
-- password change and reset flows
+- password change and reset flows (#35; session revocation is ready from #34)
 - MFA / 2FA enhancement after the base security model is in place
 - approval before a self-registered `DRIVER` or `RESTAURANT_OWNER` can operate (today these business roles are self-service)
 - service identity: system tokens are signed with the shared `JWT_SECRET` and carry `role: ADMIN`, so any service holding the secret can act as any user and audit logs cannot tell a service from an admin

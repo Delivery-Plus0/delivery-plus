@@ -17,6 +17,11 @@ class UnlimitedController {
   open() {}
 }
 
+class KeyedController {
+  @RateLimit({ limit: 1, windowSeconds: 60, key: (request) => (request.body as { session?: string } | undefined)?.session })
+  refresh() {}
+}
+
 /** In-memory stand-in for the Redis counter so the limit can be exercised end to end. */
 function fakeLimiter() {
   const counts = new Map<string, number>();
@@ -67,6 +72,30 @@ describe('RateLimitGuard', () => {
     await guard.canActivate(contextFor(ClassLimitedController, 'addItem', 'a'));
 
     await expect(guard.canActivate(contextFor(ClassLimitedController, 'addItem', 'b'))).resolves.toBe(true);
+  });
+
+  it('uses the route key when it gives one, and falls back to the user or IP when it does not (#34)', async () => {
+    const limiter = fakeLimiter();
+    const guard = new RateLimitGuard(new Reflector(), limiter as unknown as RateLimiterService);
+    const anonymous = (body: unknown) =>
+      ({
+        getClass: () => KeyedController,
+        getHandler: () => KeyedController.prototype.refresh,
+        // Every anonymous caller behind the gateway shares the gateway's IP.
+        switchToHttp: () => ({ getRequest: () => ({ body, ip: '10.0.0.2', route: { path: '/refresh' } }) }),
+      }) as unknown as ExecutionContext;
+
+    await expect(guard.canActivate(anonymous({ session: 's1' }))).resolves.toBe(true);
+    await expect(guard.canActivate(anonymous({ session: 's2' }))).resolves.toBe(true);
+    await expect(guard.canActivate(anonymous({ session: 's1' }))).rejects.toMatchObject({ statusCode: 429 });
+    await guard.canActivate(anonymous({}));
+
+    expect(limiter.incrementAndCheck.mock.calls.map(([key]) => key)).toEqual([
+      'ratelimit:/refresh:s1',
+      'ratelimit:/refresh:s2',
+      'ratelimit:/refresh:s1',
+      'ratelimit:/refresh:10.0.0.2',
+    ]);
   });
 
   it('does nothing when no limit is declared anywhere', async () => {

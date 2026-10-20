@@ -175,6 +175,46 @@ async function assertNoSelfRegisteredAdmin() {
   console.log('Self-registration cannot obtain ADMIN (400 on request, 403 on admin route)');
 }
 
+/**
+ * Refresh sessions (#34): refresh rotates and the old token stops working, reusing a rotated token
+ * ends the whole session, logout ends one session and logout-all ends every session. Access tokens
+ * keep working on existing routes. Uses a fresh account; two logins, because /auth/login allows 5
+ * per minute and the seeded accounts already use 3.
+ */
+async function assertRefreshSessions() {
+  const email = `e2e.sessions.${Date.now()}@example.com`;
+  const refresh = (refreshToken: string) => axios.post(`${API_URL}/api/auth/refresh`, { refreshToken });
+  const bearer = (token: string) => ({ headers: { Authorization: `Bearer ${token}` } });
+
+  const signup = (await axios.post(`${API_URL}/api/auth/register`, { email, password: 'password123', fullName: 'E2E Sessions', appId: 'customer' })).data;
+  if (!signup.refreshToken || !signup.accessTokenExpiresAt) throw new Error(`Register did not sign in with a refresh token: ${JSON.stringify(Object.keys(signup))}`);
+
+  // Refresh rotates; the new access token works on existing routes and names its session.
+  const rotated = (await refresh(signup.refreshToken)).data;
+  const me = (await axios.get(`${API_URL}/api/auth/me`, bearer(rotated.accessToken))).data;
+  if (rotated.refreshToken === signup.refreshToken || me.sid !== signup.refreshToken.split('.')[0]) {
+    throw new Error(`Refresh did not rotate within the session: ${JSON.stringify({ sid: me.sid })}`);
+  }
+  // The replaced token fails, and using it again ended the session: the newest token is dead too.
+  const replayed = await statusOf(refresh(signup.refreshToken));
+  const newestAfterReuse = await statusOf(refresh(rotated.refreshToken));
+
+  // Logout ends one session; logout-all ends the rest. Issued access tokens expire on their own.
+  const first = (await axios.post(`${API_URL}/api/auth/login`, { email, password: 'password123', appId: 'driver' })).data;
+  const second = (await axios.post(`${API_URL}/api/auth/login`, { email, password: 'password123' })).data;
+  const logout = await statusOf(axios.post(`${API_URL}/api/auth/logout`, { refreshToken: first.refreshToken }));
+  const afterLogout = await statusOf(refresh(first.refreshToken));
+  const stillLive = (await refresh(second.refreshToken)).data;
+  const logoutAll = await statusOf(axios.post(`${API_URL}/api/auth/logout-all`, {}, bearer(stillLive.accessToken)));
+  const afterLogoutAll = await statusOf(refresh(stillLive.refreshToken));
+  const accessAfterLogoutAll = await statusOf(axios.get(`${API_URL}/api/auth/me`, bearer(stillLive.accessToken)));
+
+  const got = { replayed, newestAfterReuse, logout, afterLogout, logoutAll, afterLogoutAll, accessAfterLogoutAll };
+  const want = { replayed: 401, newestAfterReuse: 401, logout: 204, afterLogout: 401, logoutAll: 204, afterLogoutAll: 401, accessAfterLogoutAll: 200 };
+  if (JSON.stringify(got) !== JSON.stringify(want)) throw new Error(`Refresh sessions: got ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`);
+  console.log('Refresh sessions: refresh rotates, reuse ends the session, logout and logout-all revoke (401 on refresh)');
+}
+
 async function runE2E() {
   console.log('Starting E2E test...');
 
@@ -204,6 +244,7 @@ async function runE2E() {
 
     // 0. Registration is a privilege boundary.
     await assertNoSelfRegisteredAdmin();
+    await assertRefreshSessions();
 
     // 1. Get Restaurants
     const restaurantsRes = await axios.get(`${API_URL}/api/restaurants`, customerAuth);

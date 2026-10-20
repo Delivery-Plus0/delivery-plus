@@ -66,11 +66,18 @@
         "operationId": "auth_post_api_auth_register",
         "responses": {
           "201": {
-            "description": "Registration successful",
+            "description": "Registered. Signed in (AuthResponse), or, while email verification is required, VerificationRequiredResponse with no tokens",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AuthResponse"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AuthResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/VerificationRequiredResponse"
+                    }
+                  ]
                 }
               }
             }
@@ -107,7 +114,7 @@
     },
     "/api/auth/login": {
       "post": {
-        "summary": "Login and receive a JWT",
+        "summary": "Login and receive an access token and a refresh token",
         "tags": [
           "auth"
         ],
@@ -151,6 +158,140 @@
             }
           }
         }
+      }
+    },
+    "/api/auth/refresh": {
+      "post": {
+        "summary": "Exchange a refresh token for a new pair (single use; reuse ends the session)",
+        "tags": [
+          "auth"
+        ],
+        "operationId": "auth_post_api_auth_refresh",
+        "responses": {
+          "200": {
+            "description": "A new access token and a new refresh token; the one sent no longer works",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "InvalidRefreshToken: unknown, expired, revoked or already used (reusing one ends its session). Sign in again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "429": {
+            "description": "Too many refreshes for this session"
+          }
+        },
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshTokenRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "summary": "Sign out this device (always 204)",
+        "tags": [
+          "auth"
+        ],
+        "operationId": "auth_post_api_auth_logout",
+        "responses": {
+          "204": {
+            "description": "Signed out (also returned for an unknown token)"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshTokenRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/logout-all": {
+      "post": {
+        "summary": "Sign out on every device",
+        "tags": [
+          "auth"
+        ],
+        "operationId": "auth_post_api_auth_logout_all",
+        "responses": {
+          "204": {
+            "description": "Every session of the user ended. Access tokens already issued expire on their own"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/auth/verify-email": {
@@ -3927,6 +4068,49 @@
           "password": {
             "type": "string",
             "format": "password"
+          },
+          "appId": {
+            "type": "string",
+            "enum": [
+              "customer",
+              "driver",
+              "restaurant",
+              "admin"
+            ],
+            "description": "#34: the app signing in, recorded on the session."
+          }
+        }
+      },
+      "RefreshTokenRequest": {
+        "type": "object",
+        "required": [
+          "refreshToken"
+        ],
+        "properties": {
+          "refreshToken": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "The latest refresh token. Each one works once."
+          }
+        }
+      },
+      "VerificationRequiredResponse": {
+        "type": "object",
+        "description": "#34: register while email verification is required. No tokens until the email is verified and the user logs in.",
+        "required": [
+          "userId",
+          "verificationRequired"
+        ],
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "verificationRequired": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
           }
         }
       },
@@ -3960,6 +4144,16 @@
               "RESTAURANT_OWNER",
               "DRIVER"
             ]
+          },
+          "appId": {
+            "type": "string",
+            "enum": [
+              "customer",
+              "driver",
+              "restaurant",
+              "admin"
+            ],
+            "description": "#34: the app signing up, recorded on the session."
           }
         }
       },
@@ -4354,15 +4548,33 @@
       },
       "AuthResponse": {
         "type": "object",
+        "description": "#34: a short-lived access token (Bearer) and a single-use refresh token.",
         "required": [
           "accessToken",
+          "accessTokenExpiresAt",
+          "refreshToken",
+          "refreshTokenExpiresAt",
           "userId",
           "email",
           "role"
         ],
         "properties": {
           "accessToken": {
-            "type": "string"
+            "type": "string",
+            "description": "JWT for Authorization: Bearer. 15 minutes by default."
+          },
+          "accessTokenExpiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "refreshToken": {
+            "type": "string",
+            "description": "Opaque. Send it to POST /api/auth/refresh; it works once."
+          },
+          "refreshTokenExpiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "30 days after the last refresh by default (sliding)."
           },
           "userId": {
             "type": "string"

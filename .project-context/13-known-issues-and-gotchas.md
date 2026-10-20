@@ -67,6 +67,7 @@ Open findings from the 2026-10-01 code review (mostly not filed as issues yet; t
 - System tokens are signed with the shared `JWT_SECRET` and carry `role: ADMIN`: any service (or a leaked `.env`) can mint any identity, and logs cannot tell a service from an admin.
 - cart-service updates the cart with read-modify-write on one Redis JSON value, so two concurrent adds can lose one.
 - The rate limiter fails closed (5xx) when Redis is down.
+- Behind the gateway, anonymous rate limits are shared by everyone: the gateway doesn't forward the client IP and services don't trust a proxy, so `request.ip` is the gateway's address. `/auth/login` and `/auth/register` (5 per minute) are therefore platform-wide limits today. `/auth/refresh` and `/auth/logout` avoid this by keying on the session (#34).
 - Correlation ids propagate only from auth-service to user-service, not across other HTTP calls or Kafka.
 - Media: a verified S3 object can be orphaned if the owning service's database write fails after the copy (see [15-media-and-storage.md](./15-media-and-storage.md)).
 - `.gitignore` has no entry for local agent settings such as `.claude/`, so they show as untracked; stage files explicitly rather than with `git add -A`.

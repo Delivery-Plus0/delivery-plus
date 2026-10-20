@@ -8,12 +8,14 @@ import * as bcrypt from 'bcrypt';
 import { createHash } from 'node:crypto';
 import { loadConfig } from '../config/app-config';
 import { AuthController } from '../controllers/auth.controller';
+import { SessionsService } from './sessions.service';
 
 describe('AuthService', () => {
   let service: AuthService;
   let credentials: jest.Mocked<CredentialsRepository>;
   let userServiceClient: jest.Mocked<UserServiceClient>;
   let jwtService: jest.Mocked<JwtService>;
+  let sessions: jest.Mocked<SessionsService>;
 
   beforeEach(() => {
     credentials = {
@@ -32,7 +34,16 @@ describe('AuthService', () => {
 
     jwtService = {
       signAsync: jest.fn().mockResolvedValue('signed.jwt.token'),
+      decode: jest.fn().mockReturnValue({ exp: 1_800_000_000 }),
     } as unknown as jest.Mocked<JwtService>;
+
+    sessions = {
+      start: jest.fn().mockResolvedValue({ session: { id: 'session-1', expiresAt: new Date('2026-11-19T00:00:00Z') }, refreshToken: 'session-1.refresh-secret' }),
+      rotate: jest.fn(),
+      endByToken: jest.fn(),
+      revokeAll: jest.fn(),
+      end: jest.fn(),
+    } as unknown as jest.Mocked<SessionsService>;
 
     service = new AuthService(credentials, userServiceClient, jwtService, {
       serviceName: 'auth-service',
@@ -48,7 +59,11 @@ describe('AuthService', () => {
       maxFailedLoginAttempts: 5,
       lockoutMinutes: 15,
       verificationTokenTtlMinutes: 60,
-    });
+      refreshTokenTtlDays: 30,
+      sessionCleanupIntervalMs: 0,
+      sessionRetentionDays: 30,
+      internalAuthAllowedServices: [],
+    }, sessions);
   });
 
   describe('config validation', () => {
@@ -128,6 +143,37 @@ describe('AuthService', () => {
       expect(() => loadConfig()).toThrow(`Invalid LOCKOUT_MINUTES: ${rawValue}`);
       expect(expected).toBeDefined();
     });
+
+    it('defaults to 15-minute access tokens, 30-day sliding sessions and an hourly cleanup (#34)', () => {
+      process.env.DATABASE_URL = 'postgres://postgres:postgres@localhost:5432/auth_service';
+      process.env.JWT_SECRET = 'secret';
+      for (const key of ['JWT_EXPIRES_IN', 'REFRESH_TOKEN_TTL_DAYS', 'SESSION_CLEANUP_INTERVAL_MS', 'SESSION_RETENTION_DAYS', 'AUTH_INTERNAL_ALLOWED_SERVICES']) {
+        delete process.env[key];
+      }
+
+      expect(loadConfig()).toMatchObject({
+        jwtExpiresIn: '15m',
+        refreshTokenTtlDays: 30,
+        sessionCleanupIntervalMs: 3_600_000,
+        sessionRetentionDays: 30,
+        internalAuthAllowedServices: [],
+      });
+    });
+
+    it('reads the session settings and the internal callers list', () => {
+      process.env.DATABASE_URL = 'postgres://postgres:postgres@localhost:5432/auth_service';
+      process.env.JWT_SECRET = 'secret';
+      process.env.SESSION_CLEANUP_INTERVAL_MS = '0';
+      process.env.AUTH_INTERNAL_ALLOWED_SERVICES = ' user-service, admin-api ,';
+
+      expect(loadConfig()).toMatchObject({ sessionCleanupIntervalMs: 0, internalAuthAllowedServices: ['user-service', 'admin-api'] });
+
+      process.env.REFRESH_TOKEN_TTL_DAYS = '0';
+      expect(() => loadConfig()).toThrow('Invalid REFRESH_TOKEN_TTL_DAYS: 0');
+      delete process.env.REFRESH_TOKEN_TTL_DAYS;
+      process.env.SESSION_CLEANUP_INTERVAL_MS = '-1';
+      expect(() => loadConfig()).toThrow('Invalid SESSION_CLEANUP_INTERVAL_MS: -1');
+    });
   });
 
   describe('route rate limiting', () => {
@@ -189,7 +235,7 @@ describe('AuthService', () => {
       } as any);
       userServiceClient.createProfile.mockResolvedValue(undefined);
 
-      const result = await service.register({
+      const result: any = await service.register({
         email: 'b@b.com',
         password: 'password123',
         fullName: 'B',
@@ -259,7 +305,7 @@ describe('AuthService', () => {
       });
 
       it('registers a normal user as CUSTOMER with a hashed password and a CUSTOMER token', async () => {
-        const result = await service.register({ email: 'jane@example.com', password: 'valid-password', fullName: 'Jane' });
+        const result: any = await service.register({ email: 'jane@example.com', password: 'valid-password', fullName: 'Jane' });
 
         const persisted = credentials.create.mock.calls[0][0];
         expect(persisted.role).toBe(UserRole.CUSTOMER);
@@ -270,12 +316,13 @@ describe('AuthService', () => {
           sub: 'new-user-id',
           email: 'jane@example.com',
           role: UserRole.CUSTOMER,
+          sid: 'session-1',
         });
         expect(result.role).toBe(UserRole.CUSTOMER);
       });
 
       it('treats an explicit null role like an omitted one (CUSTOMER)', async () => {
-        const result = await service.register({
+        const result: any = await service.register({
           email: 'nullrole@example.com',
           password: 'valid-password',
           fullName: 'Null Role',
@@ -287,7 +334,7 @@ describe('AuthService', () => {
       });
 
       it.each(SELF_SERVICE_ROLES)('still lets a caller register as %s', async (role) => {
-        const result = await service.register({ email: 'b@b.com', password: 'valid-password', fullName: 'B', role });
+        const result: any = await service.register({ email: 'b@b.com', password: 'valid-password', fullName: 'B', role });
 
         expect(credentials.create.mock.calls[0][0].role).toBe(role);
         expect(jwtService.signAsync).toHaveBeenCalledWith(expect.objectContaining({ role }));
@@ -495,7 +542,7 @@ describe('AuthService', () => {
       service = new AuthService(credentials, userServiceClient, jwtService, {
         ...service['config'],
         emailVerificationRequired: true,
-      });
+      }, sessions);
 
       credentials.findByEmail.mockResolvedValue({
         id: 'u1',
@@ -514,6 +561,88 @@ describe('AuthService', () => {
       await expect(service.login({ email: 'verify@example.com', password: 'correct-password' })).rejects.toThrow(
         'Please verify your email before logging in',
       );
+    });
+  });
+
+  describe('sessions (#34)', () => {
+    const credential = (overrides: Record<string, unknown> = {}) =>
+      ({
+        id: 'u1',
+        email: 's@example.com',
+        role: UserRole.DRIVER,
+        emailVerified: true,
+        failedLoginCount: 0,
+        lockedUntil: null,
+        ...overrides,
+      }) as any;
+
+    it('login starts a session for the app and returns both tokens with their expiries', async () => {
+      credentials.findByEmail.mockResolvedValue(credential({ passwordHash: await bcrypt.hash('pw-12345678', 4) }));
+
+      const result = await service.login({ email: 's@example.com', password: 'pw-12345678', appId: 'driver' }, { userAgent: 'UA' });
+
+      expect(sessions.start).toHaveBeenCalledWith('u1', { userAgent: 'UA', appId: 'driver' });
+      expect(jwtService.signAsync).toHaveBeenCalledWith({ sub: 'u1', email: 's@example.com', role: UserRole.DRIVER, sid: 'session-1' });
+      expect(result).toEqual({
+        accessToken: 'signed.jwt.token',
+        accessTokenExpiresAt: new Date(1_800_000_000 * 1000).toISOString(),
+        refreshToken: 'session-1.refresh-secret',
+        refreshTokenExpiresAt: '2026-11-19T00:00:00.000Z',
+        userId: 'u1',
+        email: 's@example.com',
+        role: UserRole.DRIVER,
+      });
+    });
+
+    it('register returns no tokens while email verification is required, and starts no session', async () => {
+      service = new AuthService(credentials, userServiceClient, jwtService, { ...service['config'], emailVerificationRequired: true }, sessions);
+      credentials.findByEmail.mockResolvedValue(null);
+      credentials.create.mockResolvedValue(credential({ id: 'new-user', emailVerified: false }));
+      userServiceClient.createProfile.mockResolvedValue(undefined);
+
+      const result = await service.register({ email: 'n@example.com', password: 'valid-password', fullName: 'N' });
+
+      expect(result).toEqual({ userId: 'new-user', verificationRequired: true });
+      expect(sessions.start).not.toHaveBeenCalled();
+      expect(jwtService.signAsync).not.toHaveBeenCalled();
+    });
+
+    it('register signs in (both tokens) when email verification is off', async () => {
+      credentials.findByEmail.mockResolvedValue(null);
+      credentials.create.mockResolvedValue(credential({ id: 'new-user' }));
+      userServiceClient.createProfile.mockResolvedValue(undefined);
+
+      const result: any = await service.register({ email: 'n@example.com', password: 'valid-password', fullName: 'N', appId: 'customer' });
+
+      expect(sessions.start).toHaveBeenCalledWith('new-user', { appId: 'customer' });
+      expect(result).toMatchObject({ accessToken: 'signed.jwt.token', refreshToken: 'session-1.refresh-secret' });
+    });
+
+    it('refresh returns the rotated token and re-reads the role from the credential', async () => {
+      sessions.rotate.mockResolvedValue({ session: { id: 'session-1', credentialId: 'u1', expiresAt: new Date('2026-12-01T00:00:00Z') } as any, refreshToken: 'session-1.next' });
+      credentials.findById.mockResolvedValue(credential({ role: UserRole.CUSTOMER }));
+
+      const result = await service.refresh('session-1.old');
+
+      expect(sessions.rotate).toHaveBeenCalledWith('session-1.old');
+      expect(jwtService.signAsync).toHaveBeenCalledWith(expect.objectContaining({ role: UserRole.CUSTOMER, sid: 'session-1' }));
+      expect(result).toMatchObject({ refreshToken: 'session-1.next', refreshTokenExpiresAt: '2026-12-01T00:00:00.000Z', role: UserRole.CUSTOMER });
+    });
+
+    it('refresh ends the session when its credential is gone', async () => {
+      sessions.rotate.mockResolvedValue({ session: { id: 'session-1', credentialId: 'gone', expiresAt: new Date() } as any, refreshToken: 'x' });
+      credentials.findById.mockResolvedValue(null);
+
+      await expect(service.refresh('session-1.old')).rejects.toMatchObject({ statusCode: 401, error: 'InvalidRefreshToken' });
+      expect(sessions.end).toHaveBeenCalledWith('session-1', 'admin');
+    });
+
+    it('logout ends the session of the token; logout-all ends every session of the user', async () => {
+      await service.logout('session-1.secret');
+      await service.logoutAll('u1');
+
+      expect(sessions.endByToken).toHaveBeenCalledWith('session-1.secret', 'logout');
+      expect(sessions.revokeAll).toHaveBeenCalledWith('u1', 'logout_all');
     });
   });
 

@@ -1,7 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsEmail, IsString } from 'class-validator';
+import { SessionAppField } from './session.dto';
 
-export class LoginDto {
+export class LoginDto extends SessionAppField {
   @ApiProperty({
     description: 'Email address used to authenticate.',
     example: 'customer@example.com',

@@ -9,9 +9,11 @@ import { RegisterDto, SELF_SERVICE_ROLES } from '../dto/register.dto';
 import { LoginDto } from '../dto/login.dto';
 import { VerifyEmailDto } from '../dto/verify-email.dto';
 import { ResendVerificationDto } from '../dto/resend-verification.dto';
-import { AuthResponseDto } from '../dto/auth-response.dto';
+import { AuthResponseDto, VerificationRequiredResponseDto } from '../dto/auth-response.dto';
 import { AppConfig, APP_CONFIG } from '../config/app-config';
 import { UserRole } from '@food-delivery/shared';
+import { Credential } from '../entities/credential.entity';
+import { InvalidRefreshTokenError, SessionContext, SessionsService } from './sessions.service';
 
 const SALT_ROUNDS = 10;
 
@@ -22,9 +24,19 @@ export class AuthService {
     private readonly userServiceClient: UserServiceClient,
     private readonly jwtService: JwtService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
+    private readonly sessions: SessionsService,
   ) {}
 
-  async register(dto: RegisterDto, correlationId = generateCorrelationId()): Promise<AuthResponseDto> {
+  /**
+   * Signs up and, unless email verification is required, signs in (#34). With
+   * EMAIL_VERIFICATION_REQUIRED=true no tokens are issued until the email is verified and the user
+   * logs in.
+   */
+  async register(
+    dto: RegisterDto,
+    correlationId = generateCorrelationId(),
+    context: SessionContext = {},
+  ): Promise<AuthResponseDto | VerificationRequiredResponseDto> {
     const role = this.resolveRegistrationRole(dto.role);
     const existing = await this.credentials.findByEmail(dto.email);
     if (existing) {
@@ -61,10 +73,13 @@ export class AuthService {
       throw err;
     }
 
-    return this.issueToken(credential.id, credential.email, credential.role);
+    if (this.config.emailVerificationRequired) {
+      return { userId: credential.id, verificationRequired: true };
+    }
+    return this.signIn(credential, { ...context, appId: dto.appId ?? context.appId });
   }
 
-  async login(dto: LoginDto): Promise<AuthResponseDto> {
+  async login(dto: LoginDto, context: SessionContext = {}): Promise<AuthResponseDto> {
     const credential = await this.credentials.findByEmail(dto.email);
     if (!credential) {
       throw new UnauthorizedError('Invalid email or password');
@@ -99,7 +114,31 @@ export class AuthService {
 
     await this.credentials.resetFailureState(credential.id);
 
-    return this.issueToken(credential.id, credential.email, credential.role);
+    return this.signIn(credential, { ...context, appId: dto.appId ?? context.appId });
+  }
+
+  /**
+   * Exchanges a refresh token for a new pair (#34). The token rotates; the role is read again from
+   * the credential, so a changed role applies from the next access token.
+   */
+  async refresh(refreshToken: string): Promise<AuthResponseDto> {
+    const { session, refreshToken: next } = await this.sessions.rotate(refreshToken);
+    const credential = await this.credentials.findById(session.credentialId);
+    if (!credential) {
+      await this.sessions.end(session.id, 'admin');
+      throw new InvalidRefreshTokenError();
+    }
+    return this.tokensFor(credential, session.id, next, session.expiresAt);
+  }
+
+  /** Ends the session of this refresh token. Always succeeds, so it reveals nothing about the token. */
+  async logout(refreshToken: string): Promise<void> {
+    await this.sessions.endByToken(refreshToken, 'logout');
+  }
+
+  /** Ends every session of the signed-in user, on every device. */
+  async logoutAll(credentialId: string): Promise<void> {
+    await this.sessions.revokeAll(credentialId, 'logout_all');
   }
 
   async verifyEmail(dto: VerifyEmailDto): Promise<{ message: string }> {
@@ -152,9 +191,24 @@ export class AuthService {
     return requested;
   }
 
-  private async issueToken(userId: string, email: string, role: UserRole): Promise<AuthResponseDto> {
-    const accessToken = await this.jwtService.signAsync({ sub: userId, email, role });
-    return { accessToken, userId, email, role };
+  private async signIn(credential: Credential, context: SessionContext): Promise<AuthResponseDto> {
+    const { session, refreshToken } = await this.sessions.start(credential.id, context);
+    return this.tokensFor(credential, session.id, refreshToken, session.expiresAt);
+  }
+
+  /** The access token names its session (`sid`), so a password change can keep only this one (#35). */
+  private async tokensFor(credential: Credential, sessionId: string, refreshToken: string, refreshExpiresAt: Date): Promise<AuthResponseDto> {
+    const accessToken = await this.jwtService.signAsync({ sub: credential.id, email: credential.email, role: credential.role, sid: sessionId });
+    const { exp } = this.jwtService.decode(accessToken) as { exp: number };
+    return {
+      accessToken,
+      accessTokenExpiresAt: new Date(exp * 1000).toISOString(),
+      refreshToken,
+      refreshTokenExpiresAt: refreshExpiresAt.toISOString(),
+      userId: credential.id,
+      email: credential.email,
+      role: credential.role,
+    };
   }
 
   private generateVerificationToken(): string {

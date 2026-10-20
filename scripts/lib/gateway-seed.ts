@@ -382,6 +382,13 @@ export async function ensureDriverProfile(driver: Auth, vehicleType: string, lic
   }
 }
 
+/**
+ * #206: only VERIFIED drivers can go online, and seeds have no admin to verify the drivers they register.
+ * The dev and test overlays set DRIVER_AUTO_VERIFY=true for this; a stack without it can't be seeded.
+ */
+export const DRIVER_NOT_VERIFIED_HINT =
+  'The seeded driver is not VERIFIED (#206). Run driver-service with DRIVER_AUTO_VERIFY=true (the dev and test compose overlays do; it is refused in production).';
+
 /** Standard CLI wrapper: prints a useful gateway error and exits non-zero. */
 export function runSeed(name: string, main: () => Promise<void>) {
   main().catch((error: unknown) => {
@@ -393,6 +400,7 @@ export function runSeed(name: string, main: () => Promise<void>) {
         error.response.status,
         JSON.stringify(error.response.data),
       );
+      if (error.response.data?.error === 'DriverNotVerified') console.error(DRIVER_NOT_VERIFIED_HINT);
     } else {
       console.error(error instanceof Error ? error.message : error);
     }

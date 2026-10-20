@@ -1,4 +1,4 @@
-import { PhoneNotVerifiedError } from '@food-delivery/shared';
+import { DriverNotVerifiedError, PhoneNotVerifiedError } from '@food-delivery/shared';
 import { UserServiceClient } from '../common/user-service.client';
 import { AppConfig } from '../config/app-config';
 import { DriversService } from './drivers.service';
@@ -9,7 +9,7 @@ describe('DriversService', () => {
   let service: DriversService;
   let drivers: jest.Mocked<DriversRepository>;
   let userClient: jest.Mocked<UserServiceClient>;
-  const gateOff = { phoneVerificationRequired: false } as AppConfig;
+  const gateOff = { phoneVerificationRequired: false, autoVerifyDrivers: false } as AppConfig;
 
   const baseDriver = {
     id: 'driver-1',
@@ -17,9 +17,10 @@ describe('DriversService', () => {
     vehicleType: 'motorcycle',
     licensePlate: 'ABC-123',
     status: DriverStatus.OFFLINE,
-    verificationStatus: 'PENDING' as const,
+    // Verified, so the status tests below are about status rules; the #206 gate has its own tests.
+    verificationStatus: 'VERIFIED' as 'PENDING' | 'VERIFIED' | 'REJECTED',
     verificationNote: null,
-    verifiedAt: null,
+    verifiedAt: new Date('2026-10-01T00:00:00Z') as Date | null,
     createdAt: new Date(),
     updatedAt: new Date(),
   };
@@ -55,6 +56,19 @@ describe('DriversService', () => {
         licensePlate: 'ABC-123',
       });
       expect(result.id).toBe('driver-1');
+      expect(drivers.create).toHaveBeenCalledWith({ userId: 'user-1', vehicleType: 'motorcycle', licensePlate: 'ABC-123' });
+    });
+
+    it('creates the profile VERIFIED only with the DRIVER_AUTO_VERIFY test hook (#206)', async () => {
+      drivers.findByUserId.mockResolvedValue(null);
+      drivers.create.mockResolvedValue(baseDriver);
+      const autoVerify = new DriversService(drivers, userClient, { ...gateOff, autoVerifyDrivers: true });
+
+      await autoVerify.register('user-1', { vehicleType: 'motorcycle', licensePlate: 'ABC-123' });
+
+      expect(drivers.create).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'user-1', verificationStatus: 'VERIFIED', verifiedAt: expect.any(Date) }),
+      );
     });
   });
 
@@ -276,10 +290,21 @@ describe('DriversService', () => {
             await tick();
             return { ...row };
           }),
+          findByUserId: jest.fn(async () => {
+            await tick();
+            return { ...row };
+          }),
+          // Same conditions as the SQL: the status, and VERIFIED for AVAILABLE/BUSY (#206).
           transitionStatus: jest.fn(async (_id: string, from: DriverStatus, to: DriverStatus) => {
             await tick();
             if (row.status !== from) return null;
+            if ((to === DriverStatus.AVAILABLE || to === DriverStatus.BUSY) && row.verificationStatus !== 'VERIFIED') return null;
             row.status = to;
+            return { ...row };
+          }),
+          updateVerification: jest.fn(async (_id: string, data: Partial<typeof row>) => {
+            await tick();
+            Object.assign(row, data);
             return { ...row };
           }),
         } as unknown as jest.Mocked<DriversRepository>,
@@ -314,6 +339,117 @@ describe('DriversService', () => {
 
       expect([claim.status, offline.status].filter((s) => s === 'fulfilled')).toHaveLength(1);
       expect(row.status).toBe(claim.status === 'fulfilled' ? DriverStatus.BUSY : DriverStatus.OFFLINE);
+    });
+
+    it('never assigns a driver rejected while the claim was in flight (#206)', async () => {
+      const { row, repo } = inMemoryRepository(DriverStatus.AVAILABLE);
+      const racing = new DriversService(repo, userClient, gateOff);
+
+      const [claim, review] = await Promise.allSettled([
+        racing.updateStatusById('driver-1', UserRole.ADMIN, { status: DriverStatus.BUSY }),
+        racing.setVerification('driver-1', { status: 'REJECTED' }),
+      ]);
+
+      expect(review.status).toBe('fulfilled');
+      expect(row.verificationStatus).toBe('REJECTED');
+      if (claim.status === 'fulfilled') {
+        // The claim won the race: the driver keeps that job (and is released to OFFLINE afterwards).
+        expect(row.status).toBe(DriverStatus.BUSY);
+      } else {
+        expect(claim.reason).toBeInstanceOf(ConflictError);
+        expect(row.status).toBe(DriverStatus.OFFLINE);
+      }
+    });
+
+    it('never leaves a rejected driver online when the rejection races going online (#206)', async () => {
+      const { row, repo } = inMemoryRepository(DriverStatus.OFFLINE);
+      const racing = new DriversService(repo, userClient, gateOff);
+
+      await Promise.allSettled([
+        racing.goOnline('user-1', UserRole.DRIVER, 'Bearer d'),
+        racing.setVerification('driver-1', { status: 'REJECTED' }),
+      ]);
+
+      expect(row.verificationStatus).toBe('REJECTED');
+      expect(row.status).toBe(DriverStatus.OFFLINE);
+    });
+  });
+
+  describe('verification gate (#206)', () => {
+    const pending = { ...baseDriver, verificationStatus: 'PENDING' as const, verifiedAt: null };
+    const rejected = { ...baseDriver, verificationStatus: 'REJECTED' as const, verifiedAt: null };
+
+    it.each([
+      ['PENDING', pending, 'waiting for review'],
+      ['REJECTED', rejected, 'not approved'],
+    ] as const)('refuses to put a %s driver online (403 DriverNotVerified), before the phone check', async (status, driver, text) => {
+      drivers.findByUserId.mockResolvedValue(driver);
+      const gated = new DriversService(drivers, userClient, { ...gateOff, phoneVerificationRequired: true });
+
+      const error = await gated.goOnline('user-1', UserRole.DRIVER, 'Bearer d').catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(DriverNotVerifiedError);
+      expect(error).toMatchObject({ statusCode: 403, error: 'DriverNotVerified', details: { verificationStatus: status } });
+      expect((error as Error).message).toContain(text);
+      expect(userClient.getOwnProfile).not.toHaveBeenCalled();
+      expect(drivers.transitionStatus).not.toHaveBeenCalled();
+    });
+
+    it('applies the same gate to POST /drivers/me/status and to an admin setting AVAILABLE', async () => {
+      drivers.findByUserId.mockResolvedValue(pending);
+      drivers.findById.mockResolvedValue(pending);
+
+      await expect(service.updateStatus('user-1', UserRole.DRIVER, { status: DriverStatus.AVAILABLE })).rejects.toBeInstanceOf(DriverNotVerifiedError);
+      await expect(service.updateStatusById('driver-1', UserRole.ADMIN, { status: DriverStatus.AVAILABLE })).rejects.toBeInstanceOf(DriverNotVerifiedError);
+      expect(drivers.transitionStatus).not.toHaveBeenCalled();
+    });
+
+    it('still lets an unverified driver go offline', async () => {
+      drivers.findByUserId.mockResolvedValue({ ...pending, status: DriverStatus.AVAILABLE });
+      drivers.transitionStatus.mockResolvedValue({ ...pending, status: DriverStatus.OFFLINE });
+
+      await expect(service.updateStatus('user-1', UserRole.DRIVER, { status: DriverStatus.OFFLINE })).resolves.toMatchObject({ status: DriverStatus.OFFLINE });
+    });
+
+    it.each([['PENDING', pending], ['REJECTED', rejected]] as const)('never claims a %s driver (409, so dispatch tries the next one)', async (_status, driver) => {
+      drivers.findById.mockResolvedValue({ ...driver, status: DriverStatus.AVAILABLE });
+
+      await expect(service.updateStatusById('driver-1', UserRole.ADMIN, { status: DriverStatus.BUSY })).rejects.toMatchObject({ statusCode: 409 });
+      expect(drivers.transitionStatus).not.toHaveBeenCalled();
+    });
+
+    it('refuses a claim when the driver was rejected between the read and the write (409)', async () => {
+      drivers.findById
+        .mockResolvedValueOnce({ ...baseDriver, status: DriverStatus.AVAILABLE })
+        .mockResolvedValueOnce({ ...rejected, status: DriverStatus.AVAILABLE });
+      drivers.transitionStatus.mockResolvedValue(null); // the compare-and-set needs VERIFIED
+
+      await expect(service.updateStatusById('driver-1', UserRole.ADMIN, { status: DriverStatus.BUSY })).rejects.toBeInstanceOf(ConflictError);
+      expect(drivers.transitionStatus).toHaveBeenCalledTimes(1);
+    });
+
+    it('releases a BUSY driver who lost verification to OFFLINE, not AVAILABLE', async () => {
+      drivers.findById.mockResolvedValue({ ...rejected, status: DriverStatus.BUSY });
+      drivers.transitionStatus.mockResolvedValue({ ...rejected, status: DriverStatus.OFFLINE });
+
+      const result = await service.updateStatusById('driver-1', UserRole.ADMIN, { status: DriverStatus.AVAILABLE });
+
+      expect(drivers.transitionStatus).toHaveBeenCalledWith('driver-1', DriverStatus.BUSY, DriverStatus.OFFLINE);
+      expect(result.status).toBe(DriverStatus.OFFLINE);
+    });
+
+    it('releases to OFFLINE when the rejection lands between the read and the write', async () => {
+      drivers.findById
+        .mockResolvedValueOnce({ ...baseDriver, status: DriverStatus.BUSY })
+        .mockResolvedValueOnce({ ...rejected, status: DriverStatus.BUSY });
+      drivers.transitionStatus
+        .mockResolvedValueOnce(null) // BUSY -> AVAILABLE needs VERIFIED
+        .mockResolvedValueOnce({ ...rejected, status: DriverStatus.OFFLINE });
+
+      const result = await service.updateStatusById('driver-1', UserRole.ADMIN, { status: DriverStatus.AVAILABLE });
+
+      expect(drivers.transitionStatus).toHaveBeenLastCalledWith('driver-1', DriverStatus.BUSY, DriverStatus.OFFLINE);
+      expect(result.status).toBe(DriverStatus.OFFLINE);
     });
   });
 
@@ -400,6 +536,37 @@ describe('DriversService', () => {
     it('404s for an unknown driver', async () => {
       drivers.findById.mockResolvedValue(null);
       await expect(service.setVerification('nope', { status: 'VERIFIED' })).rejects.toThrow(NotFoundError);
+    });
+
+    it.each(['REJECTED', 'PENDING'] as const)('takes an online driver OFFLINE when set to %s (#206)', async (status) => {
+      drivers.findById.mockResolvedValue({ ...baseDriver, status: DriverStatus.AVAILABLE });
+      drivers.updateVerification.mockResolvedValue({ ...baseDriver, status: DriverStatus.AVAILABLE, verificationStatus: status, verifiedAt: null });
+      drivers.transitionStatus.mockResolvedValue({ ...baseDriver, status: DriverStatus.OFFLINE, verificationStatus: status, verifiedAt: null });
+
+      const result = await service.setVerification('driver-1', { status }, now);
+
+      expect(drivers.transitionStatus).toHaveBeenCalledWith('driver-1', DriverStatus.AVAILABLE, DriverStatus.OFFLINE);
+      expect(result).toMatchObject({ status: DriverStatus.OFFLINE, verificationStatus: status });
+    });
+
+    it('lets a BUSY driver keep the current job when rejected (#206)', async () => {
+      const busyRejected = { ...baseDriver, status: DriverStatus.BUSY, verificationStatus: 'REJECTED' as const, verifiedAt: null };
+      drivers.findById.mockResolvedValueOnce({ ...baseDriver, status: DriverStatus.BUSY }).mockResolvedValue(busyRejected);
+      drivers.updateVerification.mockResolvedValue(busyRejected);
+      drivers.transitionStatus.mockResolvedValue(null); // not AVAILABLE: nothing to take offline
+
+      const result = await service.setVerification('driver-1', { status: 'REJECTED' }, now);
+
+      expect(result).toMatchObject({ status: DriverStatus.BUSY, verificationStatus: 'REJECTED' });
+    });
+
+    it('does not touch the status when a driver is verified', async () => {
+      drivers.findById.mockResolvedValue(baseDriver);
+      drivers.updateVerification.mockResolvedValue(baseDriver);
+
+      await service.setVerification('driver-1', { status: 'VERIFIED' }, now);
+
+      expect(drivers.transitionStatus).not.toHaveBeenCalled();
     });
   });
 });

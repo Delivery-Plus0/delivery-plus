@@ -169,6 +169,18 @@ jobs:
 
           check notification_service "select count(*) from information_schema.tables where table_name='notifications'" "table notifications"
 
+      # #206: the driver verification gate lives in SQL (the dispatch list and the claim
+      # compare-and-set), so drivers.repository.integration.spec.ts builds the schema with the
+      # real migrations (including 004, which verifies existing drivers) and runs the repository
+      # against this Postgres. Like the payment test below, it only runs when its env var is set.
+      - name: Run driver-service Postgres repository test
+        env:
+          PGPASSWORD: postgres
+          DRIVER_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/driver_service_repository_test
+        run: |
+          psql -h localhost -U postgres -c "CREATE DATABASE driver_service_repository_test"
+          npm test --workspace=services/driver-service
+
       - name: Collect diagnostics
         if: failure()
         env:

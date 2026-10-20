@@ -135,10 +135,10 @@ export const SERVICE_DEFINITIONS = [
       { method: 'post', path: '/register', summary: 'Register a driver profile', auth: true, statusCode: 201 },
       { method: 'get', path: '/me', summary: 'Get the current driver profile', auth: true, statusCode: 200 },
       { method: 'patch', path: '/me/vehicle', summary: 'Change your vehicle (only while offline)', auth: true, statusCode: 200 },
-      { method: 'post', path: '/me/online', summary: 'Go online', auth: true, statusCode: 201 },
+      { method: 'post', path: '/me/online', summary: 'Go online (VERIFIED drivers only)', auth: true, statusCode: 201 },
       { method: 'post', path: '/me/offline', summary: 'Go offline', auth: true, statusCode: 201 },
       { method: 'post', path: '/me/status', summary: 'Set driver status explicitly', auth: true, statusCode: 201 },
-      { method: 'get', path: '/available', summary: 'List available drivers (admin/system only)', auth: true, statusCode: 200 },
+      { method: 'get', path: '/available', summary: 'List the drivers dispatch may claim: available and verified (admin/system only)', auth: true, statusCode: 200 },
       { method: 'get', path: '/:id', summary: 'Get a driver by id (self or admin)', auth: true, statusCode: 200 },
       { method: 'patch', path: '/:id/status', summary: 'Set a driver status as admin', auth: true, statusCode: 200 },
       { method: 'patch', path: '/:id/verification', summary: "Set a driver's verification status (admin only)", auth: true, statusCode: 200 },
@@ -232,6 +232,22 @@ const baseSchemas = {
               },
             },
           },
+        },
+      },
+    },
+  },
+  DriverNotVerifiedError: {
+    type: 'object',
+    description: '#206: 403 when a driver who is not VERIFIED tries to go online. The app shows "waiting for review" (PENDING) or "not approved" (REJECTED).',
+    properties: {
+      statusCode: { type: 'integer', example: 403 },
+      error: { type: 'string', example: 'DriverNotVerified' },
+      message: { type: 'string' },
+      details: {
+        type: 'object',
+        required: ['verificationStatus'],
+        properties: {
+          verificationStatus: { type: 'string', enum: ['PENDING', 'REJECTED'] },
         },
       },
     },
@@ -629,6 +645,19 @@ export function generatePublicOpenApiDocument() {
         operation.responses['409'] = {
           description: 'CartChanged: the cart was out of date with the menu and has been updated; review it and try again',
           content: { 'application/json': { schema: { $ref: '#/components/schemas/CartChangedError' } } },
+        };
+      }
+
+      // #206 and #153: going online needs a VERIFIED driver, then a verified phone when that gate is on.
+      if (route.method === 'post' && service.service === 'drivers' && (route.path === '/me/online' || route.path === '/me/status')) {
+        operation.responses['403'] = {
+          description:
+            'DriverNotVerified: an admin has not verified the driver (details.verificationStatus is PENDING or REJECTED); PhoneNotVerified: the phone gate is on and the phone is not verified; or the driver is on an active delivery',
+          content: {
+            'application/json': {
+              schema: { oneOf: [{ $ref: '#/components/schemas/DriverNotVerifiedError' }, { $ref: '#/components/schemas/ErrorResponse' }] },
+            },
+          },
         };
       }
 

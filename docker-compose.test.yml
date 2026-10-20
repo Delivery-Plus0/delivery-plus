@@ -377,6 +377,8 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/driver_service
       JWT_SECRET: ${JWT_SECRET:-local-development-only}
       USER_SERVICE_URL: http://user-service:3002
+      # #206 test hook: seeded drivers start VERIFIED, since no admin account exists to verify them yet.
+      DRIVER_AUTO_VERIFY: 'true'
       KAFKA_BROKER: kafka:29092
     healthcheck:
       test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3009/health/ready']

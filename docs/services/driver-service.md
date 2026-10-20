@@ -8,10 +8,11 @@ From `services/driver-service/src/controllers/drivers.controller.ts`:
 
 - `POST /drivers/register` – register a driver profile for the authenticated driver
 - `GET /drivers/me` – fetch the current driver profile
-- `POST /drivers/me/online` – go online (OFFLINE → AVAILABLE); not while BUSY
+- `POST /drivers/me/online` – go online (OFFLINE → AVAILABLE); only a VERIFIED driver (`403 DriverNotVerified` otherwise, #206); not while BUSY
 - `POST /drivers/me/offline` – go offline (AVAILABLE → OFFLINE); not while BUSY
 - `POST /drivers/me/status` – same rules as the two routes above (ADMIN may use it for any valid transition)
-- `GET /drivers/available` – list available drivers
+- `GET /drivers/available` – list the drivers auto-dispatch may claim: AVAILABLE and VERIFIED (ADMIN/system token)
+- `PATCH /drivers/:id/verification` – admin review: `PENDING`, `VERIFIED` or `REJECTED` (ADMIN)
 - `GET /drivers/:id` – fetch a driver by ID
 - `PATCH /drivers/:id/status` – admin/system status update
 
@@ -30,6 +31,7 @@ From `services/driver-service/src/config/app-config.ts`:
 - `JWT_SECRET`
 - `USER_SERVICE_URL` (default: `http://localhost:3002`)
 - `PHONE_VERIFICATION_REQUIRED` (default `false`), see the phone verification gate
+- `DRIVER_AUTO_VERIFY` (default `false`; test hook, **refused in production**): new driver profiles start `VERIFIED`. See the verification gate.
 - `PORT` (default: `3009`)
 - `NODE_ENV` (default: `development`)
 
@@ -41,13 +43,34 @@ With `PHONE_VERIFICATION_REQUIRED=true`, going online (`POST /drivers/me/online`
 
 - **Verification status:** `verificationStatus` is `PENDING` (default, also for drivers registered before #147), `VERIFIED` or `REJECTED`, plus an optional `verificationNote` for the driver and `verifiedAt`.
   - Only an admin sets it: `PATCH /drivers/:id/verification`. Admin review tooling is out of scope.
-  - It is informational for now: it doesn't gate going online.
+  - Since #206 it is binding: see the verification gate below.
 - **Vehicle:** `PATCH /drivers/me/vehicle` (DRIVER) changes the vehicle type and plate (trimmed; the plate is upper-cased), **only while OFFLINE**, checked with a compare-and-set (409 otherwise). A change mid-shift would make the customer's driver card wrong for a job already on its way.
 - **Name, phone and photo** belong to user-service (`PATCH /users/me` with the Egyptian phone rules of #152, and the avatar upload). driver-service doesn't copy them.
 - **No identity documents.** The business does not require national-ID details today, so none are collected or stored, in line with the data-minimisation rule.
   - If that changes, they belong here only, restricted to the driver and admins.
   - They are never returned to customers and never copied into other services.
 - Customers only ever see the delivery-service driver card (first name, photo, vehicle, plate); the verification fields are not part of it.
+
+## Verification gate (#206)
+
+Only a driver an admin has `VERIFIED` is ever put on the road:
+
+- **Going online** (`me/online`, `me/status`, and an admin's `PATCH /drivers/:id/status` to AVAILABLE) is refused unless the driver is `VERIFIED`.
+  - The answer is `403`, error code `DriverNotVerified`, with `details.verificationStatus` (`PENDING` or `REJECTED`), so the driver app can show "waiting for review" or "not approved".
+  - It is checked before the phone gate.
+- **Dispatch:**
+  - `GET /drivers/available` returns only `AVAILABLE` and `VERIFIED` drivers.
+  - The claim (AVAILABLE → BUSY) refuses a driver who isn't `VERIFIED` with `409`, so delivery-service moves on to the next driver.
+  - The compare-and-set also requires `VERIFIED` at write time (`UPDATE … WHERE id = $1 AND status = $2 AND "verificationStatus" = 'VERIFIED'`). A driver rejected between the dispatcher's read and the claim is never assigned.
+- **Rejection or re-review:** setting `REJECTED`, or `PENDING` on a re-review:
+  - **While AVAILABLE:** the driver moves to `OFFLINE`. The verification is written first, so no claim or go-online can slip in between; then a compare-and-set moves AVAILABLE → OFFLINE.
+  - **While BUSY:** the current job finishes. When delivery-service releases the driver (BUSY → AVAILABLE), driver-service writes `OFFLINE` instead, and the driver can't go online again.
+- **Existing drivers:** migration 004 marks every `PENDING` driver that exists before #206 as `VERIFIED`. All of them are seeded or E2E accounts, since production starts empty. `REJECTED` drivers stay rejected.
+- **Test stacks** (`DRIVER_AUTO_VERIFY=true`):
+  - Seeds register new drivers on fresh databases, and no admin account exists to verify them until staff accounts arrive (#216, #234).
+  - So `docker-compose.test.yml` (the Integration job and the E2E stack) and `docker-compose.dev.yml` make new profiles start `VERIFIED`.
+  - Like `SMS_PROVIDER=test` and `PAYMENT_TEST_HOOKS`, the service refuses to start with it in production.
+  - The root `docker-compose.yml` runs in production mode, so its drivers stay `PENDING` until an admin verifies them.
 
 ## Availability lifecycle
 
@@ -67,14 +90,16 @@ Who may make each transition (`src/common/driver-transition-rules.ts`):
 | OFFLINE → AVAILABLE, AVAILABLE → OFFLINE | the driver (or ADMIN) | `me/online`, `me/offline`, `me/status` |
 | AVAILABLE → BUSY (claim for a delivery) | ADMIN only: delivery-service with its system token | `PATCH /drivers/:id/status` |
 | BUSY → AVAILABLE (release after complete/cancel) | ADMIN only: delivery-service with its system token | `PATCH /drivers/:id/status` |
+| BUSY → OFFLINE (that release, for a driver who is no longer VERIFIED, #206) | ADMIN only: delivery-service with its system token | `PATCH /drivers/:id/status` (asking for AVAILABLE) |
 | → SUSPENDED, SUSPENDED → OFFLINE | ADMIN only | either |
 
 Every change goes through one path in `DriversService`, in this order:
 
+0. **Verification (#206):** going AVAILABLE needs `VERIFIED` (`403 DriverNotVerified`); a claim of a driver who isn't `VERIFIED` is a `409`.
 1. **Repeated request:** asking for the current status is a no-op returning the driver (200) when that status is AVAILABLE or OFFLINE, so going online twice or releasing a driver twice is retry-safe. **BUSY is never a no-op:** claiming a BUSY driver is always a conflict.
 2. **Transition exists?** Otherwise `409 InvalidStateTransition`.
 3. **Role allowed?** Otherwise `403`. A driver who is BUSY gets *"Driver is on an active delivery; availability is restored when the delivery completes or is cancelled"*. Drivers cannot free themselves for a second delivery.
-4. **Compare-and-set write** (`UPDATE … WHERE id = $1 AND status = <status read>`). If another writer changed the status in between, the loser gets `409`. Two assignments racing for one driver: exactly one claims them. A driver going offline while being claimed: exactly one of the two wins.
+4. **Compare-and-set write** (`UPDATE … WHERE id = $1 AND status = <status read>`, plus `"verificationStatus" = 'VERIFIED'` for AVAILABLE and BUSY). If another writer changed the status in between, the loser gets `409`. Two assignments racing for one driver: exactly one claims them. A driver going offline while being claimed: exactly one of the two wins. If only the verification changed in between, the request is decided once more on the fresh row.
 
 ### Assignment failure and recovery
 

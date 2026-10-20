@@ -3196,7 +3196,7 @@
     },
     "/api/drivers/me/online": {
       "post": {
-        "summary": "Go online",
+        "summary": "Go online (VERIFIED drivers only)",
         "tags": [
           "drivers"
         ],
@@ -3219,7 +3219,21 @@
             "description": "Missing or invalid JWT"
           },
           "403": {
-            "description": "Forbidden"
+            "description": "DriverNotVerified: an admin has not verified the driver (details.verificationStatus is PENDING or REJECTED); PhoneNotVerified: the phone gate is on and the phone is not verified; or the driver is on an active delivery",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/DriverNotVerifiedError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    }
+                  ]
+                }
+              }
+            }
           }
         },
         "security": [
@@ -3289,7 +3303,21 @@
             "description": "Missing or invalid JWT"
           },
           "403": {
-            "description": "Forbidden"
+            "description": "DriverNotVerified: an admin has not verified the driver (details.verificationStatus is PENDING or REJECTED); PhoneNotVerified: the phone gate is on and the phone is not verified; or the driver is on an active delivery",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/DriverNotVerifiedError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    }
+                  ]
+                }
+              }
+            }
           }
         },
         "security": [
@@ -3301,7 +3329,7 @@
     },
     "/api/drivers/available": {
       "get": {
-        "summary": "List available drivers (admin/system only)",
+        "summary": "List the drivers dispatch may claim: available and verified (admin/system only)",
         "tags": [
           "drivers"
         ],
@@ -3839,6 +3867,38 @@
                     }
                   }
                 }
+              }
+            }
+          }
+        }
+      },
+      "DriverNotVerifiedError": {
+        "type": "object",
+        "description": "#206: 403 when a driver who is not VERIFIED tries to go online. The app shows \"waiting for review\" (PENDING) or \"not approved\" (REJECTED).",
+        "properties": {
+          "statusCode": {
+            "type": "integer",
+            "example": 403
+          },
+          "error": {
+            "type": "string",
+            "example": "DriverNotVerified"
+          },
+          "message": {
+            "type": "string"
+          },
+          "details": {
+            "type": "object",
+            "required": [
+              "verificationStatus"
+            ],
+            "properties": {
+              "verificationStatus": {
+                "type": "string",
+                "enum": [
+                  "PENDING",
+                  "REJECTED"
+                ]
               }
             }
           }

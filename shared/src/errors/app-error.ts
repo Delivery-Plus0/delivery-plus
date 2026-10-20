@@ -82,6 +82,17 @@ export class CartChangedError extends AppError {
   }
 }
 
+/**
+ * F6 (#205): another request kept changing the same cart, so this change couldn't be applied. Its own
+ * code so clients don't mistake it for the different-restaurant `Conflict`: the answer is "try again",
+ * never "start a new cart".
+ */
+export class CartWriteConflictError extends AppError {
+  constructor(message = 'Your cart changed at the same time. Please try again.') {
+    super(409, 'CartWriteConflict', message);
+  }
+}
+
 /** #153: the action needs a verified phone; clients answer it by showing the verification step. */
 export class PhoneNotVerifiedError extends AppError {
   constructor(message = 'Verify your phone number to continue.') {

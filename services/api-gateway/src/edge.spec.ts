@@ -6,12 +6,13 @@ import { claimedRole, edgePolicy } from './edge';
 
 /**
  * http-proxy-middleware v4 is ESM only and Jest runs CommonJS (see main.spec.ts), so this stands in
- * for it: forward the request with the incoming headers, which is what the proxy does. The real
- * gateway is covered end to end by scripts/e2e.ts.
+ * for it: forward the request with the incoming headers, which is what the proxy does. It always
+ * forwards to a fixed path: only the headers matter here. The real gateway is covered end to end by
+ * scripts/e2e.ts.
  */
 function forwardTo(target: string): express.RequestHandler {
   return (req, res) => {
-    const upstreamReq = httpRequest(`${target}${req.originalUrl}`, { method: req.method, headers: req.headers }, (upstreamRes) => {
+    const upstreamReq = httpRequest(`${target}/forwarded`, { method: req.method, headers: req.headers }, (upstreamRes) => {
       res.status(upstreamRes.statusCode ?? 502);
       upstreamRes.pipe(res);
     });

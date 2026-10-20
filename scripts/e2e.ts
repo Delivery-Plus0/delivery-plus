@@ -272,7 +272,7 @@ async function assertAccountSuspension() {
   const suspended = (await status({ status: 'SUSPENDED', reason: 'E2E check' })).data;
   const refreshAfter = await outcomeOf(axios.post(`${API_URL}/api/auth/refresh`, { refreshToken: user.refreshToken }));
   const loginAfter = await outcomeOf(axios.post(`${API_URL}/api/auth/login`, { email, password: 'password123' }));
-  const wrongPassword = await outcomeOf(axios.post(`${API_URL}/api/auth/login`, { email, password: 'wrong-password' }));
+  const strangerLogin = await outcomeOf(axios.post(`${API_URL}/api/auth/login`, { email, password: 'wrong-password' }));
   await status({ status: 'ACTIVE' });
   const loginAgain = await outcomeOf(axios.post(`${API_URL}/api/auth/login`, { email, password: 'password123' }));
   const oldSession = await outcomeOf(axios.post(`${API_URL}/api/auth/refresh`, { refreshToken: user.refreshToken }));
@@ -285,7 +285,7 @@ async function assertAccountSuspension() {
     suspended: [suspended.status, suspended.sessionsRevoked],
     refreshAfter,
     loginAfter,
-    wrongPassword: wrongPassword.status,
+    strangerLogin: strangerLogin.status,
     loginAgain: loginAgain.status,
     oldSession,
     systemThroughGateway: systemThroughGateway.status,
@@ -295,7 +295,7 @@ async function assertAccountSuspension() {
     suspended: ['SUSPENDED', 1],
     refreshAfter: { status: 403, error: 'AccountSuspended' },
     loginAfter: { status: 403, error: 'AccountSuspended' },
-    wrongPassword: 401,
+    strangerLogin: 401,
     loginAgain: 200,
     oldSession: { status: 401, error: 'InvalidRefreshToken' },
     systemThroughGateway: 401,

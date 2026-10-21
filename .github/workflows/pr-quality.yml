@@ -75,7 +75,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The full local stack runs with NODE_ENV=production and requires SYSTEM_JWT_SECRET (#202).
       - name: Validate full local stack (docker-compose.yml)
+        env:
+          SYSTEM_JWT_SECRET: compose_validation_only_system_jwt_4b7e1c
         run: docker compose -f docker-compose.yml config --quiet
 
       - name: Validate base + dev overlay
@@ -94,6 +97,7 @@ jobs:
           POSTGRES_USER_URLENCODED: compose_validation_user
           POSTGRES_PASSWORD_URLENCODED: compose_validation_only_7f3c2b
           JWT_SECRET: compose_validation_only_jwt_9a41d8
+          SYSTEM_JWT_SECRET: compose_validation_only_system_jwt_4b7e1c
           INTERNAL_AUTH_SECRET: compose_validation_only_internal_5e2a91
           CORS_ORIGINS: https://compose-validation.example.com
           AWS_ACCESS_KEY_ID: compose_validation_only_access_key

@@ -207,18 +207,22 @@ describe('DriversService', () => {
     });
   });
 
-  describe('updateStatusById (delivery-service claim and release, admin)', () => {
-    it('rejects non-ADMIN callers', async () => {
-      await expect(
-        service.updateStatusById('driver-1', UserRole.DRIVER, { status: DriverStatus.BUSY }),
-      ).rejects.toThrow(ForbiddenError);
+  describe('updateStatusById (delivery-service claim and release, SYSTEM token, #202)', () => {
+    it.each([UserRole.DRIVER, UserRole.ADMIN, UserRole.CUSTOMER])('refuses a %s caller: only a service (SYSTEM) claims and releases (#202)', async (role) => {
+      await expect(service.updateStatusById('driver-1', role, { status: DriverStatus.BUSY })).rejects.toThrow(ForbiddenError);
+      expect(drivers.transitionStatus).not.toHaveBeenCalled();
+    });
+
+    it('lets a SYSTEM caller read any driver profile, like staff', async () => {
+      drivers.findById.mockResolvedValue(baseDriver as any);
+      await expect(service.getByIdFor('driver-1', { sub: 'system:tracking-service', role: UserRole.SYSTEM })).resolves.toMatchObject({ id: 'driver-1' });
     });
 
     it('claims an AVAILABLE driver (AVAILABLE -> BUSY)', async () => {
       drivers.findById.mockResolvedValue({ ...baseDriver, status: DriverStatus.AVAILABLE });
       drivers.transitionStatus.mockResolvedValue({ ...baseDriver, status: DriverStatus.BUSY });
 
-      const result = await service.updateStatusById('driver-1', UserRole.ADMIN, { status: DriverStatus.BUSY });
+      const result = await service.updateStatusById('driver-1', UserRole.SYSTEM, { status: DriverStatus.BUSY });
 
       expect(drivers.transitionStatus).toHaveBeenCalledWith('driver-1', DriverStatus.AVAILABLE, DriverStatus.BUSY);
       expect(result.status).toBe(DriverStatus.BUSY);
@@ -227,7 +231,7 @@ describe('DriversService', () => {
     it('never treats claiming an already BUSY driver as a no-op (409)', async () => {
       drivers.findById.mockResolvedValue({ ...baseDriver, status: DriverStatus.BUSY });
       await expect(
-        service.updateStatusById('driver-1', UserRole.ADMIN, { status: DriverStatus.BUSY }),
+        service.updateStatusById('driver-1', UserRole.SYSTEM, { status: DriverStatus.BUSY }),
       ).rejects.toThrow(InvalidStateTransitionError);
       expect(drivers.transitionStatus).not.toHaveBeenCalled();
     });
@@ -239,7 +243,7 @@ describe('DriversService', () => {
       drivers.transitionStatus.mockResolvedValue(null);
 
       await expect(
-        service.updateStatusById('driver-1', UserRole.ADMIN, { status: DriverStatus.BUSY }),
+        service.updateStatusById('driver-1', UserRole.SYSTEM, { status: DriverStatus.BUSY }),
       ).rejects.toThrow(InvalidStateTransitionError);
     });
 
@@ -247,14 +251,14 @@ describe('DriversService', () => {
       drivers.findById.mockResolvedValue({ ...baseDriver, status: DriverStatus.BUSY });
       drivers.transitionStatus.mockResolvedValue({ ...baseDriver, status: DriverStatus.AVAILABLE });
 
-      const result = await service.updateStatusById('driver-1', UserRole.ADMIN, { status: DriverStatus.AVAILABLE });
+      const result = await service.updateStatusById('driver-1', UserRole.SYSTEM, { status: DriverStatus.AVAILABLE });
       expect(result.status).toBe(DriverStatus.AVAILABLE);
     });
 
     it('treats a repeated release of an already AVAILABLE driver as a no-op', async () => {
       drivers.findById.mockResolvedValue({ ...baseDriver, status: DriverStatus.AVAILABLE });
 
-      const result = await service.updateStatusById('driver-1', UserRole.ADMIN, { status: DriverStatus.AVAILABLE });
+      const result = await service.updateStatusById('driver-1', UserRole.SYSTEM, { status: DriverStatus.AVAILABLE });
 
       expect(result.status).toBe(DriverStatus.AVAILABLE);
       expect(drivers.transitionStatus).not.toHaveBeenCalled();
@@ -266,14 +270,14 @@ describe('DriversService', () => {
         .mockResolvedValueOnce({ ...baseDriver, status: DriverStatus.AVAILABLE });
       drivers.transitionStatus.mockResolvedValue(null);
 
-      const result = await service.updateStatusById('driver-1', UserRole.ADMIN, { status: DriverStatus.AVAILABLE });
+      const result = await service.updateStatusById('driver-1', UserRole.SYSTEM, { status: DriverStatus.AVAILABLE });
       expect(result.status).toBe(DriverStatus.AVAILABLE);
     });
 
-    it('rejects an invalid transition even for ADMIN', async () => {
+    it('rejects an invalid transition even for SYSTEM', async () => {
       drivers.findById.mockResolvedValue({ ...baseDriver, status: DriverStatus.SUSPENDED });
       await expect(
-        service.updateStatusById('driver-1', UserRole.ADMIN, { status: DriverStatus.BUSY }),
+        service.updateStatusById('driver-1', UserRole.SYSTEM, { status: DriverStatus.BUSY }),
       ).rejects.toThrow(InvalidStateTransitionError);
     });
   });
@@ -316,8 +320,8 @@ describe('DriversService', () => {
       const racing = new DriversService(repo, userClient, gateOff);
 
       const results = await Promise.allSettled([
-        racing.updateStatusById('driver-1', UserRole.ADMIN, { status: DriverStatus.BUSY }),
-        racing.updateStatusById('driver-1', UserRole.ADMIN, { status: DriverStatus.BUSY }),
+        racing.updateStatusById('driver-1', UserRole.SYSTEM, { status: DriverStatus.BUSY }),
+        racing.updateStatusById('driver-1', UserRole.SYSTEM, { status: DriverStatus.BUSY }),
       ]);
 
       expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
@@ -333,7 +337,7 @@ describe('DriversService', () => {
       const racing = new DriversService(repo, userClient, gateOff);
 
       const [claim, offline] = await Promise.allSettled([
-        racing.updateStatusById('driver-1', UserRole.ADMIN, { status: DriverStatus.BUSY }),
+        racing.updateStatusById('driver-1', UserRole.SYSTEM, { status: DriverStatus.BUSY }),
         racing.updateStatus('user-1', UserRole.DRIVER, { status: DriverStatus.OFFLINE }),
       ]);
 
@@ -346,7 +350,7 @@ describe('DriversService', () => {
       const racing = new DriversService(repo, userClient, gateOff);
 
       const [claim, review] = await Promise.allSettled([
-        racing.updateStatusById('driver-1', UserRole.ADMIN, { status: DriverStatus.BUSY }),
+        racing.updateStatusById('driver-1', UserRole.SYSTEM, { status: DriverStatus.BUSY }),
         racing.setVerification('driver-1', { status: 'REJECTED' }),
       ]);
 
@@ -400,7 +404,7 @@ describe('DriversService', () => {
       drivers.findById.mockResolvedValue(pending);
 
       await expect(service.updateStatus('user-1', UserRole.DRIVER, { status: DriverStatus.AVAILABLE })).rejects.toBeInstanceOf(DriverNotVerifiedError);
-      await expect(service.updateStatusById('driver-1', UserRole.ADMIN, { status: DriverStatus.AVAILABLE })).rejects.toBeInstanceOf(DriverNotVerifiedError);
+      await expect(service.updateStatusById('driver-1', UserRole.SYSTEM, { status: DriverStatus.AVAILABLE })).rejects.toBeInstanceOf(DriverNotVerifiedError);
       expect(drivers.transitionStatus).not.toHaveBeenCalled();
     });
 
@@ -414,7 +418,7 @@ describe('DriversService', () => {
     it.each([['PENDING', pending], ['REJECTED', rejected]] as const)('never claims a %s driver (409, so dispatch tries the next one)', async (_status, driver) => {
       drivers.findById.mockResolvedValue({ ...driver, status: DriverStatus.AVAILABLE });
 
-      await expect(service.updateStatusById('driver-1', UserRole.ADMIN, { status: DriverStatus.BUSY })).rejects.toMatchObject({ statusCode: 409 });
+      await expect(service.updateStatusById('driver-1', UserRole.SYSTEM, { status: DriverStatus.BUSY })).rejects.toMatchObject({ statusCode: 409 });
       expect(drivers.transitionStatus).not.toHaveBeenCalled();
     });
 
@@ -424,7 +428,7 @@ describe('DriversService', () => {
         .mockResolvedValueOnce({ ...rejected, status: DriverStatus.AVAILABLE });
       drivers.transitionStatus.mockResolvedValue(null); // the compare-and-set needs VERIFIED
 
-      await expect(service.updateStatusById('driver-1', UserRole.ADMIN, { status: DriverStatus.BUSY })).rejects.toBeInstanceOf(ConflictError);
+      await expect(service.updateStatusById('driver-1', UserRole.SYSTEM, { status: DriverStatus.BUSY })).rejects.toBeInstanceOf(ConflictError);
       expect(drivers.transitionStatus).toHaveBeenCalledTimes(1);
     });
 
@@ -432,7 +436,7 @@ describe('DriversService', () => {
       drivers.findById.mockResolvedValue({ ...rejected, status: DriverStatus.BUSY });
       drivers.transitionStatus.mockResolvedValue({ ...rejected, status: DriverStatus.OFFLINE });
 
-      const result = await service.updateStatusById('driver-1', UserRole.ADMIN, { status: DriverStatus.AVAILABLE });
+      const result = await service.updateStatusById('driver-1', UserRole.SYSTEM, { status: DriverStatus.AVAILABLE });
 
       expect(drivers.transitionStatus).toHaveBeenCalledWith('driver-1', DriverStatus.BUSY, DriverStatus.OFFLINE);
       expect(result.status).toBe(DriverStatus.OFFLINE);
@@ -446,7 +450,7 @@ describe('DriversService', () => {
         .mockResolvedValueOnce(null) // BUSY -> AVAILABLE needs VERIFIED
         .mockResolvedValueOnce({ ...rejected, status: DriverStatus.OFFLINE });
 
-      const result = await service.updateStatusById('driver-1', UserRole.ADMIN, { status: DriverStatus.AVAILABLE });
+      const result = await service.updateStatusById('driver-1', UserRole.SYSTEM, { status: DriverStatus.AVAILABLE });
 
       expect(drivers.transitionStatus).toHaveBeenLastCalledWith('driver-1', DriverStatus.BUSY, DriverStatus.OFFLINE);
       expect(result.status).toBe(DriverStatus.OFFLINE);

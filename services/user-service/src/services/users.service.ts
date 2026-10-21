@@ -119,7 +119,8 @@ export class UsersService {
   }
 
   private assertCanReadProfile(profile: UserProfile, requester: JwtPayload): void {
-    if (requester.role === UserRole.ADMIN || requester.sub === profile.id) {
+    // SYSTEM: delivery-service reading the assigned driver's name and photo for the driver card (#202).
+    if (requester.role === UserRole.ADMIN || requester.role === UserRole.SYSTEM || requester.sub === profile.id) {
       return;
     }
     throw new ForbiddenError('You do not have access to this profile');

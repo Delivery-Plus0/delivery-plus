@@ -64,14 +64,13 @@ The workspace root defines commands, but actual validation is still service-spec
 Open findings from the 2026-10-01 code review (mostly not filed as issues yet; the critical one, self-registered ADMIN, is fixed in #105, and the driver claim race in #107):
 
 - Every service connects to PostgreSQL as the `postgres` superuser, and the runtime image has no `USER` (runs as root).
-- System tokens are signed with the shared `JWT_SECRET` and carry `role: ADMIN`: any service (or a leaked `.env`) can mint any identity, and logs cannot tell a service from an admin.
 - The rate limiter fails closed (5xx) when Redis is down.
 - Behind the gateway, anonymous rate limits are shared by everyone: the gateway doesn't forward the client IP and services don't trust a proxy, so `request.ip` is the gateway's address. `/auth/login` and `/auth/register` (5 per minute) are therefore platform-wide limits today. `/auth/refresh` and `/auth/logout` avoid this by keying on the session (#34).
 - Correlation ids propagate only from auth-service to user-service, not across other HTTP calls or Kafka.
 - Media: a verified S3 object can be orphaned if the owning service's database write fails after the copy (see [15-media-and-storage.md](./15-media-and-storage.md)).
 - `.gitignore` has no entry for local agent settings such as `.claude/`, so they show as untracked; stage files explicitly rather than with `git add -A`.
 
-Closed in #204: F3 (unexpected 500s now return a generic message; the real error is only logged), F7 (the rate-limit key gets its TTL in the same atomic Lua script as the increment) and F8 (every DataSource sets `invalidWhereValuesBehavior: { undefined: 'throw' }` through `STRICT_WHERE_VALUES` in `shared`). Closed in #205: F6 (cart writes are compare-and-set, so concurrent changes no longer overwrite each other).
+Closed in #204: F3 (unexpected 500s now return a generic message; the real error is only logged), F7 (the rate-limit key gets its TTL in the same atomic Lua script as the increment) and F8 (every DataSource sets `invalidWhereValuesBehavior: { undefined: 'throw' }` through `STRICT_WHERE_VALUES` in `shared`). Closed in #205: F6 (cart writes are compare-and-set, so concurrent changes no longer overwrite each other). Closed in #202: F5 (services call each other as `role: SYSTEM`, signed with a separate `SYSTEM_JWT_SECRET` and refused when they arrive through the gateway; no service mints ADMIN tokens).
 
 These are documented findings from the current source, not claims that the application should be changed as part of documentation work. Related GitHub roadmap items remain open unless the repository and GitHub state prove otherwise.
 

@@ -1,3 +1,4 @@
+import { loadSystemJwtSecret } from '@food-delivery/shared';
 export const APP_CONFIG = Symbol('APP_CONFIG');
 
 export interface AppConfig {
@@ -6,6 +7,8 @@ export interface AppConfig {
   nodeEnv: string;
   databaseUrl: string;
   jwtSecret: string;
+  /** #202: signs/verifies service-to-service SYSTEM tokens; required in production (see loadSystemJwtSecret). */
+  systemJwtSecret: string;
   orderServiceUrl: string;
   driverServiceUrl: string;
   restaurantServiceUrl: string;
@@ -36,6 +39,7 @@ export function loadConfig(): AppConfig {
     nodeEnv: process.env.NODE_ENV || 'development',
     databaseUrl: process.env.DATABASE_URL as string,
     jwtSecret: process.env.JWT_SECRET as string,
+    systemJwtSecret: loadSystemJwtSecret(process.env.NODE_ENV || 'development'),
     orderServiceUrl: process.env.ORDER_SERVICE_URL || 'http://localhost:3006',
     driverServiceUrl: process.env.DRIVER_SERVICE_URL || 'http://localhost:3009',
     restaurantServiceUrl: process.env.RESTAURANT_SERVICE_URL || 'http://localhost:3003',

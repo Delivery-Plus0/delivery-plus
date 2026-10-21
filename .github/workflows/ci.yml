@@ -46,7 +46,10 @@ jobs:
     needs: test-build
     steps:
       - uses: actions/checkout@v4
+      # The root stack runs with NODE_ENV=production and requires SYSTEM_JWT_SECRET (#202); placeholder for config only.
       - run: docker compose config --quiet
+        env:
+          SYSTEM_JWT_SECRET: compose_validation_only_system_jwt_4b7e1c
       - run: docker build --build-arg SERVICE_NAME=api-gateway -t food-delivery-api-gateway:ci .
 
   security:

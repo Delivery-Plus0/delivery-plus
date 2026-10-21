@@ -77,7 +77,7 @@ export class DriversController {
 
   @Get('available')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.SYSTEM)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'List currently available drivers (admin / delivery-service system token only)' })
   listAvailable(@Query() query: ListDriversQueryDto) {
@@ -86,7 +86,7 @@ export class DriversController {
 
   @Get(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.DRIVER, UserRole.ADMIN)
+  @Roles(UserRole.DRIVER, UserRole.ADMIN, UserRole.SYSTEM)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get a driver by id (the driver themself, admin, or a service system token)' })
   getById(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
@@ -95,7 +95,7 @@ export class DriversController {
 
   @Patch(':id/status')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.SYSTEM)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Admin/system: set a specific driver\'s status by id (e.g. delivery-service assigning/releasing a driver)' })
   setStatusById(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: UpdateDriverStatusDto) {

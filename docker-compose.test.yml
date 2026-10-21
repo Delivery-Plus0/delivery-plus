@@ -139,6 +139,8 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/auth_service
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:-local-development-only}
+      # Access-token lifetime (#34). The apps' E2E runs set it short (e.g. 60s) to prove sessions survive refreshes.
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
       # #202: the test stack's super admin (all permissions), created at startup; refused in production.
       TEST_ADMIN_EMAIL: ${TEST_ADMIN_EMAIL:-qa.admin@delivery-plus.test}
       TEST_ADMIN_PASSWORD: ${TEST_ADMIN_PASSWORD:-Qa-Only-Admin-Passw0rd!}

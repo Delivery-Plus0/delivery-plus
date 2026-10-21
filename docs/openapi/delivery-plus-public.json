@@ -144,7 +144,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "AccountSuspended: the account is suspended (show the suspended screen)",
+            "description": "AccountSuspended: the account is suspended (show the suspended screen). EmailNotVerified: email verification is required and this email is not verified yet (show the code screen). Both only after the password checked out",
             "content": {
               "application/json": {
                 "schema": {

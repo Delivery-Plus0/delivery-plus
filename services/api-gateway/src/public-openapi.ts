@@ -800,9 +800,13 @@ export function generatePublicOpenApiDocument() {
       }
 
       // #202: a suspended account gets 403 AccountSuspended, only once its credentials checked out.
+      // #252: login also answers 403 EmailNotVerified, under the same condition.
       if (route.method === 'post' && service.service === 'auth' && (route.path === '/login' || route.path === '/refresh')) {
         operation.responses['403'] = {
-          description: 'AccountSuspended: the account is suspended (show the suspended screen)',
+          description:
+            route.path === '/login'
+              ? 'AccountSuspended: the account is suspended (show the suspended screen). EmailNotVerified: email verification is required and this email is not verified yet (show the code screen). Both only after the password checked out'
+              : 'AccountSuspended: the account is suspended (show the suspended screen)',
           content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } },
         };
       }

@@ -110,6 +110,8 @@ Login and register accept an optional `appId` (`customer`, `driver`, `restaurant
   - `POST /auth/refresh` answers `403 AccountSuspended` too, including for a session the suspension ended, so the apps can show the suspended screen.
 - **Suspending** ends every refresh session (`revokedReason: suspended`). Access tokens already issued expire within `JWT_EXPIRES_IN`.
 - **Reactivating** restores login. The sessions the suspension ended stay ended.
+
+**Unverified email (#252).** While `EMAIL_VERIFICATION_REQUIRED=true`, `POST /auth/login` answers `403 EmailNotVerified` for an account whose email isn't verified yet, again only after the password checked out (a wrong password stays `401`). The apps open their code screen. `POST /auth/verify-email` keeps one `401` for every failure: a wrong, expired, used or exhausted code and an unknown email look the same, so the endpoint can't be used to find accounts.
 - **`PATCH /auth/users/:id/status`** `{ status, reason? }` → `200 { userId, status, suspendedAt, suspendedReason, sessionsRevoked }`.
   - It needs an ADMIN token with `users.manage`.
   - `403` for your own account, for a staff account (staff are managed with the staff tools, #216), or without the permission; `404` for an unknown user.

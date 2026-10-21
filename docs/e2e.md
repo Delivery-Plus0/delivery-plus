@@ -10,6 +10,7 @@ repo, e.g. `delivery-plus-customer-app/e2e`).
 | Gateway | `:3000` | `:3100` |
 | Object storage | `:9000` | `:9100` (public media URLs point here) |
 | Payments | always succeed; `simulateFailure` is refused (400) | always succeed; tests force a decline with `simulateFailure` (`PAYMENT_TEST_HOOKS=true`, #201) |
+| Access tokens | 15 minutes (`JWT_EXPIRES_IN`) | 15 minutes; start with `JWT_EXPIRES_IN=60s npm run e2e:env:up` to make every app flow refresh its session (#34) |
 
 Both stacks can run at the same time.
 

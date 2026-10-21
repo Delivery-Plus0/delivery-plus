@@ -13,8 +13,9 @@ From `services/auth-service/src/controllers/auth.controller.ts`:
 - `POST /auth/refresh` – exchange a refresh token for a new pair.
 - `POST /auth/logout` – sign out this device (ends the session of a refresh token).
 - `POST /auth/logout-all` – sign out every device (access token required).
-- `POST /auth/verify-email`, `POST /auth/resend-verification` – email verification.
+- `POST /auth/verify-email`, `POST /auth/resend-verification` – email verification by a 6-digit code (see [Email verification](#email-verification-203)).
 - `GET /auth/me` – return the current user payload from the bearer token.
+- `PATCH /auth/users/:id/status` – suspend or reactivate an account (staff with `users.manage`, see [Account status](#account-status-202)).
 
 Internal only (blocked at the gateway, HMAC per ADR 001), from `src/controllers/internal-sessions.controller.ts`:
 
@@ -81,6 +82,48 @@ Login and register accept an optional `appId` (`customer`, `driver`, `restaurant
 - Only services listed in `AUTH_INTERNAL_ALLOWED_SERVICES` may call it (empty by default: nobody). `401` for a missing, wrong, expired or replayed signature or a caller not on the list; `400` for another reason or a malformed id.
 - Inside auth-service (#35's password change and reset, #202's suspension) call `SessionsService.revokeAll(credentialId, reason, exceptSessionId?)` directly. The current session's id is the access token's `sid` claim.
 
+## Email verification (#203)
+
+- **Sending:** registration emails a **6-digit code**, and `POST /auth/resend-verification { email }` sends a new one. The user sends it back as `token` to `POST /auth/verify-email { email, token }`.
+- **The code:**
+  - it works **once**, for **10 minutes** (`VERIFICATION_TOKEN_TTL_MINUTES`);
+  - the **5th wrong code** (`VERIFICATION_MAX_ATTEMPTS`) invalidates it;
+  - it's stored only as an HMAC under `EMAIL_CODE_HASH_SECRET`, bound to the account, and compared in constant time;
+  - it never appears in logs or responses.
+- **Resend limits:** one email a minute per address (`VERIFICATION_RESEND_COOLDOWN_SECONDS`), 5 an hour per address, and 20 an hour per client IP.
+  - The limits are counted whether or not the address has an account, so the `429` and the generic answer reveal nothing.
+  - Registration counts as the first send.
+- **Language:** the email is multipart (text and HTML), in Arabic (right to left) or English from `Accept-Language` (Arabic by default, like the apps).
+- **Senders (`EMAIL_PROVIDER`):**
+  - `disabled` (default): nothing is sent, and resend answers `503 EmailUnavailable`.
+  - `test`: the last email per address goes to Redis (`test:email:<address>`) for E2E runs. Refused in production.
+  - `ses`: Amazon SES (SESv2 `SendEmail`), credentials from the AWS provider chain only. One retry on throttling or 5xx, none on 4xx or timeout. Failures are `503 EmailUnavailable` without provider details; logs carry the correlation id, never the address or the code. Setup: [docs/runbooks/email-ses.md](../runbooks/email-ses.md).
+- **Registration never fails because of email:** the account exists, and the user can ask for a new code.
+- **Production refuses:** `EMAIL_PROVIDER=test`; `ses` without `AWS_REGION`/`SES_FROM_ADDRESS`; `EMAIL_VERIFICATION_REQUIRED=true` with `disabled`; a provider without a real `EMAIL_CODE_HASH_SECRET`.
+- **Old codes:** codes issued before #203 were never emailed. Migration 006 clears them, and those users ask for a new one.
+
+## Account status (#202)
+
+- `credentials.status` is `ACTIVE` (default) or `SUSPENDED`, with `suspendedAt` and `suspendedReason`.
+- **Suspended accounts:**
+  - `POST /auth/login` answers `403 AccountSuspended`, but only after the password checked out. A wrong password stays `401`, so a stranger learns nothing.
+  - `POST /auth/refresh` answers `403 AccountSuspended` too, including for a session the suspension ended, so the apps can show the suspended screen.
+- **Suspending** ends every refresh session (`revokedReason: suspended`). Access tokens already issued expire within `JWT_EXPIRES_IN`.
+- **Reactivating** restores login. The sessions the suspension ended stay ended.
+- **`PATCH /auth/users/:id/status`** `{ status, reason? }` → `200 { userId, status, suspendedAt, suspendedReason, sessionsRevoked }`.
+  - It needs an ADMIN token with `users.manage`.
+  - `403` for your own account, for a staff account (staff are managed with the staff tools, #216), or without the permission; `404` for an unknown user.
+  - This is the minimal staff action the admin console (#215) builds on.
+
+## Staff permissions (#202)
+
+- Staff have role `ADMIN`. What each person may do is in `staff_permissions` (`credentialId`, `permission`).
+- **The ten permissions:** `support.read`, `support.act`, `ops.read`, `ops.act`, `finance.read`, `finance.act`, `onboarding.review`, `users.manage`, `staff.manage`, `audit.read` (`STAFF_PERMISSIONS` in `shared`).
+- **In tokens:** staff access tokens carry `perms`, read fresh at every login and refresh, so a change applies within one access-token lifetime. Other tokens carry none.
+- **Enforcement:** routes require permissions with `@RequirePermissions(...)` and `PermissionsGuard` from `shared`. `perms` on a non-staff token is ignored.
+- **The first super admin** (every permission) is created out of band: see [docs/runbooks/bootstrap-admin.md](../runbooks/bootstrap-admin.md).
+  - Test and dev stacks create theirs at startup from `TEST_ADMIN_EMAIL` and `TEST_ADMIN_PASSWORD`; auth-service refuses those variables in production.
+
 ## Dependencies
 - Calls `user-service` internally for user profile creation via `src/common/user-service.client.ts`, signing the request with the internal HMAC contract
 - Requires `DATABASE_URL` and `JWT_SECRET`
@@ -104,6 +147,11 @@ From `services/auth-service/src/config/app-config.ts` and `docker-compose.yml`:
 - `NODE_ENV` (default: `development`)
 - `INTERNAL_AUTH_SECRET` (required in production; local Compose provides a development-only default)
 - `EMAIL_VERIFICATION_REQUIRED` (default: `false`)
+- `EMAIL_PROVIDER` (`disabled` default, `test`, `ses`), `EMAIL_CODE_HASH_SECRET` (required in production with a provider)
+- For `ses`: `AWS_REGION`, `SES_FROM_ADDRESS`, optional `SES_CONFIGURATION_SET`, `EMAIL_SEND_TIMEOUT_MS` (default `5000`)
+- `VERIFICATION_TOKEN_TTL_MINUTES` (default `10`), `VERIFICATION_MAX_ATTEMPTS` (default `5`), `VERIFICATION_RESEND_COOLDOWN_SECONDS` (default `60`)
+- `TEST_ADMIN_EMAIL`, `TEST_ADMIN_PASSWORD` (test and dev stacks only; refused in production): the super admin created at startup
+- For the bootstrap CLI only: `BOOTSTRAP_ADMIN_EMAIL`, optional `BOOTSTRAP_ADMIN_PASSWORD` (otherwise prompted)
 
 ## Notes
 The auth service validates credentials and issues JSON Web Tokens; downstream access control is enforced with shared guards from `@food-delivery/shared`. Its profile-creation call uses HMAC service authentication with a service identity, timestamp, nonce, and body-bound signature. A shared `INTERNAL_AUTH_SECRET` must be rotated through deployment configuration, not source code.

@@ -158,6 +158,12 @@ describe('UsersService', () => {
       expect(result.id).toBe('u-owner');
     });
 
+    it('allows a service (SYSTEM token) to read a profile, e.g. the driver card (#202)', async () => {
+      profiles.findById.mockResolvedValue(profile());
+      const result = await service.getProfileById('u-owner', { sub: 'system:delivery-service', email: 'delivery-service@internal', role: UserRole.SYSTEM });
+      expect(result.id).toBe('u-owner');
+    });
+
     it('rejects stored credential mapping drift', async () => {
       profiles.findById.mockResolvedValue(profile({ authCredentialId: 'drifted-id' }));
       await expect(service.getProfileById('u-owner', owner)).rejects.toThrow(ConflictError);

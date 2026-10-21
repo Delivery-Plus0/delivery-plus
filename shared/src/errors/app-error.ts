@@ -83,6 +83,16 @@ export class CartChangedError extends AppError {
 }
 
 /**
+ * #202: the account is suspended. Returned only after the password (or refresh token) checked out, so
+ * it reveals nothing to someone who doesn't hold the account. Apps show a dedicated screen.
+ */
+export class AccountSuspendedError extends AppError {
+  constructor(message = 'This account is suspended. Contact support.') {
+    super(403, 'AccountSuspended', message);
+  }
+}
+
+/**
  * F6 (#205): another request kept changing the same cart, so this change couldn't be applied. Its own
  * code so clients don't mistake it for the different-restaurant `Conflict`: the answer is "try again",
  * never "start a new cart".

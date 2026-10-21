@@ -1,0 +1,188 @@
+import express from 'express';
+import { createServer, IncomingHttpHeaders, request as httpRequest, Server } from 'node:http';
+import { AddressInfo } from 'node:net';
+import { CLIENT_IP_HEADER, GATEWAY_MARKER_HEADER } from '@food-delivery/shared';
+import { claimedRole, configureTrustProxy, edgePolicy, trustedProxyHops } from './edge';
+
+/**
+ * http-proxy-middleware v4 is ESM only and Jest runs CommonJS (see main.spec.ts), so this stands in
+ * for it: forward the request with the incoming headers, which is what the proxy does. It always
+ * forwards to a fixed path: only the headers matter here. The real gateway is covered end to end by
+ * scripts/e2e.ts.
+ */
+function forwardTo(target: string): express.RequestHandler {
+  return (req, res) => {
+    const upstreamReq = httpRequest(`${target}/forwarded`, { method: req.method, headers: req.headers }, (upstreamRes) => {
+      res.status(upstreamRes.statusCode ?? 502);
+      upstreamRes.pipe(res);
+    });
+    req.pipe(upstreamReq);
+  };
+}
+
+const token = (claims: object) => `Bearer h.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.s`;
+
+describe('gateway edge policy (#202)', () => {
+  let upstream: Server;
+  let gateway: Server;
+  let gatewayUrl: string;
+  let received: IncomingHttpHeaders[] = [];
+
+  beforeAll(async () => {
+    // A stand-in service that records what the gateway forwarded.
+    upstream = createServer((req, res) => {
+      received.push(req.headers);
+      res.end('ok');
+    });
+    await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve));
+    const target = `http://127.0.0.1:${(upstream.address() as AddressInfo).port}`;
+
+    // The same order as main.ts: trust proxy (default: none), edge policy, then the proxy.
+    const app = express();
+    configureTrustProxy(app, {});
+    app.use(edgePolicy);
+    app.use('/api/orders', forwardTo(target));
+    gateway = createServer(app);
+    await new Promise<void>((resolve) => gateway.listen(0, '127.0.0.1', resolve));
+    gatewayUrl = `http://127.0.0.1:${(gateway.address() as AddressInfo).port}`;
+  });
+
+  afterAll(async () => {
+    await new Promise((resolve) => gateway.close(resolve));
+    await new Promise((resolve) => upstream.close(resolve));
+  });
+
+  beforeEach(() => {
+    received = [];
+  });
+
+  it('marks every proxied request as coming through the gateway', async () => {
+    const response = await fetch(`${gatewayUrl}/api/orders/1`);
+
+    expect(response.status).toBe(200);
+    expect(received[0][GATEWAY_MARKER_HEADER]).toBe('1');
+  });
+
+  it.each([
+    ['an empty value', ''],
+    ['"0"', '0'],
+    ['"false"', 'false'],
+    ['a long value', 'x'.repeat(200)],
+  ])('replaces a client-supplied marker (%s): the client is still treated as external', async (_label, value) => {
+    await fetch(`${gatewayUrl}/api/orders/1`, { headers: { [GATEWAY_MARKER_HEADER]: value, 'X-Delivery-Plus-Gateway': value } });
+
+    expect(received[0][GATEWAY_MARKER_HEADER]).toBe('1');
+  });
+
+  it('forwards the real client address and replaces one the client supplied (#203)', async () => {
+    await fetch(`${gatewayUrl}/api/orders/1`, { headers: { [CLIENT_IP_HEADER]: '198.51.100.9' } });
+
+    expect(received[0][CLIENT_IP_HEADER]).toMatch(/127.0.0.1/);
+    expect(received[0][CLIENT_IP_HEADER]).not.toContain('198.51.100.9');
+  });
+
+  it('ignores a client X-Forwarded-For when no proxy is trusted (#251)', async () => {
+    await fetch(`${gatewayUrl}/api/orders/1`, { headers: { 'X-Forwarded-For': '203.0.113.5' } });
+
+    expect(received[0][CLIENT_IP_HEADER]).toMatch(/127.0.0.1/);
+  });
+
+  it('refuses a bearer token claiming the SYSTEM role and never proxies it', async () => {
+    const response = await fetch(`${gatewayUrl}/api/orders/1`, { headers: { Authorization: token({ sub: 'system:x', role: 'SYSTEM' }) } });
+
+    expect(response.status).toBe(401);
+    expect(received).toHaveLength(0);
+  });
+
+  it('proxies user tokens unchanged', async () => {
+    const authorization = token({ sub: 'u1', role: 'CUSTOMER' });
+
+    expect((await fetch(`${gatewayUrl}/api/orders/1`, { headers: { Authorization: authorization } })).status).toBe(200);
+    expect(received[0].authorization).toBe(authorization);
+  });
+
+  it('reads the claimed role without verifying, and ignores anything that is not a JWT', () => {
+    expect(claimedRole(token({ role: 'SYSTEM' }))).toBe('SYSTEM');
+    expect(claimedRole(token({ role: 'ADMIN' }))).toBe('ADMIN');
+    expect(claimedRole('Bearer not-a-jwt')).toBeUndefined();
+    expect(claimedRole('Bearer a.%%%.c')).toBeUndefined();
+    expect(claimedRole('Basic abc')).toBeUndefined();
+    expect(claimedRole(undefined)).toBeUndefined();
+  });
+});
+
+describe('gateway behind a trusted proxy (#251)', () => {
+  let upstream: Server;
+  let gateway: Server;
+  let gatewayUrl: string;
+  let received: IncomingHttpHeaders[] = [];
+
+  beforeAll(async () => {
+    upstream = createServer((req, res) => {
+      received.push(req.headers);
+      res.end('ok');
+    });
+    await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve));
+    const target = `http://127.0.0.1:${(upstream.address() as AddressInfo).port}`;
+
+    // One load balancer in front: it appends the address it saw to X-Forwarded-For.
+    const app = express();
+    expect(configureTrustProxy(app, { TRUSTED_PROXY_HOPS: '1' })).toBe(1);
+    app.use(edgePolicy);
+    app.use('/api/orders', forwardTo(target));
+    gateway = createServer(app);
+    await new Promise<void>((resolve) => gateway.listen(0, '127.0.0.1', resolve));
+    gatewayUrl = `http://127.0.0.1:${(gateway.address() as AddressInfo).port}`;
+  });
+
+  afterAll(async () => {
+    await new Promise((resolve) => gateway.close(resolve));
+    await new Promise((resolve) => upstream.close(resolve));
+  });
+
+  beforeEach(() => {
+    received = [];
+  });
+
+  /** A request as the load balancer forwards it: whatever the client sent, then the address it saw. */
+  const viaBalancer = (clientAddress: string, clientSent?: string) =>
+    fetch(`${gatewayUrl}/api/orders/1`, {
+      headers: { 'X-Forwarded-For': clientSent ? `${clientSent}, ${clientAddress}` : clientAddress },
+    });
+
+  it('counts each client by the address the balancer saw, so two clients get two buckets', async () => {
+    await viaBalancer('198.51.100.20');
+    await viaBalancer('198.51.100.21');
+
+    expect(received.map((headers) => headers[CLIENT_IP_HEADER])).toEqual(['198.51.100.20', '198.51.100.21']);
+  });
+
+  it('ignores addresses a client prepends to X-Forwarded-For', async () => {
+    await viaBalancer('198.51.100.20', '6.6.6.6, 7.7.7.7');
+
+    expect(received[0][CLIENT_IP_HEADER]).toBe('198.51.100.20');
+  });
+
+  it('still replaces a client-supplied client IP header', async () => {
+    await fetch(`${gatewayUrl}/api/orders/1`, { headers: { 'X-Forwarded-For': '198.51.100.20', [CLIENT_IP_HEADER]: '6.6.6.6' } });
+
+    expect(received[0][CLIENT_IP_HEADER]).toBe('198.51.100.20');
+  });
+});
+
+describe('TRUSTED_PROXY_HOPS (#251)', () => {
+  it.each([
+    [undefined, 0],
+    ['', 0],
+    [' 0 ', 0],
+    ['1', 1],
+    ['5', 5],
+  ])('accepts %p as %p hops', (value, hops) => {
+    expect(trustedProxyHops(value === undefined ? {} : { TRUSTED_PROXY_HOPS: value })).toBe(hops);
+  });
+
+  it.each(['-1', '6', '1.5', 'true', 'loopback', '10.0.0.0/8'])('refuses %p, so the gateway does not start', (value) => {
+    expect(() => trustedProxyHops({ TRUSTED_PROXY_HOPS: value })).toThrow(/TRUSTED_PROXY_HOPS/);
+    expect(() => configureTrustProxy({ set: jest.fn() }, { TRUSTED_PROXY_HOPS: value })).toThrow(/TRUSTED_PROXY_HOPS/);
+  });
+});

@@ -64,17 +64,17 @@ describe('AutoDispatchService', () => {
       expect(repo.findByOrderId).toHaveBeenCalledWith('order-1');
     });
 
-    it('creates the delivery and assigns a driver with dispatch (ADMIN) rights, no API call needed', async () => {
+    it('creates the delivery and assigns a driver as SYSTEM (#202), no API call needed', async () => {
       repo.findByOrderId.mockResolvedValue(null);
       deliveriesService.create.mockResolvedValue(delivery(DeliveryStatus.CREATED));
 
       await service.dispatchOrder('order-1');
 
       expect(deliveriesService.create).toHaveBeenCalledWith(
-        expect.objectContaining({ role: UserRole.ADMIN }),
+        expect.objectContaining({ role: UserRole.SYSTEM }),
         { orderId: 'order-1' },
       );
-      expect(deliveriesService.assignDriver).toHaveBeenCalledWith('delivery-1', expect.objectContaining({ role: UserRole.ADMIN }));
+      expect(deliveriesService.assignDriver).toHaveBeenCalledWith('delivery-1', expect.objectContaining({ role: UserRole.SYSTEM }));
     });
 
     it.each([DeliveryStatus.DRIVER_ASSIGNED, DeliveryStatus.PICKED_UP, DeliveryStatus.DELIVERED, DeliveryStatus.CANCELLED])(

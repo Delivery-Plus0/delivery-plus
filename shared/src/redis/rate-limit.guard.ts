@@ -2,6 +2,7 @@ import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { RateLimiterService } from './rate-limiter.service';
 import { AppError } from '../errors/app-error';
+import { clientIpOf } from '../nest/auth/system-principal';
 
 export const RATE_LIMIT_KEY = 'RATE_LIMIT';
 
@@ -33,8 +34,9 @@ export class RateLimitGuard implements CanActivate {
     if (!options) return true;
 
     const request = context.switchToHttp().getRequest();
-    // The route's own key if it has one, else the user ID if authenticated, else the IP address
-    const identifier = options.key?.(request) || request.user?.sub || request.ip || 'unknown-ip';
+    // The route's own key if it has one, else the user ID if authenticated, else the client's IP (the
+    // gateway forwards it, #203; before that every anonymous caller shared the gateway's address).
+    const identifier = options.key?.(request) || request.user?.sub || clientIpOf(request);
     
     // Key structure: ratelimit:{path}:{identifier}
     const path = request.route.path;

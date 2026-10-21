@@ -4,6 +4,7 @@ import { createProxyMiddleware } from 'http-proxy-middleware';
 import { SwaggerModule } from '@nestjs/swagger';
 import { NextFunction, Request, Response } from 'express';
 import { isBlockedInternalRoute } from './route-policy';
+import { configureTrustProxy, edgePolicy } from './edge';
 
 export const PROXIES = {
   '/api/auth': process.env.AUTH_SERVICE_URL || 'http://localhost:3001',
@@ -97,6 +98,9 @@ async function bootstrap() {
 
   const PORT = process.env.PORT || 3000;
 
+  // #251: before any middleware reads request.ip. An invalid TRUSTED_PROXY_HOPS stops startup here.
+  configureTrustProxy(app.getHttpAdapter().getInstance());
+
   app.enableCors(getCorsOptions());
 
   app.use((request: Request, response: Response, next: NextFunction) => {
@@ -110,6 +114,9 @@ async function bootstrap() {
 
     next();
   });
+
+  // #202: an unspoofable "came through the gateway" marker, and no SYSTEM tokens from outside.
+  app.use(edgePolicy);
 
   const swaggerOptions = {
     explorer: true,

@@ -1,6 +1,8 @@
 import { UserRole } from '@food-delivery/shared';
 import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
 
+export type AccountStatus = 'ACTIVE' | 'SUSPENDED';
+
 @Entity('credentials')
 export class Credential {
   @PrimaryGeneratedColumn('uuid')
@@ -28,11 +30,29 @@ export class Credential {
   @Column({ type: 'timestamptz', nullable: true })
   lastFailedLoginAt!: Date | null;
 
+  /** #202: a SUSPENDED account can't log in or refresh; suspending ends its sessions. */
+  @Column({ type: 'varchar', length: 20, default: 'ACTIVE' })
+  status!: AccountStatus;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  suspendedAt!: Date | null;
+
+  @Column({ type: 'varchar', length: 300, nullable: true })
+  suspendedReason!: string | null;
+
   @Column({ type: 'varchar', nullable: true })
   verificationTokenHash!: string | null;
 
   @Column({ type: 'timestamptz', nullable: true })
   verificationTokenExpiresAt!: Date | null;
+
+  /** #203: wrong codes tried against the current one; at the limit the code is invalidated. */
+  @Column({ default: 0 })
+  verificationAttempts!: number;
+
+  /** #203: when the last verification email was sent. */
+  @Column({ type: 'timestamptz', nullable: true })
+  verificationSentAt!: Date | null;
 
   @CreateDateColumn()
   createdAt!: Date;

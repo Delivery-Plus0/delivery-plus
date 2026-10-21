@@ -22,6 +22,8 @@ services:
     environment:
       NODE_ENV: production
       CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS must be set}
+      # Reverse proxies in front of the gateway (#251), e.g. 1 behind one load balancer; see docs/services/api-gateway.md.
+      TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-0}
       AUTH_SERVICE_URL: http://auth-service:3001
       USER_SERVICE_URL: http://user-service:3002
       RESTAURANT_SERVICE_URL: http://restaurant-service:3003
@@ -75,6 +77,13 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER_URLENCODED:?POSTGRES_USER_URLENCODED must be set}:${POSTGRES_PASSWORD_URLENCODED:?POSTGRES_PASSWORD_URLENCODED must be set}@postgres:5432/auth_service
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+      # #203: EMAIL_PROVIDER=ses sends verification codes through Amazon SES (docs/runbooks/email-ses.md).
+      # AWS credentials come only from the AWS provider chain (task/instance role), never from this file.
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-disabled}
+      AWS_REGION: ${AWS_REGION:-}
+      SES_FROM_ADDRESS: ${SES_FROM_ADDRESS:-}
+      SES_CONFIGURATION_SET: ${SES_CONFIGURATION_SET:-}
+      EMAIL_CODE_HASH_SECRET: ${EMAIL_CODE_HASH_SECRET:-}
       INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:?INTERNAL_AUTH_SECRET must be set}
       USER_SERVICE_URL: http://user-service:3002
     healthcheck:
@@ -96,6 +105,7 @@ services:
       NODE_ENV: production
       DATABASE_URL: postgres://${POSTGRES_USER_URLENCODED:?POSTGRES_USER_URLENCODED must be set}:${POSTGRES_PASSWORD_URLENCODED:?POSTGRES_PASSWORD_URLENCODED must be set}@postgres:5432/user_service
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+      SYSTEM_JWT_SECRET: ${SYSTEM_JWT_SECRET:?SYSTEM_JWT_SECRET must be set (a long random value, different from JWT_SECRET)}
       REDIS_URL: redis://redis:6379
       INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:?INTERNAL_AUTH_SECRET must be set}
       # Phone verification (#153): off until a real SMS provider and its credentials exist.
@@ -217,6 +227,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER_URLENCODED:?POSTGRES_USER_URLENCODED must be set}:${POSTGRES_PASSWORD_URLENCODED:?POSTGRES_PASSWORD_URLENCODED must be set}@postgres:5432/order_service
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+      SYSTEM_JWT_SECRET: ${SYSTEM_JWT_SECRET:?SYSTEM_JWT_SECRET must be set (a long random value, different from JWT_SECRET)}
       KAFKA_BROKER: kafka:29092
       CART_SERVICE_URL: http://cart-service:3005
       RESTAURANT_SERVICE_URL: http://restaurant-service:3003
@@ -250,6 +261,7 @@ services:
       NODE_ENV: production
       DATABASE_URL: postgres://${POSTGRES_USER_URLENCODED:?POSTGRES_USER_URLENCODED must be set}:${POSTGRES_PASSWORD_URLENCODED:?POSTGRES_PASSWORD_URLENCODED must be set}@postgres:5432/payment_service
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+      SYSTEM_JWT_SECRET: ${SYSTEM_JWT_SECRET:?SYSTEM_JWT_SECRET must be set (a long random value, different from JWT_SECRET)}
       KAFKA_BROKER: kafka:29092
       ORDER_SERVICE_URL: http://order-service:3006
     healthcheck:
@@ -275,6 +287,7 @@ services:
       NODE_ENV: production
       DATABASE_URL: postgres://${POSTGRES_USER_URLENCODED:?POSTGRES_USER_URLENCODED must be set}:${POSTGRES_PASSWORD_URLENCODED:?POSTGRES_PASSWORD_URLENCODED must be set}@postgres:5432/delivery_service
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+      SYSTEM_JWT_SECRET: ${SYSTEM_JWT_SECRET:?SYSTEM_JWT_SECRET must be set (a long random value, different from JWT_SECRET)}
       REDIS_URL: redis://redis:6379
       KAFKA_BROKER: kafka:29092
       ORDER_SERVICE_URL: http://order-service:3006
@@ -308,6 +321,7 @@ services:
       NODE_ENV: production
       DATABASE_URL: postgres://${POSTGRES_USER_URLENCODED:?POSTGRES_USER_URLENCODED must be set}:${POSTGRES_PASSWORD_URLENCODED:?POSTGRES_PASSWORD_URLENCODED must be set}@postgres:5432/driver_service
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+      SYSTEM_JWT_SECRET: ${SYSTEM_JWT_SECRET:?SYSTEM_JWT_SECRET must be set (a long random value, different from JWT_SECRET)}
       USER_SERVICE_URL: http://user-service:3002
       # Phone verification gate (#153): on only together with a real SMS provider.
       PHONE_VERIFICATION_REQUIRED: ${PHONE_VERIFICATION_REQUIRED:-false}
@@ -333,6 +347,7 @@ services:
       NODE_ENV: production
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+      SYSTEM_JWT_SECRET: ${SYSTEM_JWT_SECRET:?SYSTEM_JWT_SECRET must be set (a long random value, different from JWT_SECRET)}
       DELIVERY_SERVICE_URL: http://delivery-service:3008
       DRIVER_SERVICE_URL: http://driver-service:3009
       KAFKA_BROKER: kafka:29092

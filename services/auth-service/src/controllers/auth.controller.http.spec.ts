@@ -14,7 +14,9 @@ import { UserServiceClient } from '../common/user-service.client';
 import { InternalAuthGuard } from '../guards/internal-auth.guard';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { InMemorySessions } from '../testing/in-memory-sessions';
-import { Credential } from '../entities/credential.entity';
+import { AccountStatus, Credential } from '../entities/credential.entity';
+import { StaffPermissionsRepository } from '../repositories/staff-permissions.repository';
+import { DisabledEmailSender } from '../email/email-sender';
 
 const JWT_SECRET = 'test-jwt-secret';
 const INTERNAL_SECRET = 'test-internal-secret';
@@ -40,7 +42,16 @@ const credentials = {
   resetFailureState: async () => undefined,
   recordFailedLogin: async (id: string) => credentialRows.get(id) ?? null,
   update: async () => null,
+  setStatus: async (id: string, status: AccountStatus, reason: string | null) => {
+    const row = credentialRows.get(id);
+    if (!row) return null;
+    Object.assign(row, { status, suspendedAt: status === 'SUSPENDED' ? new Date() : null, suspendedReason: status === 'SUSPENDED' ? reason : null });
+    return row;
+  },
 };
+/** Staff permissions by credential id (#202). */
+const permissionRows = new Map<string, string[]>();
+const staffPermissions = { listFor: async (id: string) => [...(permissionRows.get(id) ?? [])].sort() };
 /** Counts per key like the Redis limiter, so the per-session refresh limit can be exercised. */
 const counts = new Map<string, number>();
 const limiter = {
@@ -64,7 +75,7 @@ const redis = { set: async (key: string) => (nonces.has(key) ? null : (nonces.ad
       provide: AuthService,
       inject: [JwtService, SessionsService],
       useFactory: (jwt: JwtService, sessions: SessionsService) =>
-        new AuthService(credentials as unknown as CredentialsRepository, {} as UserServiceClient, jwt, config, sessions),
+        new AuthService(credentials as unknown as CredentialsRepository, {} as UserServiceClient, jwt, config, sessions, staffPermissions as unknown as StaffPermissionsRepository, new DisabledEmailSender(), limiter as unknown as RateLimiterService),
     },
     InternalAuthGuard,
   ],
@@ -89,6 +100,11 @@ describe('Auth sessions over HTTP (#34)', () => {
       lastFailedLoginAt: null,
       verificationTokenHash: null,
       verificationTokenExpiresAt: null,
+      verificationAttempts: 0,
+      verificationSentAt: null,
+      status: 'ACTIVE',
+      suspendedAt: null,
+      suspendedReason: null,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
@@ -213,6 +229,97 @@ describe('Auth sessions over HTTP (#34)', () => {
 
     // Another session from the same IP is not affected.
     expect((await refresh((await login()).refreshToken)).status).toBe(200);
+  });
+
+  describe('account status and staff permissions (#202)', () => {
+    const STAFF_PASSWORD = 'staff-password-123';
+    let adminId: string;
+    let readOnlyStaffId: string;
+
+    const addCredential = async (email: string, role: UserRole, password = PASSWORD) => {
+      const id = randomUUID();
+      credentialRows.set(id, {
+        id, email, passwordHash: await bcrypt.hash(password, 4), role, emailVerified: true, lockedUntil: null, failedLoginCount: 0,
+        lastFailedLoginAt: null, verificationTokenHash: null, verificationTokenExpiresAt: null, verificationAttempts: 0, verificationSentAt: null, status: 'ACTIVE', suspendedAt: null,
+        suspendedReason: null, createdAt: new Date(), updatedAt: new Date(),
+      });
+      return id;
+    };
+    const signIn = async (email: string, password = PASSWORD) => (await post('/auth/login', { email, password })).body;
+    const setStatus = async (id: string, body: unknown, accessToken: string) => {
+      const response = await fetch(`${baseUrl}/auth/users/${id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify(body),
+      });
+      return { status: response.status, body: await response.json() };
+    };
+
+    beforeAll(async () => {
+      adminId = await addCredential('admin@example.com', UserRole.ADMIN, STAFF_PASSWORD);
+      permissionRows.set(adminId, ['users.manage', 'ops.read']);
+      readOnlyStaffId = await addCredential('support@example.com', UserRole.ADMIN, STAFF_PASSWORD);
+      permissionRows.set(readOnlyStaffId, ['support.read']);
+    });
+
+    it('puts the staff permissions in staff access tokens, and none in other tokens', async () => {
+      const staff = await signIn('admin@example.com', STAFF_PASSWORD);
+      const driver = await signIn('driver@example.com');
+
+      expect(app.get(JwtService).decode(staff.accessToken)).toMatchObject({ role: UserRole.ADMIN, perms: ['ops.read', 'users.manage'] });
+      expect(app.get(JwtService).decode(driver.accessToken)).not.toHaveProperty('perms');
+    });
+
+    it('re-reads the permissions on refresh, so a change applies within one access-token lifetime', async () => {
+      const staff = await signIn('support@example.com', STAFF_PASSWORD);
+      permissionRows.set(readOnlyStaffId, ['support.read', 'support.act']);
+      try {
+        const rotated = (await refresh(staff.refreshToken)).body;
+        expect(app.get(JwtService).decode(rotated.accessToken)).toMatchObject({ perms: ['support.act', 'support.read'] });
+      } finally {
+        permissionRows.set(readOnlyStaffId, ['support.read']);
+      }
+    });
+
+    it('suspends an account: its sessions end, refresh and login answer 403 AccountSuspended; a wrong password stays 401', async () => {
+      const userId = await addCredential('to-suspend@example.com', UserRole.CUSTOMER);
+      const phone = await signIn('to-suspend@example.com');
+      const laptop = await signIn('to-suspend@example.com');
+      const admin = await signIn('admin@example.com', STAFF_PASSWORD);
+
+      const suspended = await setStatus(userId, { status: 'SUSPENDED', reason: 'Chargeback fraud' }, admin.accessToken);
+
+      expect(suspended.status).toBe(200);
+      expect(suspended.body).toMatchObject({ userId, status: 'SUSPENDED', suspendedReason: 'Chargeback fraud', sessionsRevoked: 2 });
+      for (const session of [phone, laptop]) {
+        expect(await refresh(session.refreshToken)).toMatchObject({ status: 403, body: { error: 'AccountSuspended' } });
+      }
+      expect(await post('/auth/login', { email: 'to-suspend@example.com', password: PASSWORD })).toMatchObject({ status: 403, body: { error: 'AccountSuspended' } });
+      // Nothing is revealed to someone without the password.
+      expect(await post('/auth/login', { email: 'to-suspend@example.com', password: 'wrong-password' })).toMatchObject({ status: 401 });
+
+      counts.clear(); // the login limit (5 per minute) is not what this test is about
+      const reactivated = await setStatus(userId, { status: 'ACTIVE' }, admin.accessToken);
+      expect(reactivated.body).toMatchObject({ status: 'ACTIVE', suspendedAt: null, suspendedReason: null });
+      expect((await post('/auth/login', { email: 'to-suspend@example.com', password: PASSWORD })).status).toBe(200);
+      // The sessions ended by the suspension stay ended.
+      expect(await refresh(phone.refreshToken)).toMatchObject({ status: 401, body: { error: 'InvalidRefreshToken' } });
+    });
+
+    it('refuses the status route without users.manage, to non-staff, for staff targets and for yourself', async () => {
+      const target = await addCredential('target@example.com', UserRole.DRIVER);
+      const support = await signIn('support@example.com', STAFF_PASSWORD);
+      const driver = await signIn('driver@example.com');
+      const admin = await signIn('admin@example.com', STAFF_PASSWORD);
+
+      expect((await setStatus(target, { status: 'SUSPENDED' }, support.accessToken)).status).toBe(403);
+      expect((await setStatus(target, { status: 'SUSPENDED' }, driver.accessToken)).status).toBe(403);
+      expect((await setStatus(readOnlyStaffId, { status: 'SUSPENDED' }, admin.accessToken)).status).toBe(403);
+      expect((await setStatus(adminId, { status: 'SUSPENDED' }, admin.accessToken)).status).toBe(403);
+      expect((await setStatus(target, { status: 'BANNED' }, admin.accessToken)).status).toBe(400);
+      expect((await setStatus(randomUUID(), { status: 'SUSPENDED' }, admin.accessToken)).status).toBe(404);
+      expect(credentialRows.get(target)?.status).toBe('ACTIVE');
+    });
   });
 
   describe('POST /internal/auth/users/:id/revoke-sessions', () => {

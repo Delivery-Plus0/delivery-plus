@@ -6,6 +6,8 @@ export interface JwtPayload {
   role: UserRole;
   /** The refresh session this access token was issued for (#34). Absent on system tokens. */
   sid?: string;
+  /** Staff permissions (#202), only on ADMIN tokens. */
+  perms?: string[];
 }
 
 export interface AuthenticatedRequest extends Request {

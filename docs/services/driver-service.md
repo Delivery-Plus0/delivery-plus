@@ -11,10 +11,10 @@ From `services/driver-service/src/controllers/drivers.controller.ts`:
 - `POST /drivers/me/online` – go online (OFFLINE → AVAILABLE); only a VERIFIED driver (`403 DriverNotVerified` otherwise, #206); not while BUSY
 - `POST /drivers/me/offline` – go offline (AVAILABLE → OFFLINE); not while BUSY
 - `POST /drivers/me/status` – same rules as the two routes above (ADMIN may use it for any valid transition)
-- `GET /drivers/available` – list the drivers auto-dispatch may claim: AVAILABLE and VERIFIED (ADMIN/system token)
+- `GET /drivers/available` – list the drivers auto-dispatch may claim: AVAILABLE and VERIFIED (SYSTEM token only, #202)
 - `PATCH /drivers/:id/verification` – admin review: `PENDING`, `VERIFIED` or `REJECTED` (ADMIN)
 - `GET /drivers/:id` – fetch a driver by ID
-- `PATCH /drivers/:id/status` – admin/system status update
+- `PATCH /drivers/:id/status` – claim or release a driver (SYSTEM token only: delivery-service, #202)
 
 ## Dependencies
 - Persists driver data in PostgreSQL
@@ -88,9 +88,9 @@ Who may make each transition (`src/common/driver-transition-rules.ts`):
 | Transition | Who | Route |
 | --- | --- | --- |
 | OFFLINE → AVAILABLE, AVAILABLE → OFFLINE | the driver (or ADMIN) | `me/online`, `me/offline`, `me/status` |
-| AVAILABLE → BUSY (claim for a delivery) | ADMIN only: delivery-service with its system token | `PATCH /drivers/:id/status` |
-| BUSY → AVAILABLE (release after complete/cancel) | ADMIN only: delivery-service with its system token | `PATCH /drivers/:id/status` |
-| BUSY → OFFLINE (that release, for a driver who is no longer VERIFIED, #206) | ADMIN only: delivery-service with its system token | `PATCH /drivers/:id/status` (asking for AVAILABLE) |
+| AVAILABLE → BUSY (claim for a delivery) | SYSTEM only: delivery-service with its system token (#202) | `PATCH /drivers/:id/status` |
+| BUSY → AVAILABLE (release after complete/cancel) | SYSTEM only: delivery-service with its system token (#202) | `PATCH /drivers/:id/status` |
+| BUSY → OFFLINE (that release, for a driver who is no longer VERIFIED, #206) | SYSTEM only: delivery-service with its system token (#202) | `PATCH /drivers/:id/status` (asking for AVAILABLE) |
 | → SUSPENDED, SUSPENDED → OFFLINE | ADMIN only | either |
 
 Every change goes through one path in `DriversService`, in this order:

@@ -1,6 +1,20 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
-import { JwtAuthGuard, CurrentUser, JwtPayload, RateLimit, RateLimitGuard } from '@food-delivery/shared';
+import {
+  JwtAuthGuard,
+  CurrentUser,
+  JwtPayload,
+  clientIpOf,
+  generateCorrelationId,
+  PermissionsGuard,
+  RateLimit,
+  RateLimitGuard,
+  RequirePermissions,
+  Roles,
+  RolesGuard,
+  UserRole,
+} from '@food-delivery/shared';
+import { UpdateAccountStatusDto } from '../dto/account-status.dto';
 import { AuthService } from '../services/auth.service';
 import { RegisterDto } from '../dto/register.dto';
 import { LoginDto } from '../dto/login.dto';
@@ -10,6 +24,13 @@ import { AuthResponseDto, VerificationRequiredResponseDto } from '../dto/auth-re
 import { RefreshTokenDto } from '../dto/session.dto';
 import { RequestWithContext } from '@food-delivery/shared';
 import { SessionContext, sessionIdOf } from '../services/sessions.service';
+import { EmailLocale, localeFrom } from '../email/verification-email';
+
+/** #203: the verification email's language, from Accept-Language (Arabic by default, like the apps). */
+function localeOf(req: RequestWithContext): EmailLocale {
+  const header = (req as unknown as { headers: Record<string, string | string[] | undefined> }).headers['accept-language'];
+  return localeFrom(typeof header === 'string' ? header : undefined);
+}
 
 /** What a session records about the client; the app id comes from the body. */
 function sessionContext(req: { headers: Record<string, string | string[] | undefined> }): SessionContext {
@@ -27,7 +48,7 @@ export class AuthController {
   @RateLimit({ limit: 5, windowSeconds: 60 })
   @ApiOperation({ summary: 'Register a new user (creates credentials + profile); signs in unless email verification is required' })
   register(@Body() dto: RegisterDto, @Req() req: RequestWithContext): Promise<AuthResponseDto | VerificationRequiredResponseDto> {
-    return this.authService.register(dto, req.correlationId, sessionContext(req as never));
+    return this.authService.register(dto, req.correlationId, { ...sessionContext(req as never), locale: localeOf(req) });
   }
 
   @Post('login')
@@ -81,8 +102,23 @@ export class AuthController {
   @RateLimit({ limit: 5, windowSeconds: 60 })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Resend a verification email if the account is not already verified' })
-  resendVerification(@Body() dto: ResendVerificationDto): Promise<{ message: string }> {
-    return this.authService.resendVerification(dto);
+  resendVerification(@Body() dto: ResendVerificationDto, @Req() req: RequestWithContext): Promise<{ message: string }> {
+    return this.authService.resendVerification(dto, {
+      correlationId: req.correlationId ?? generateCorrelationId(),
+      locale: localeOf(req),
+      clientIp: clientIpOf(req as never),
+    });
+  }
+
+  /** #202: suspend or reactivate a customer, owner or driver (staff with users.manage). */
+  @Patch('users/:id/status')
+  @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
+  @Roles(UserRole.ADMIN)
+  @RequirePermissions('users.manage')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Suspend or reactivate an account (staff with users.manage). Suspending ends its sessions' })
+  setAccountStatus(@Param('id', new ParseUUIDPipe()) id: string, @Body() dto: UpdateAccountStatusDto, @CurrentUser() actor: JwtPayload) {
+    return this.authService.setAccountStatus(id, dto.status, dto.reason?.trim() || null, actor.sub);
   }
 
   @Get('me')

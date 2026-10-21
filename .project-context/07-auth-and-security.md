@@ -26,7 +26,8 @@ The defined roles are:
 - `CUSTOMER`
 - `RESTAURANT_OWNER`
 - `DRIVER`
-- `ADMIN`
+- `ADMIN`: staff; what each person may do is in the token's `perms` (#202)
+- `SYSTEM`: a service calling another service (#202); never a person, never a credential
 
 These values are used as role enums in the credentials table and by guard logic across service boundaries.
 
@@ -74,8 +75,8 @@ This means the platform often relies on consistent user identifiers while still 
 - Registration, login, and `GET /auth/me` are implemented in `auth-service`.
 - JWT validation and role guards are shared by the domain services.
 - Roles are `CUSTOMER`, `RESTAURANT_OWNER`, `DRIVER`, and `ADMIN`.
-- **Public registration picks the role on the server.** `RegisterDto.role` accepts only `SELF_SERVICE_ROLES` (`CUSTOMER`, `RESTAURANT_OWNER`, `DRIVER`; omitted or null → `CUSTOMER`). `AuthService.register` re-checks the same allow-list before touching the database (403), so `ADMIN` can never be self-assigned (#105, found in the 2026-10-01 review). There is no admin-provisioning endpoint: admins are created out of band. The only ADMIN principals in normal operation are service system tokens.
-- Email verification (off by default: `EMAIL_VERIFICATION_REQUIRED=false`) and failed-login lockout (5 attempts → 15 minutes, generic "Invalid email or password") are implemented. While verification is required, register returns `{ userId, verificationRequired: true }` and no tokens (#34).
+- **Public registration picks the role on the server.** `RegisterDto.role` accepts only `SELF_SERVICE_ROLES` (`CUSTOMER`, `RESTAURANT_OWNER`, `DRIVER`; omitted or null → `CUSTOMER`). `AuthService.register` re-checks the same allow-list before touching the database (403), so `ADMIN` can never be self-assigned (#105, found in the 2026-10-01 review). There is no admin-provisioning endpoint: the first admin is created out of band with the bootstrap CLI (#202), and services are `SYSTEM`, never `ADMIN`.
+- Email verification (off by default: `EMAIL_VERIFICATION_REQUIRED=false`) and failed-login lockout (5 attempts → 15 minutes, generic "Invalid email or password") are implemented. While verification is required, register returns `{ userId, verificationRequired: true }` and no tokens (#34). The code is a 6-digit number emailed through the `EmailSender` port (#203): HMAC-stored, 10 minutes, single use, 5 attempts; resend limits count unknown addresses too, so they reveal nothing.
 - **Sessions (#34).** Login (and register, when verification is off) returns a 15-minute access JWT and an opaque refresh token `<sessionId>.<secret>`.
   - Sessions live in auth-service Postgres (`auth_sessions`); only `sha256(secret)` is stored and compared in constant time.
   - `POST /auth/refresh` rotates the token in a compare-and-set UPDATE and re-reads the role. Reusing a rotated token revokes the whole session (theft detection). Every failure is `401 InvalidRefreshToken`.
@@ -84,6 +85,13 @@ This means the platform often relies on consistent user identifiers while still 
   - `POST /internal/auth/users/:id/revoke-sessions` (HMAC, callers in `AUTH_INTERNAL_ALLOWED_SERVICES`) ends sessions for password change/reset, suspension and staff actions.
   - A periodic job deletes sessions that ended more than `SESSION_RETENTION_DAYS` ago.
   - Details and the client contract: [docs/services/auth-service.md](../docs/services/auth-service.md#sessions-34).
+- **SYSTEM principal (#202, F5).**
+  - payment-, delivery- and tracking-service mint `role: SYSTEM` tokens signed with `SYSTEM_JWT_SECRET`, a separate secret from `JWT_SECRET`, valid for 2 minutes.
+  - The shared `JwtAuthGuard` accepts a SYSTEM token only when it's signed with that secret and the request didn't come through the gateway. A user-secret token claiming SYSTEM is refused.
+  - The gateway refuses any bearer token claiming SYSTEM. It also sets `x-delivery-plus-gateway` on every proxied request, after removing any client copy, so services can tell outside requests from internal ones.
+  - Service-only routes (`GET /drivers/available`, `PATCH /drivers/:id/status`, `GET /orders/:id/fee-split`) accept only SYSTEM. Routes that both services and staff use accept both.
+  - `SYSTEM_JWT_SECRET` is required in production: missing, the local default, shorter than 32 characters or equal to `JWT_SECRET` all stop the service at startup.
+- **Account status and staff permissions (#202).** Accounts can be suspended: login and refresh then answer `403 AccountSuspended`, and the account's sessions are revoked. Staff tokens carry `perms`, read from `staff_permissions`. The first super admin comes from the bootstrap CLI ([runbook](../docs/runbooks/bootstrap-admin.md)).
 - Ownership is enforced per object in each service (orders, payments, deliveries, tracking, notifications). Drivers may only move themselves between OFFLINE and AVAILABLE; claim and release are system-token (ADMIN) operations (#33).
 - **Driver locations are untrusted claims (#60).**
   - A report is accepted only while the driver has an active delivery, resolved from their own token, and is stored bound to it. Reads only use positions bound to the delivery being read.
@@ -98,7 +106,7 @@ The current auth implementation is intentionally minimal and is tracked as a man
 - password change and reset flows (#35; session revocation is ready from #34)
 - MFA / 2FA enhancement after the base security model is in place
 - approval before a self-registered `DRIVER` or `RESTAURANT_OWNER` can operate (today these business roles are self-service)
-- service identity: system tokens are signed with the shared `JWT_SECRET` and carry `role: ADMIN`, so any service holding the secret can act as any user and audit logs cannot tell a service from an admin
+- staff management (invitations, granting permissions, #216) and the admin console's actions (#215); the audit log (#213)
 
 These gaps are tracked in GitHub and local issue metadata, especially:
 

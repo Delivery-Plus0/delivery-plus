@@ -14,8 +14,8 @@ import { DeliveriesRepository } from '../repositories/deliveries.repository';
 import { DeliveriesService, DeliveryRequester } from './deliveries.service';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 
-/** Acts with dispatch rights (ADMIN), like a restaurant owner pressing "dispatch", but for every order. */
-const AUTO_DISPATCHER: DeliveryRequester = { userId: 'system:auto-dispatch', role: UserRole.ADMIN, authHeader: '' };
+/** Acts with dispatch rights (SYSTEM, #202), like a restaurant owner pressing "dispatch", but for every order. */
+const AUTO_DISPATCHER: DeliveryRequester = { userId: 'system:auto-dispatch', role: UserRole.SYSTEM, authHeader: '' };
 
 /** How many waiting deliveries one sweep tries to assign. */
 const SWEEP_BATCH = 20;

@@ -141,6 +141,8 @@ services:
       JWT_SECRET: ${JWT_SECRET:-local-development-only}
       # #203: verification emails go to Redis (test:email:<address>) for the E2E; refused in production.
       EMAIL_PROVIDER: test
+      # Access-token lifetime (#34). The apps' E2E runs set it short (e.g. 60s) to prove sessions survive refreshes.
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
       # #202: the test stack's super admin (all permissions), created at startup; refused in production.
       TEST_ADMIN_EMAIL: ${TEST_ADMIN_EMAIL:-qa.admin@delivery-plus.test}
       TEST_ADMIN_PASSWORD: ${TEST_ADMIN_PASSWORD:-Qa-Only-Admin-Passw0rd!}

@@ -10,6 +10,8 @@ export * from './nest/auth/jwt-payload.interface';
 export * from './nest/auth/jwt-auth.guard';
 export * from './nest/auth/roles.guard';
 export * from './nest/auth/internal-auth';
+export * from './nest/auth/system-principal';
+export * from './nest/auth/permissions';
 export * from './nest/decorators/current-user.decorator';
 export * from './nest/middleware/correlation-id.middleware';
 export * from './nest/filters/http-exception.filter';

@@ -2,7 +2,10 @@ export enum UserRole {
   CUSTOMER = 'CUSTOMER',
   RESTAURANT_OWNER = 'RESTAURANT_OWNER',
   DRIVER = 'DRIVER',
+  /** Staff. What each person may do is in the token's `perms` (#202). */
   ADMIN = 'ADMIN',
+  /** A service calling another service (#202, F5). Never a person; signed with SYSTEM_JWT_SECRET. */
+  SYSTEM = 'SYSTEM',
 }
 
 export enum RestaurantStatus {

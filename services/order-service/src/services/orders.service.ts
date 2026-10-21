@@ -283,7 +283,8 @@ export class OrdersService implements OnModuleInit {
   async getById(id: string, requesterId: string, requesterRole: UserRole): Promise<Order> {
     const order = await this.findOrThrow(id);
 
-    if (requesterRole === UserRole.ADMIN || order.customerId === requesterId) {
+    // SYSTEM: payment- and delivery-service reading the order they act on (#202).
+    if (requesterRole === UserRole.ADMIN || requesterRole === UserRole.SYSTEM || order.customerId === requesterId) {
       return order;
     }
 
@@ -437,7 +438,7 @@ export class OrdersService implements OnModuleInit {
       this.logger.warn(`Ignoring stale event: order ${orderId} is ${order.status}, not moving to ${target}`);
       return;
     }
-    await this.updateStatus(orderId, 'system', UserRole.ADMIN, { status: target, ...(reason ? { reason } : {}) });
+    await this.updateStatus(orderId, 'system', UserRole.SYSTEM, { status: target, ...(reason ? { reason } : {}) });
   }
 
   private async findOrThrow(id: string): Promise<Order> {

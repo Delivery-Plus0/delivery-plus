@@ -141,6 +141,9 @@ services:
       JWT_SECRET: ${JWT_SECRET:-local-development-only}
       # Access-token lifetime (#34). The apps' E2E runs set it short (e.g. 60s) to prove sessions survive refreshes.
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
+      # #202: the test stack's super admin (all permissions), created at startup; refused in production.
+      TEST_ADMIN_EMAIL: ${TEST_ADMIN_EMAIL:-qa.admin@delivery-plus.test}
+      TEST_ADMIN_PASSWORD: ${TEST_ADMIN_PASSWORD:-Qa-Only-Admin-Passw0rd!}
       INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:-local-internal-auth-development-only}
       USER_SERVICE_URL: http://user-service:3002
     healthcheck:
@@ -162,6 +165,7 @@ services:
       NODE_ENV: test
       DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/user_service
       JWT_SECRET: ${JWT_SECRET:-local-development-only}
+      SYSTEM_JWT_SECRET: ${SYSTEM_JWT_SECRET:-local-system-jwt-development-only}
       REDIS_URL: redis://redis:6379
       INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:-local-internal-auth-development-only}
       # Isolated test stack only (#153): codes are kept in Redis (test:sms:<phone>) instead of being texted.
@@ -289,6 +293,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/order_service
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:-local-development-only}
+      SYSTEM_JWT_SECRET: ${SYSTEM_JWT_SECRET:-local-system-jwt-development-only}
       KAFKA_BROKER: kafka:29092
       CART_SERVICE_URL: http://cart-service:3005
       RESTAURANT_SERVICE_URL: http://restaurant-service:3003
@@ -320,6 +325,7 @@ services:
       NODE_ENV: test
       DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/payment_service
       JWT_SECRET: ${JWT_SECRET:-local-development-only}
+      SYSTEM_JWT_SECRET: ${SYSTEM_JWT_SECRET:-local-system-jwt-development-only}
       KAFKA_BROKER: kafka:29092
       ORDER_SERVICE_URL: http://order-service:3006
       # #201: the Integration job and seeds force payment outcomes with simulateFailure.
@@ -348,6 +354,7 @@ services:
       NODE_ENV: test
       DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/delivery_service
       JWT_SECRET: ${JWT_SECRET:-local-development-only}
+      SYSTEM_JWT_SECRET: ${SYSTEM_JWT_SECRET:-local-system-jwt-development-only}
       REDIS_URL: redis://redis:6379
       KAFKA_BROKER: kafka:29092
       ORDER_SERVICE_URL: http://order-service:3006
@@ -381,6 +388,7 @@ services:
       NODE_ENV: test
       DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/driver_service
       JWT_SECRET: ${JWT_SECRET:-local-development-only}
+      SYSTEM_JWT_SECRET: ${SYSTEM_JWT_SECRET:-local-system-jwt-development-only}
       USER_SERVICE_URL: http://user-service:3002
       # #206 test hook: seeded drivers start VERIFIED, since no admin account exists to verify them yet.
       DRIVER_AUTO_VERIFY: 'true'
@@ -406,6 +414,7 @@ services:
       NODE_ENV: test
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:-local-development-only}
+      SYSTEM_JWT_SECRET: ${SYSTEM_JWT_SECRET:-local-system-jwt-development-only}
       DELIVERY_SERVICE_URL: http://delivery-service:3008
       DRIVER_SERVICE_URL: http://driver-service:3009
       KAFKA_BROKER: kafka:29092

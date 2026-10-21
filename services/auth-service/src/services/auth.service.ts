@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { createHash, randomBytes } from 'node:crypto';
-import { ConflictError, ForbiddenError, UnauthorizedError, generateCorrelationId } from '@food-delivery/shared';
+import { AccountSuspendedError, ConflictError, ForbiddenError, NotFoundError, UnauthorizedError, generateCorrelationId } from '@food-delivery/shared';
 import { CredentialsRepository } from '../repositories/credentials.repository';
 import { UserServiceClient } from '../common/user-service.client';
 import { RegisterDto, SELF_SERVICE_ROLES } from '../dto/register.dto';
@@ -12,7 +12,8 @@ import { ResendVerificationDto } from '../dto/resend-verification.dto';
 import { AuthResponseDto, VerificationRequiredResponseDto } from '../dto/auth-response.dto';
 import { AppConfig, APP_CONFIG } from '../config/app-config';
 import { UserRole } from '@food-delivery/shared';
-import { Credential } from '../entities/credential.entity';
+import { AccountStatus, Credential } from '../entities/credential.entity';
+import { StaffPermissionsRepository } from '../repositories/staff-permissions.repository';
 import { InvalidRefreshTokenError, SessionContext, SessionsService } from './sessions.service';
 
 const SALT_ROUNDS = 10;
@@ -25,6 +26,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     private readonly sessions: SessionsService,
+    private readonly staffPermissions: StaffPermissionsRepository,
   ) {}
 
   /**
@@ -112,6 +114,11 @@ export class AuthService {
       throw new UnauthorizedError('Please verify your email before logging in');
     }
 
+    // #202: only after the password checked out, so the answer reveals nothing to a stranger.
+    if (credential.status === 'SUSPENDED') {
+      throw new AccountSuspendedError();
+    }
+
     await this.credentials.resetFailureState(credential.id);
 
     return this.signIn(credential, { ...context, appId: dto.appId ?? context.appId });
@@ -122,13 +129,56 @@ export class AuthService {
    * the credential, so a changed role applies from the next access token.
    */
   async refresh(refreshToken: string): Promise<AuthResponseDto> {
-    const { session, refreshToken: next } = await this.sessions.rotate(refreshToken);
+    let rotated: Awaited<ReturnType<SessionsService['rotate']>>;
+    try {
+      rotated = await this.sessions.rotate(refreshToken);
+    } catch (error) {
+      // A session ended by a suspension answers AccountSuspended while the account still is (#202),
+      // so the app shows the suspended screen instead of a plain sign-in.
+      if (error instanceof InvalidRefreshTokenError && error.endedSession?.revokedReason === 'suspended') {
+        const owner = await this.credentials.findById(error.endedSession.credentialId);
+        if (owner?.status === 'SUSPENDED') throw new AccountSuspendedError();
+      }
+      throw error;
+    }
+    const { session, refreshToken: next } = rotated;
     const credential = await this.credentials.findById(session.credentialId);
     if (!credential) {
       await this.sessions.end(session.id, 'admin');
       throw new InvalidRefreshTokenError();
     }
+    if (credential.status === 'SUSPENDED') {
+      await this.sessions.end(session.id, 'suspended');
+      throw new AccountSuspendedError();
+    }
     return this.tokensFor(credential, session.id, next, session.expiresAt);
+  }
+
+  /**
+   * #202: suspend or reactivate an account (staff with `users.manage`). Suspending ends every refresh
+   * session; access tokens already issued expire within JWT_EXPIRES_IN. Staff accounts are managed
+   * with the staff tools (#216), so this refuses them, and nobody can suspend themselves.
+   */
+  async setAccountStatus(
+    userId: string,
+    status: AccountStatus,
+    reason: string | null,
+    actorId: string,
+  ): Promise<{ userId: string; status: AccountStatus; suspendedAt: string | null; suspendedReason: string | null; sessionsRevoked: number }> {
+    if (userId === actorId) throw new ForbiddenError('You cannot change the status of your own account');
+    const credential = await this.credentials.findById(userId);
+    if (!credential) throw new NotFoundError(`User ${userId} not found`);
+    if (credential.role === UserRole.ADMIN) throw new ForbiddenError('Staff accounts are managed with the staff tools');
+
+    const updated = (await this.credentials.setStatus(userId, status, status === 'SUSPENDED' ? reason : null)) as Credential;
+    const sessionsRevoked = status === 'SUSPENDED' ? await this.sessions.revokeAll(userId, 'suspended') : 0;
+    return {
+      userId,
+      status: updated.status,
+      suspendedAt: updated.suspendedAt ? updated.suspendedAt.toISOString() : null,
+      suspendedReason: updated.suspendedReason,
+      sessionsRevoked,
+    };
   }
 
   /** Ends the session of this refresh token. Always succeeds, so it reveals nothing about the token. */
@@ -196,9 +246,19 @@ export class AuthService {
     return this.tokensFor(credential, session.id, refreshToken, session.expiresAt);
   }
 
-  /** The access token names its session (`sid`), so a password change can keep only this one (#35). */
+  /**
+   * The access token names its session (`sid`), so a password change can keep only this one (#35).
+   * Staff tokens also carry their permissions (`perms`, #202), read fresh at every login and refresh.
+   */
   private async tokensFor(credential: Credential, sessionId: string, refreshToken: string, refreshExpiresAt: Date): Promise<AuthResponseDto> {
-    const accessToken = await this.jwtService.signAsync({ sub: credential.id, email: credential.email, role: credential.role, sid: sessionId });
+    const perms = credential.role === UserRole.ADMIN ? await this.staffPermissions.listFor(credential.id) : undefined;
+    const accessToken = await this.jwtService.signAsync({
+      sub: credential.id,
+      email: credential.email,
+      role: credential.role,
+      sid: sessionId,
+      ...(perms ? { perms } : {}),
+    });
     const { exp } = this.jwtService.decode(accessToken) as { exp: number };
     return {
       accessToken,

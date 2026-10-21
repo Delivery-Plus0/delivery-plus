@@ -103,7 +103,7 @@ export class DriversService {
   /** A driver profile (user id, plate) is visible only to that driver and to admins/services. */
   async getByIdFor(id: string, requester: Pick<JwtPayload, 'sub' | 'role'>): Promise<Driver> {
     const driver = await this.getById(id);
-    if (requester.role !== UserRole.ADMIN && driver.userId !== requester.sub) {
+    if (requester.role !== UserRole.ADMIN && requester.role !== UserRole.SYSTEM && driver.userId !== requester.sub) {
       throw new ForbiddenError('You can only view your own driver profile');
     }
     return driver;
@@ -121,7 +121,7 @@ export class DriversService {
    * Admin/system variant of updateStatus that targets a driver by id rather
    * than "the current user's own profile". Needed by delivery-service to
    * mark a specific driver BUSY/AVAILABLE when assigning/releasing them.
-   * Restricted to ADMIN (delivery-service calls this with a minted service
+   * Restricted to SYSTEM (#202): delivery-service calls this with a minted service
    * token, same SystemTokenService pattern as payment-service).
    */
   async updateStatusById(
@@ -129,8 +129,8 @@ export class DriversService {
     requesterRole: UserRole,
     dto: UpdateDriverStatusDto,
   ): Promise<Driver> {
-    if (requesterRole !== UserRole.ADMIN) {
-      throw new ForbiddenError('Only ADMIN (or a system token) can update another driver\'s status');
+    if (requesterRole !== UserRole.SYSTEM) {
+      throw new ForbiddenError('Only a service (SYSTEM token) can update another driver\'s status');
     }
 
     return this.transition(await this.getById(driverId), dto.status, requesterRole);

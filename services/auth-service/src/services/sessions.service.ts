@@ -5,9 +5,12 @@ import { SessionsRepository } from '../repositories/sessions.repository';
 import { AuthSession, SessionApp, SessionRevokeReason } from '../entities/auth-session.entity';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 
-/** One answer for every refresh token that can't be used, so a client learns nothing from it. */
+/**
+ * One answer for every refresh token that can't be used, so a client learns nothing from it.
+ * `endedSession` (never sent to the client) lets the caller tell a session ended by a suspension (#202).
+ */
 export class InvalidRefreshTokenError extends AppError {
-  constructor() {
+  constructor(readonly endedSession?: Pick<AuthSession, 'credentialId' | 'revokedReason'>) {
     super(401, 'InvalidRefreshToken', 'Your session has ended. Please sign in again.');
   }
 }
@@ -87,7 +90,11 @@ export class SessionsService {
       await this.revokeForReuse(session);
       throw new InvalidRefreshTokenError();
     }
-    if (!this.isLive(session, presented, now)) throw new InvalidRefreshTokenError();
+    if (!this.isLive(session, presented, now)) {
+      // A revoked session's own token: say which account and why, for the caller only.
+      const matches = safeEqual(presented, session.refreshTokenHash);
+      throw new InvalidRefreshTokenError(matches && session.revokedAt ? { credentialId: session.credentialId, revokedReason: session.revokedReason } : undefined);
+    }
 
     const secret = this.newSecret();
     const rotated = await this.sessions.rotate(session.id, presented, hashSecret(secret), now, this.expiryFrom(now));

@@ -22,6 +22,8 @@ export interface AppConfig {
   sessionRetentionDays: number;
   /** #34: services allowed to call the internal revoke-sessions route (HMAC). Empty: nobody. */
   internalAuthAllowedServices: string[];
+  /** #202: test and dev stacks only, the super admin created at startup (refused in production). */
+  testAdmin: { email: string; password: string } | null;
 }
 
 export function loadConfig(): AppConfig {
@@ -54,7 +56,24 @@ export function loadConfig(): AppConfig {
       .split(',')
       .map((service) => service.trim())
       .filter(Boolean),
+    testAdmin: loadTestAdmin(process.env.NODE_ENV || 'development'),
   };
+}
+
+/**
+ * #202: TEST_ADMIN_EMAIL + TEST_ADMIN_PASSWORD give a test stack its super admin at startup. Production
+ * creates the first admin only with the bootstrap CLI (docs/runbooks/bootstrap-admin.md), so these are
+ * refused there, like the other test hooks.
+ */
+export function loadTestAdmin(nodeEnv: string, env: NodeJS.ProcessEnv = process.env): { email: string; password: string } | null {
+  const email = env.TEST_ADMIN_EMAIL?.trim();
+  const password = env.TEST_ADMIN_PASSWORD;
+  if (!email && !password) return null;
+  if (nodeEnv === 'production') {
+    throw new Error('TEST_ADMIN_EMAIL/TEST_ADMIN_PASSWORD are for test stacks; create the first admin with the bootstrap CLI in production');
+  }
+  if (!email || !password) throw new Error('Set both TEST_ADMIN_EMAIL and TEST_ADMIN_PASSWORD, or neither');
+  return { email, password };
 }
 
 function parseNonNegativeInt(key: string, defaultValue: number): number {

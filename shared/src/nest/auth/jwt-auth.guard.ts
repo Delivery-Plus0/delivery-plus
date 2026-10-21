@@ -6,7 +6,14 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { JwtPayload } from './jwt-payload.interface';
+import { UserRole } from '../../types/enums';
+import { cameThroughGateway, systemSecretForVerification } from './system-principal';
 
+/**
+ * Accepts user tokens signed with the module's JWT_SECRET and, on requests that did not come through
+ * the public gateway, SYSTEM tokens signed with SYSTEM_JWT_SECRET (#202). A user-secret token that
+ * claims `role: SYSTEM` is forged and refused.
+ */
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
   constructor(private readonly jwtService: JwtService) {}
@@ -21,12 +28,29 @@ export class JwtAuthGuard implements CanActivate {
 
     const token = authHeader.slice('Bearer '.length);
 
-    try {
-      const payload = await this.jwtService.verifyAsync<JwtPayload>(token);
-      request.user = payload;
+    const user = await this.verify(token);
+    if (user && user.role !== UserRole.SYSTEM) {
+      request.user = user;
       return true;
+    }
+
+    const systemSecret = systemSecretForVerification();
+    if (!user && systemSecret && !cameThroughGateway(request.headers)) {
+      const system = await this.verify(token, systemSecret);
+      if (system?.role === UserRole.SYSTEM) {
+        request.user = system;
+        return true;
+      }
+    }
+
+    throw new UnauthorizedException('Invalid or expired token');
+  }
+
+  private async verify(token: string, secret?: string): Promise<JwtPayload | null> {
+    try {
+      return await this.jwtService.verifyAsync<JwtPayload>(token, secret ? { secret } : undefined);
     } catch {
-      throw new UnauthorizedException('Invalid or expired token');
+      return null;
     }
   }
 }

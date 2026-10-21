@@ -83,8 +83,8 @@ export class OrdersController {
 
   @Get(':id/fee-split')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.ADMIN)
-  @ApiOperation({ summary: "An order's internal delivery-fee split (ADMIN / service token only, #145)" })
+  @Roles(UserRole.SYSTEM)
+  @ApiOperation({ summary: "An order's internal delivery-fee split (SYSTEM token only: delivery-service, #145, #202)" })
   getFeeSplit(@Param('id') id: string) {
     return this.ordersService.getFeeSplit(id);
   }

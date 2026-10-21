@@ -16,6 +16,7 @@ import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { InMemorySessions } from '../testing/in-memory-sessions';
 import { AccountStatus, Credential } from '../entities/credential.entity';
 import { StaffPermissionsRepository } from '../repositories/staff-permissions.repository';
+import { DisabledEmailSender } from '../email/email-sender';
 
 const JWT_SECRET = 'test-jwt-secret';
 const INTERNAL_SECRET = 'test-internal-secret';
@@ -74,7 +75,7 @@ const redis = { set: async (key: string) => (nonces.has(key) ? null : (nonces.ad
       provide: AuthService,
       inject: [JwtService, SessionsService],
       useFactory: (jwt: JwtService, sessions: SessionsService) =>
-        new AuthService(credentials as unknown as CredentialsRepository, {} as UserServiceClient, jwt, config, sessions, staffPermissions as unknown as StaffPermissionsRepository),
+        new AuthService(credentials as unknown as CredentialsRepository, {} as UserServiceClient, jwt, config, sessions, staffPermissions as unknown as StaffPermissionsRepository, new DisabledEmailSender(), limiter as unknown as RateLimiterService),
     },
     InternalAuthGuard,
   ],
@@ -99,6 +100,8 @@ describe('Auth sessions over HTTP (#34)', () => {
       lastFailedLoginAt: null,
       verificationTokenHash: null,
       verificationTokenExpiresAt: null,
+      verificationAttempts: 0,
+      verificationSentAt: null,
       status: 'ACTIVE',
       suspendedAt: null,
       suspendedReason: null,
@@ -237,7 +240,7 @@ describe('Auth sessions over HTTP (#34)', () => {
       const id = randomUUID();
       credentialRows.set(id, {
         id, email, passwordHash: await bcrypt.hash(password, 4), role, emailVerified: true, lockedUntil: null, failedLoginCount: 0,
-        lastFailedLoginAt: null, verificationTokenHash: null, verificationTokenExpiresAt: null, status: 'ACTIVE', suspendedAt: null,
+        lastFailedLoginAt: null, verificationTokenHash: null, verificationTokenExpiresAt: null, verificationAttempts: 0, verificationSentAt: null, status: 'ACTIVE', suspendedAt: null,
         suspendedReason: null, createdAt: new Date(), updatedAt: new Date(),
       });
       return id;

@@ -13,7 +13,7 @@ From `services/auth-service/src/controllers/auth.controller.ts`:
 - `POST /auth/refresh` – exchange a refresh token for a new pair.
 - `POST /auth/logout` – sign out this device (ends the session of a refresh token).
 - `POST /auth/logout-all` – sign out every device (access token required).
-- `POST /auth/verify-email`, `POST /auth/resend-verification` – email verification.
+- `POST /auth/verify-email`, `POST /auth/resend-verification` – email verification by a 6-digit code (see [Email verification](#email-verification-203)).
 - `GET /auth/me` – return the current user payload from the bearer token.
 - `PATCH /auth/users/:id/status` – suspend or reactivate an account (staff with `users.manage`, see [Account status](#account-status-202)).
 
@@ -82,6 +82,26 @@ Login and register accept an optional `appId` (`customer`, `driver`, `restaurant
 - Only services listed in `AUTH_INTERNAL_ALLOWED_SERVICES` may call it (empty by default: nobody). `401` for a missing, wrong, expired or replayed signature or a caller not on the list; `400` for another reason or a malformed id.
 - Inside auth-service (#35's password change and reset, #202's suspension) call `SessionsService.revokeAll(credentialId, reason, exceptSessionId?)` directly. The current session's id is the access token's `sid` claim.
 
+## Email verification (#203)
+
+- **Sending:** registration emails a **6-digit code**, and `POST /auth/resend-verification { email }` sends a new one. The user sends it back as `token` to `POST /auth/verify-email { email, token }`.
+- **The code:**
+  - it works **once**, for **10 minutes** (`VERIFICATION_TOKEN_TTL_MINUTES`);
+  - the **5th wrong code** (`VERIFICATION_MAX_ATTEMPTS`) invalidates it;
+  - it's stored only as an HMAC under `EMAIL_CODE_HASH_SECRET`, bound to the account, and compared in constant time;
+  - it never appears in logs or responses.
+- **Resend limits:** one email a minute per address (`VERIFICATION_RESEND_COOLDOWN_SECONDS`), 5 an hour per address, and 20 an hour per client IP.
+  - The limits are counted whether or not the address has an account, so the `429` and the generic answer reveal nothing.
+  - Registration counts as the first send.
+- **Language:** the email is multipart (text and HTML), in Arabic (right to left) or English from `Accept-Language` (Arabic by default, like the apps).
+- **Senders (`EMAIL_PROVIDER`):**
+  - `disabled` (default): nothing is sent, and resend answers `503 EmailUnavailable`.
+  - `test`: the last email per address goes to Redis (`test:email:<address>`) for E2E runs. Refused in production.
+  - `ses`: Amazon SES (SESv2 `SendEmail`), credentials from the AWS provider chain only. One retry on throttling or 5xx, none on 4xx or timeout. Failures are `503 EmailUnavailable` without provider details; logs carry the correlation id, never the address or the code. Setup: [docs/runbooks/email-ses.md](../runbooks/email-ses.md).
+- **Registration never fails because of email:** the account exists, and the user can ask for a new code.
+- **Production refuses:** `EMAIL_PROVIDER=test`; `ses` without `AWS_REGION`/`SES_FROM_ADDRESS`; `EMAIL_VERIFICATION_REQUIRED=true` with `disabled`; a provider without a real `EMAIL_CODE_HASH_SECRET`.
+- **Old codes:** codes issued before #203 were never emailed. Migration 006 clears them, and those users ask for a new one.
+
 ## Account status (#202)
 
 - `credentials.status` is `ACTIVE` (default) or `SUSPENDED`, with `suspendedAt` and `suspendedReason`.
@@ -127,6 +147,9 @@ From `services/auth-service/src/config/app-config.ts` and `docker-compose.yml`:
 - `NODE_ENV` (default: `development`)
 - `INTERNAL_AUTH_SECRET` (required in production; local Compose provides a development-only default)
 - `EMAIL_VERIFICATION_REQUIRED` (default: `false`)
+- `EMAIL_PROVIDER` (`disabled` default, `test`, `ses`), `EMAIL_CODE_HASH_SECRET` (required in production with a provider)
+- For `ses`: `AWS_REGION`, `SES_FROM_ADDRESS`, optional `SES_CONFIGURATION_SET`, `EMAIL_SEND_TIMEOUT_MS` (default `5000`)
+- `VERIFICATION_TOKEN_TTL_MINUTES` (default `10`), `VERIFICATION_MAX_ATTEMPTS` (default `5`), `VERIFICATION_RESEND_COOLDOWN_SECONDS` (default `60`)
 - `TEST_ADMIN_EMAIL`, `TEST_ADMIN_PASSWORD` (test and dev stacks only; refused in production): the super admin created at startup
 - For the bootstrap CLI only: `BOOTSTRAP_ADMIN_EMAIL`, optional `BOOTSTRAP_ADMIN_PASSWORD` (otherwise prompted)
 

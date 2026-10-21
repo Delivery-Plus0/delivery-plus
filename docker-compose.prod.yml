@@ -75,6 +75,13 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER_URLENCODED:?POSTGRES_USER_URLENCODED must be set}:${POSTGRES_PASSWORD_URLENCODED:?POSTGRES_PASSWORD_URLENCODED must be set}@postgres:5432/auth_service
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+      # #203: EMAIL_PROVIDER=ses sends verification codes through Amazon SES (docs/runbooks/email-ses.md).
+      # AWS credentials come only from the AWS provider chain (task/instance role), never from this file.
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-disabled}
+      AWS_REGION: ${AWS_REGION:-}
+      SES_FROM_ADDRESS: ${SES_FROM_ADDRESS:-}
+      SES_CONFIGURATION_SET: ${SES_CONFIGURATION_SET:-}
+      EMAIL_CODE_HASH_SECRET: ${EMAIL_CODE_HASH_SECRET:-}
       INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:?INTERNAL_AUTH_SECRET must be set}
       USER_SERVICE_URL: http://user-service:3002
     healthcheck:

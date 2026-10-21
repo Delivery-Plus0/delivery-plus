@@ -46,6 +46,14 @@ export class Credential {
   @Column({ type: 'timestamptz', nullable: true })
   verificationTokenExpiresAt!: Date | null;
 
+  /** #203: wrong codes tried against the current one; at the limit the code is invalidated. */
+  @Column({ default: 0 })
+  verificationAttempts!: number;
+
+  /** #203: when the last verification email was sent. */
+  @Column({ type: 'timestamptz', nullable: true })
+  verificationSentAt!: Date | null;
+
   @CreateDateColumn()
   createdAt!: Date;
 

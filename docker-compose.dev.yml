@@ -140,6 +140,8 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/auth_service
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:-local-development-only}
+      # Access-token lifetime (#34). The apps' E2E runs set it short (e.g. 60s) to prove sessions survive refreshes.
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
       INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:-local-internal-auth-development-only}
       USER_SERVICE_URL: http://user-service:3002
     healthcheck:

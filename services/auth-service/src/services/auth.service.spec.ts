@@ -585,9 +585,55 @@ describe('AuthService', () => {
         updatedAt: new Date(),
       } as any);
 
-      await expect(service.login({ email: 'verify@example.com', password: 'correct-password' })).rejects.toThrow(
-        'Please verify your email before logging in',
-      );
+      await expect(service.login({ email: 'verify@example.com', password: 'correct-password' })).rejects.toMatchObject({
+        statusCode: 403,
+        error: 'EmailNotVerified',
+        message: 'Please verify your email before logging in',
+      });
+    });
+
+    it('answers a wrong password on an unverified account with the usual 401, not EmailNotVerified (#252)', async () => {
+      const hash = await bcrypt.hash('correct-password', 10);
+      service = new AuthService(credentials, userServiceClient, jwtService, {
+        ...service['config'],
+        emailVerificationRequired: true,
+      }, sessions, staffPermissions, emailSender, rateLimiter);
+      credentials.findByEmail.mockResolvedValue({
+        id: 'u1',
+        email: 'verify@example.com',
+        passwordHash: hash,
+        role: UserRole.CUSTOMER,
+        emailVerified: false,
+        failedLoginCount: 0,
+        lockedUntil: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as any);
+      credentials.update.mockResolvedValue({} as any);
+
+      const refused = service.login({ email: 'verify@example.com', password: 'wrong-password' });
+
+      await expect(refused).rejects.toBeInstanceOf(UnauthorizedError);
+      await expect(refused).rejects.toMatchObject({ statusCode: 401, message: 'Invalid email or password' });
+    });
+
+    it('signs in an unverified account normally while verification is not required (#252)', async () => {
+      const hash = await bcrypt.hash('correct-password', 10);
+      credentials.findByEmail.mockResolvedValue({
+        id: 'u1',
+        email: 'verify@example.com',
+        passwordHash: hash,
+        role: UserRole.CUSTOMER,
+        emailVerified: false,
+        status: 'ACTIVE',
+        failedLoginCount: 0,
+        lockedUntil: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as any);
+      credentials.update.mockResolvedValue({} as any);
+
+      await expect(service.login({ email: 'verify@example.com', password: 'correct-password' })).resolves.toHaveProperty('accessToken');
     });
   });
 

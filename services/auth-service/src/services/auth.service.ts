@@ -7,6 +7,7 @@ import {
   AccountSuspendedError,
   AppError,
   ConflictError,
+  EmailNotVerifiedError,
   ForbiddenError,
   NotFoundError,
   RateLimiterService,
@@ -148,8 +149,9 @@ export class AuthService {
       throw new UnauthorizedError('Invalid email or password');
     }
 
+    // #252: its own 403 code so the apps open the code screen; still only after the password checked out.
     if (this.config.emailVerificationRequired && !credential.emailVerified) {
-      throw new UnauthorizedError('Please verify your email before logging in');
+      throw new EmailNotVerifiedError();
     }
 
     // #202: only after the password checked out, so the answer reveals nothing to a stranger.

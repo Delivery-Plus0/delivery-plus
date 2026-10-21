@@ -114,6 +114,30 @@ describe('RateLimitGuard', () => {
     expect(limiter.incrementAndCheck.mock.calls.map(([key]) => key)).toEqual(['ratelimit:/addItem:203.0.113.7', 'ratelimit:/addItem:10.0.0.2']);
   });
 
+  it('gives each forwarded client its own limit, so one client hitting it does not lock out another (#251)', async () => {
+    const limiter = fakeLimiter();
+    const guard = new RateLimitGuard(new Reflector(), limiter as unknown as RateLimiterService);
+    const from = (clientIp: string) =>
+      ({
+        getClass: () => ClassLimitedController,
+        getHandler: () => ClassLimitedController.prototype.addItem,
+        switchToHttp: () => ({
+          getRequest: () => ({
+            headers: { 'x-delivery-plus-gateway': '1', 'x-delivery-plus-client-ip': clientIp },
+            ip: '10.0.0.2',
+            route: { path: '/addItem' },
+          }),
+        }),
+      }) as unknown as ExecutionContext;
+
+    // The class limit is 2 a minute per caller.
+    await expect(guard.canActivate(from('198.51.100.20'))).resolves.toBe(true);
+    await expect(guard.canActivate(from('198.51.100.20'))).resolves.toBe(true);
+    await expect(guard.canActivate(from('198.51.100.20'))).rejects.toBeInstanceOf(AppError);
+    await expect(guard.canActivate(from('198.51.100.21'))).resolves.toBe(true);
+    await expect(guard.canActivate(from('198.51.100.21'))).resolves.toBe(true);
+  });
+
   it('does nothing when no limit is declared anywhere', async () => {
     const limiter = fakeLimiter();
     const guard = new RateLimitGuard(new Reflector(), limiter as unknown as RateLimiterService);

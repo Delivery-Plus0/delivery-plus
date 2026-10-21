@@ -22,6 +22,8 @@ services:
     environment:
       NODE_ENV: production
       CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS must be set}
+      # Reverse proxies in front of the gateway (#251), e.g. 1 behind one load balancer; see docs/services/api-gateway.md.
+      TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-0}
       AUTH_SERVICE_URL: http://auth-service:3001
       USER_SERVICE_URL: http://user-service:3002
       RESTAURANT_SERVICE_URL: http://restaurant-service:3003

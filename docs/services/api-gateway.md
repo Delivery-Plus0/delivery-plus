@@ -34,6 +34,15 @@ When `NODE_ENV=production`, `CORS_ORIGINS` is required: the gateway fails to
 start rather than silently allowing only the localhost defaults if it is
 unset or empty after trimming.
 
+## Client IP and rate limits
+Every proxied request carries `x-delivery-plus-client-ip`, the client's address as the gateway saw it. The gateway removes any copy the client sent and sets it again (#203). The services' `RateLimitGuard` counts anonymous callers by it, so `/auth/login`, `/auth/register` and the email resend limits apply per client, not to everyone at once.
+
+Where that address comes from depends on `TRUSTED_PROXY_HOPS` (#251):
+- **`0` (default):** clients connect to the gateway directly. The socket address counts, and a client's own `X-Forwarded-For` is ignored.
+- **`N`:** `N` reverse proxies in front of the gateway append the address they saw to `X-Forwarded-For`, for example `1` behind one load balancer. The gateway takes the address `N` hops from the right, which the client can't forge: anything it puts in front of the proxies' entries is ignored.
+
+Set it to the exact number of proxies. Too low, and every client shares the balancer's address and limit. Too high, and a client can pick its own address. Any value other than a whole number from 0 to 5 stops the gateway at startup.
+
 ## Dependencies
 - Depends on all application services for proxying and Compose dependency checks.
 - Does not own a database.
@@ -43,6 +52,8 @@ unset or empty after trimming.
 
 ## Required env vars
 - `PORT` (default: `3000`)
+- `CORS_ORIGINS` (required in production; see above)
+- `TRUSTED_PROXY_HOPS` (default: `0`; see "Client IP and rate limits")
 - `AUTH_SERVICE_URL` (default: `http://localhost:3001`)
 - `USER_SERVICE_URL` (default: `http://localhost:3002`)
 - `RESTAURANT_SERVICE_URL` (default: `http://localhost:3003`)

@@ -4,7 +4,7 @@ import { createProxyMiddleware } from 'http-proxy-middleware';
 import { SwaggerModule } from '@nestjs/swagger';
 import { NextFunction, Request, Response } from 'express';
 import { isBlockedInternalRoute } from './route-policy';
-import { edgePolicy } from './edge';
+import { configureTrustProxy, edgePolicy } from './edge';
 
 export const PROXIES = {
   '/api/auth': process.env.AUTH_SERVICE_URL || 'http://localhost:3001',
@@ -97,6 +97,9 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   const PORT = process.env.PORT || 3000;
+
+  // #251: before any middleware reads request.ip. An invalid TRUSTED_PROXY_HOPS stops startup here.
+  configureTrustProxy(app.getHttpAdapter().getInstance());
 
   app.enableCors(getCorsOptions());
 

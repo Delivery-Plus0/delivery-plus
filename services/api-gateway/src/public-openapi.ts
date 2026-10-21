@@ -709,6 +709,17 @@ export function generatePublicOpenApiDocument() {
         operation.responses['404'] = { description: 'The payment has not been refunded' };
       }
 
+      // F6 (#205): cart writes have two different 409s; clients must tell them apart by `error`.
+      if (service.service === 'cart' && ['post', 'patch', 'delete'].includes(route.method) && route.path.startsWith('/items')) {
+        operation.responses['409'] = {
+          description:
+            route.method === 'post'
+              ? 'Conflict: the cart holds items from another restaurant (offer to start a new cart); CartWriteConflict: the cart kept changing at the same time (just try again)'
+              : 'CartWriteConflict: the cart kept changing at the same time; try again',
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } },
+        };
+      }
+
       // #42: checkout re-checks the cart; what changed comes back in details.changes.
       if (route.method === 'post' && ((service.service === 'orders' && route.path === '') || (service.service === 'cart' && route.path === '/validate'))) {
         operation.responses['409'] = {

@@ -2,20 +2,20 @@ import { CartService } from './cart.service';
 import { CartRepository } from '../repositories/cart.repository';
 import { MenuServiceClient } from '../common/menu-service.client';
 import { BadRequestError, CartChangedError, ConflictError, MAX_CART_ITEM_QUANTITY, NotFoundError } from '@food-delivery/shared';
-import { emptyCart } from '../entities/cart.model';
+import { Cart, emptyCart } from '../entities/cart.model';
+import { InMemoryCarts } from '../testing/in-memory-carts';
 
 describe('CartService', () => {
   let service: CartService;
   let cartRepository: jest.Mocked<CartRepository>;
+  let carts: InMemoryCarts;
+  const seed = (cart: Cart | null) => carts.seed('user-1', cart);
+  const stored = () => carts.stored('user-1');
   let menuServiceClient: jest.Mocked<MenuServiceClient>;
 
   beforeEach(() => {
-    cartRepository = {
-      find: jest.fn(),
-      save: jest.fn(),
-      delete: jest.fn(),
-      ping: jest.fn(),
-    } as unknown as jest.Mocked<CartRepository>;
+    carts = new InMemoryCarts();
+    cartRepository = carts.asRepository();
 
     menuServiceClient = {
       getItem: jest.fn(),
@@ -26,7 +26,7 @@ describe('CartService', () => {
 
   describe('getCart', () => {
     it('returns an empty cart with total 0 when none exists', async () => {
-      cartRepository.find.mockResolvedValue(null);
+      seed(null);
       const result = await service.getCart('user-1');
       expect(result.items).toHaveLength(0);
       expect(result.total).toBe(0);
@@ -42,7 +42,7 @@ describe('CartService', () => {
         price: 9.99,
         available: false,
       });
-      cartRepository.find.mockResolvedValue(null);
+      seed(null);
 
       await expect(
         service.addItem('user-1', { menuItemId: 'item-1', quantity: 1 }),
@@ -57,8 +57,7 @@ describe('CartService', () => {
         price: 9.99,
         available: true,
       });
-      cartRepository.find.mockResolvedValue(null);
-      cartRepository.save.mockResolvedValue(undefined);
+      seed(null);
 
       const result = await service.addItem('user-1', { menuItemId: 'item-1', quantity: 2 });
 
@@ -75,7 +74,7 @@ describe('CartService', () => {
         price: 10,
         available: true,
       });
-      cartRepository.find.mockResolvedValue({
+      seed({
         userId: 'user-1',
         restaurantId: 'rest-1',
         items: [{ menuItemId: 'item-1', name: 'Burger', price: 10, quantity: 1 }],
@@ -95,7 +94,7 @@ describe('CartService', () => {
         price: 12,
         available: true,
       });
-      cartRepository.find.mockResolvedValue({
+      seed({
         userId: 'user-1',
         restaurantId: 'rest-1',
         items: [{ menuItemId: 'item-1', name: 'Burger', price: 10, quantity: 1 }],
@@ -110,14 +109,14 @@ describe('CartService', () => {
 
   describe('updateItemQuantity', () => {
     it('throws when the cart is empty', async () => {
-      cartRepository.find.mockResolvedValue(null);
+      seed(null);
       await expect(
         service.updateItemQuantity('user-1', 'item-1', { quantity: 2 }),
       ).rejects.toThrow(BadRequestError);
     });
 
     it('removes the item and clears the cart key when quantity is set to 0 and cart becomes empty', async () => {
-      cartRepository.find.mockResolvedValue({
+      seed({
         userId: 'user-1',
         restaurantId: 'rest-1',
         items: [{ menuItemId: 'item-1', name: 'Burger', price: 10, quantity: 1 }],
@@ -126,13 +125,13 @@ describe('CartService', () => {
 
       const result = await service.updateItemQuantity('user-1', 'item-1', { quantity: 0 });
 
-      expect(cartRepository.delete).toHaveBeenCalledWith('user-1');
+      expect(stored()).toBeNull();
       expect(result.items).toHaveLength(0);
       expect(result.total).toBe(0);
     });
 
     it('updates quantity in place', async () => {
-      cartRepository.find.mockResolvedValue({
+      seed({
         userId: 'user-1',
         restaurantId: 'rest-1',
         items: [{ menuItemId: 'item-1', name: 'Burger', price: 10, quantity: 1 }],
@@ -161,7 +160,7 @@ describe('CartService', () => {
   describe('quantity limit (#42)', () => {
     it('refuses adding past the maximum of one item', async () => {
       menuServiceClient.getItem.mockResolvedValue({ id: 'item-1', restaurantId: 'rest-1', name: 'Burger', price: 10, available: true });
-      cartRepository.find.mockResolvedValue({
+      seed({
         userId: 'user-1',
         restaurantId: 'rest-1',
         items: [{ menuItemId: 'item-1', name: 'Burger', price: 10, quantity: MAX_CART_ITEM_QUANTITY - 1 }],
@@ -169,7 +168,7 @@ describe('CartService', () => {
       });
 
       await expect(service.addItem('user-1', { menuItemId: 'item-1', quantity: 2 })).rejects.toThrow(`at most ${MAX_CART_ITEM_QUANTITY}`);
-      expect(cartRepository.save).not.toHaveBeenCalled();
+      expect(cartRepository.replace).not.toHaveBeenCalled();
     });
   });
 
@@ -179,15 +178,15 @@ describe('CartService', () => {
     const menu = (id: string, price: number, extra: Record<string, unknown> = {}) => ({ id, restaurantId: 'rest-1', name: `Menu ${id}`, price, available: true, archived: false, ...extra });
 
     it('returns an unchanged cart without writing anything', async () => {
-      cartRepository.find.mockResolvedValue({ ...cartOf(line('a', 10, 2)), items: [{ menuItemId: 'a', name: 'Menu a', price: 10, quantity: 2 }] });
+      seed({ ...cartOf(line('a', 10, 2)), items: [{ menuItemId: 'a', name: 'Menu a', price: 10, quantity: 2 }] });
       menuServiceClient.getItem.mockResolvedValue(menu('a', 10.0));
 
       await expect(service.validateForCheckout('user-1')).resolves.toMatchObject({ total: 20 });
-      expect(cartRepository.save).not.toHaveBeenCalled();
+      expect(cartRepository.replace).not.toHaveBeenCalled();
     });
 
     it('reports every change, updates the cart, and never lets the old price through', async () => {
-      cartRepository.find.mockResolvedValue(cartOf(line('cheaper', 40, 1), line('gone', 5), line('soldout', 7), line('archived', 9), line('many', 3, 50)));
+      seed(cartOf(line('cheaper', 40, 1), line('gone', 5), line('soldout', 7), line('archived', 9), line('many', 3, 50)));
       menuServiceClient.getItem.mockImplementation(async (id: string) => {
         if (id === 'gone') throw new NotFoundError('gone');
         if (id === 'soldout') return menu(id, 7, { available: false });
@@ -206,39 +205,39 @@ describe('CartService', () => {
         { menuItemId: 'archived', name: 'Old archived', change: 'REMOVED' },
         { menuItemId: 'many', name: 'Menu many', change: 'QUANTITY_LIMITED', previousQuantity: 50, currentQuantity: MAX_CART_ITEM_QUANTITY },
       ]);
-      expect(cartRepository.save.mock.calls[0][0].items).toEqual([
+      expect(stored()?.items).toEqual([
         { menuItemId: 'cheaper', name: 'Menu cheaper', price: 45, quantity: 1 },
         { menuItemId: 'many', name: 'Menu many', price: 3, quantity: MAX_CART_ITEM_QUANTITY },
       ]);
     });
 
     it('takes out an item that now belongs to another restaurant', async () => {
-      cartRepository.find.mockResolvedValue(cartOf(line('a', 10)));
+      seed(cartOf(line('a', 10)));
       menuServiceClient.getItem.mockResolvedValue(menu('a', 10, { restaurantId: 'rest-2' }));
 
       await expect(service.validateForCheckout('user-1')).rejects.toBeInstanceOf(CartChangedError);
-      expect(cartRepository.delete).toHaveBeenCalledWith('user-1'); // nothing left: the cart is cleared
+      expect(stored()).toBeNull(); // nothing left: the cart is cleared
     });
 
     it('quietly refreshes a renamed item: the price the customer pays is the same', async () => {
-      cartRepository.find.mockResolvedValue(cartOf(line('a', 10)));
+      seed(cartOf(line('a', 10)));
       menuServiceClient.getItem.mockResolvedValue(menu('a', 10));
 
       await expect(service.validateForCheckout('user-1')).resolves.toMatchObject({ items: [{ name: 'Menu a', price: 10 }] });
-      expect(cartRepository.save).toHaveBeenCalled();
+      expect(stored()?.items).toEqual([{ menuItemId: 'a', name: 'Menu a', price: 10, quantity: 1 }]);
     });
 
     it('does not hide a menu-service outage as a removed item', async () => {
-      cartRepository.find.mockResolvedValue(cartOf(line('a', 10)));
+      seed(cartOf(line('a', 10)));
       menuServiceClient.getItem.mockRejectedValue(new BadRequestError('Failed to fetch menu item a'));
 
       await expect(service.validateForCheckout('user-1')).rejects.toThrow('Failed to fetch menu item a');
-      expect(cartRepository.save).not.toHaveBeenCalled();
+      expect(cartRepository.replace).not.toHaveBeenCalled();
       expect(cartRepository.delete).not.toHaveBeenCalled();
     });
 
     it('returns an empty cart as is (order-service refuses it)', async () => {
-      cartRepository.find.mockResolvedValue(null);
+      seed(null);
       await expect(service.validateForCheckout('user-1')).resolves.toMatchObject({ items: [], total: 0 });
     });
   });

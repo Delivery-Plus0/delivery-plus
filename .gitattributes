@@ -1,0 +1,4 @@
+# Dependabot's GitHub Actions updater can't rewrite workflows with CRLF line endings ("No files
+# changed!"), so they are kept LF whatever the platform that edits them.
+.github/workflows/*.yml text eol=lf
+.github/workflows/*.yaml text eol=lf

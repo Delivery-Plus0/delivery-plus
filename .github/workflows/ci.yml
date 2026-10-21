@@ -60,7 +60,7 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@v4
-      - uses: aquasecurity/trivy-action@v0.36.0
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -69,7 +69,7 @@ jobs:
           ignore-unfixed: true
           exit-code: 1
       - run: docker build --build-arg SERVICE_NAME=api-gateway -t food-delivery-api-gateway:ci .
-      - uses: aquasecurity/trivy-action@v0.36.0
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: food-delivery-api-gateway:ci
           format: table

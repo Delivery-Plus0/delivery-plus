@@ -7,6 +7,7 @@ import { ConfigModule } from './config/config.module';
 import { loadConfig } from './config/app-config';
 import { Credential } from './entities/credential.entity';
 import { AuthSession } from './entities/auth-session.entity';
+import { StaffPermission } from './entities/staff-permission.entity';
 import { buildTypeOrmConfig } from './database/typeorm.config';
 
 const config = loadConfig();
@@ -14,7 +15,7 @@ const config = loadConfig();
 @Module({
   imports: [
     ConfigModule,
-    TypeOrmModule.forRoot(buildTypeOrmConfig(config.databaseUrl, [Credential, AuthSession])),
+    TypeOrmModule.forRoot(buildTypeOrmConfig(config.databaseUrl, [Credential, AuthSession, StaffPermission])),
     RedisModule.register({ url: process.env.REDIS_URL || 'redis://localhost:6379' }),
     AuthModule,
   ],

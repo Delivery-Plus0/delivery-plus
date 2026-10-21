@@ -1,3 +1,4 @@
+import { loadSystemJwtSecret } from '@food-delivery/shared';
 export const APP_CONFIG = Symbol('APP_CONFIG');
 
 export interface AppConfig {
@@ -13,6 +14,8 @@ export interface AppConfig {
   /** Realtime stream full reload: re-authorizes and covers a lost pub/sub message (#135). */
   streamResyncMs: number;
   jwtSecret: string;
+  /** #202: signs/verifies service-to-service SYSTEM tokens; required in production (see loadSystemJwtSecret). */
+  systemJwtSecret: string;
   deliveryServiceUrl: string;
   driverServiceUrl: string;
 }
@@ -34,6 +37,7 @@ export function loadConfig(): AppConfig {
     streamHeartbeatMs: parseInt(process.env.TRACKING_STREAM_HEARTBEAT_MS || '15000', 10),
     streamResyncMs: parseInt(process.env.TRACKING_STREAM_RESYNC_MS || '30000', 10),
     jwtSecret: process.env.JWT_SECRET as string,
+    systemJwtSecret: loadSystemJwtSecret(process.env.NODE_ENV || 'development'),
     deliveryServiceUrl: process.env.DELIVERY_SERVICE_URL || 'http://localhost:3008',
     driverServiceUrl: process.env.DRIVER_SERVICE_URL || 'http://localhost:3009',
   };

@@ -61,7 +61,7 @@ describe('AppDataSource', () => {
     const entities = AppDataSource.options.entities as Array<{ name?: string }>;
 
     expect(defaultDataSource).toBe(AppDataSource);
-    expect(entities.map((entity) => entity.name)).toEqual(['Credential', 'AuthSession']);
+    expect(entities.map((entity) => entity.name)).toEqual(['Credential', 'AuthSession', 'StaffPermission']);
     expect(AppDataSource.options.synchronize).toBe(false);
     expect(AppDataSource.options.migrationsRun).toBe(false);
     expect(AppDataSource.isInitialized).toBe(false);

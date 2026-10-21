@@ -1,24 +1,22 @@
 import { OrderStatus, UserRole } from '@food-delivery/shared';
 
 /**
- * Who is allowed to request each *target* status, before ownership is even
- * checked. ADMIN can always do everything (checked separately in the
- * service). This is intentionally conservative for statuses that will
- * eventually be system-triggered by payment-service, driver-service, and
- * delivery-service once those exist (Phases 5–7): until then only ADMIN can
- * set them, so the transition endpoint stays usable for local testing
- * without pretending those integrations already exist.
+ * Who is allowed to request each *target* status, before ownership is even checked.
+ * - SYSTEM (#202): the services that drive the order: payment-service (PAYMENT_PENDING, CONFIRMED,
+ *   FAILED), delivery-service (DRIVER_ASSIGNED, PICKED_UP, DELIVERED, CANCELLED) and order-service itself.
+ * - ADMIN (staff) can still do everything (checked separately below). Whether staff should keep the
+ *   service-only transitions is for the admin console's support actions (#219) to decide.
  */
 export const TRANSITION_ROLES: Partial<Record<OrderStatus, UserRole[]>> = {
-  [OrderStatus.PAYMENT_PENDING]: [UserRole.ADMIN], // normally: order-service itself, right after creation
-  [OrderStatus.CONFIRMED]: [UserRole.ADMIN], // normally: payment-service, on payment.completed (Phase 5/9)
+  [OrderStatus.PAYMENT_PENDING]: [UserRole.SYSTEM, UserRole.ADMIN],
+  [OrderStatus.CONFIRMED]: [UserRole.SYSTEM, UserRole.ADMIN],
   [OrderStatus.PREPARING]: [UserRole.RESTAURANT_OWNER, UserRole.ADMIN],
   [OrderStatus.READY_FOR_PICKUP]: [UserRole.RESTAURANT_OWNER, UserRole.ADMIN],
-  [OrderStatus.DRIVER_ASSIGNED]: [UserRole.ADMIN], // normally: delivery-service (Phase 7/9)
-  [OrderStatus.PICKED_UP]: [UserRole.ADMIN], // normally: delivery-service (Phase 7/9)
-  [OrderStatus.DELIVERED]: [UserRole.ADMIN], // normally: delivery-service (Phase 7/9)
-  [OrderStatus.CANCELLED]: [UserRole.CUSTOMER, UserRole.RESTAURANT_OWNER, UserRole.ADMIN],
-  [OrderStatus.FAILED]: [UserRole.ADMIN],
+  [OrderStatus.DRIVER_ASSIGNED]: [UserRole.SYSTEM, UserRole.ADMIN],
+  [OrderStatus.PICKED_UP]: [UserRole.SYSTEM, UserRole.ADMIN],
+  [OrderStatus.DELIVERED]: [UserRole.SYSTEM, UserRole.ADMIN],
+  [OrderStatus.CANCELLED]: [UserRole.CUSTOMER, UserRole.RESTAURANT_OWNER, UserRole.SYSTEM, UserRole.ADMIN],
+  [OrderStatus.FAILED]: [UserRole.SYSTEM, UserRole.ADMIN],
 };
 
 export function isRoleAllowedForTransition(target: OrderStatus, role: UserRole): boolean {
@@ -58,6 +56,9 @@ export function cancellationRefusal(from: OrderStatus, requesterId: string, role
     case UserRole.RESTAURANT_OWNER:
       // A restaurant rejects an order before cooking it, never mid-way (#154).
       return from === OrderStatus.CONFIRMED ? null : 'An order can only be rejected before you start preparing it.';
+    case UserRole.SYSTEM:
+      // A service acting for the platform (delivery-service syncing a cancelled delivery, #56).
+      return null;
     case UserRole.ADMIN:
       return DRIVER_ON_ORDER_STATUSES.includes(from) && !isSystemCaller(requesterId)
         ? 'This order has a driver: cancel its delivery instead (POST /deliveries/:id/cancel), so the driver is released and compensated.'

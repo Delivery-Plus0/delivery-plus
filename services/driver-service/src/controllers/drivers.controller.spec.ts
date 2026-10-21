@@ -11,14 +11,15 @@ import { UserServiceClient } from '../common/user-service.client';
 describe('DriversController', () => {
   const handler = (name: keyof DriversController) => DriversController.prototype[name];
 
-  it('GET /drivers/available is no longer anonymous: JWT + ADMIN (service system tokens) only', () => {
+  it('GET /drivers/available and PATCH /drivers/:id/status are for services only: JWT + SYSTEM (#202)', () => {
     expect(Reflect.getMetadata(GUARDS_METADATA, handler('listAvailable'))).toEqual([JwtAuthGuard, RolesGuard]);
-    expect(Reflect.getMetadata(ROLES_KEY, handler('listAvailable'))).toEqual([UserRole.ADMIN]);
+    expect(Reflect.getMetadata(ROLES_KEY, handler('listAvailable'))).toEqual([UserRole.SYSTEM]);
+    expect(Reflect.getMetadata(ROLES_KEY, handler('setStatusById'))).toEqual([UserRole.SYSTEM]);
   });
 
   it('GET /drivers/:id requires a JWT from a driver (self, checked in the service) or admin', () => {
     expect(Reflect.getMetadata(GUARDS_METADATA, handler('getById'))).toEqual([JwtAuthGuard, RolesGuard]);
-    expect(Reflect.getMetadata(ROLES_KEY, handler('getById'))).toEqual([UserRole.DRIVER, UserRole.ADMIN]);
+    expect(Reflect.getMetadata(ROLES_KEY, handler('getById'))).toEqual([UserRole.DRIVER, UserRole.ADMIN, UserRole.SYSTEM]);
   });
 
   it('lets only the driver change their own vehicle, and only admins set verification (#147)', () => {

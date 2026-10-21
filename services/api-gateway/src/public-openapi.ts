@@ -22,6 +22,7 @@ export const SERVICE_DEFINITIONS = [
       { method: 'post', path: '/refresh', summary: 'Exchange a refresh token for a new pair (single use; reuse ends the session)', auth: false, statusCode: 200 },
       { method: 'post', path: '/logout', summary: 'Sign out this device (always 204)', auth: false, statusCode: 204 },
       { method: 'post', path: '/logout-all', summary: 'Sign out on every device', auth: true, statusCode: 204 },
+      { method: 'patch', path: '/users/:id/status', summary: 'Suspend or reactivate an account (staff with users.manage; suspending ends its sessions)', auth: true, statusCode: 200 },
       { method: 'post', path: '/verify-email', summary: 'Verify an email address with a token', auth: false, statusCode: 200 },
       { method: 'post', path: '/resend-verification', summary: 'Resend email verification', auth: false, statusCode: 200 },
       { method: 'get', path: '/me', summary: 'Get the current authenticated user', auth: true, statusCode: 200 },
@@ -141,9 +142,9 @@ export const SERVICE_DEFINITIONS = [
       { method: 'post', path: '/me/online', summary: 'Go online (VERIFIED drivers only)', auth: true, statusCode: 201 },
       { method: 'post', path: '/me/offline', summary: 'Go offline', auth: true, statusCode: 201 },
       { method: 'post', path: '/me/status', summary: 'Set driver status explicitly', auth: true, statusCode: 201 },
-      { method: 'get', path: '/available', summary: 'List the drivers dispatch may claim: available and verified (admin/system only)', auth: true, statusCode: 200 },
+      { method: 'get', path: '/available', summary: 'List the drivers dispatch may claim: available and verified (services only, SYSTEM token; not callable through the gateway)', auth: true, statusCode: 200 },
       { method: 'get', path: '/:id', summary: 'Get a driver by id (self or admin)', auth: true, statusCode: 200 },
-      { method: 'patch', path: '/:id/status', summary: 'Set a driver status as admin', auth: true, statusCode: 200 },
+      { method: 'patch', path: '/:id/status', summary: 'Claim or release a driver (services only, SYSTEM token; not callable through the gateway)', auth: true, statusCode: 200 },
       { method: 'patch', path: '/:id/verification', summary: "Set a driver's verification status (admin only)", auth: true, statusCode: 200 },
     ],
   },
@@ -262,6 +263,26 @@ const baseSchemas = {
       email: { type: 'string', format: 'email' },
       password: { type: 'string', format: 'password' },
       appId: { type: 'string', enum: ['customer', 'driver', 'restaurant', 'admin'], description: '#34: the app signing in, recorded on the session.' },
+    },
+  },
+  AccountStatusRequest: {
+    type: 'object',
+    description: '#202: staff with users.manage. Staff accounts and your own account are refused (403).',
+    required: ['status'],
+    properties: {
+      status: { type: 'string', enum: ['ACTIVE', 'SUSPENDED'] },
+      reason: { type: 'string', maxLength: 300, description: 'Why it is suspended; for staff, not shown to the user.' },
+    },
+  },
+  AccountStatusResponse: {
+    type: 'object',
+    required: ['userId', 'status', 'suspendedAt', 'suspendedReason', 'sessionsRevoked'],
+    properties: {
+      userId: { type: 'string', format: 'uuid' },
+      status: { type: 'string', enum: ['ACTIVE', 'SUSPENDED'] },
+      suspendedAt: { type: 'string', format: 'date-time', nullable: true },
+      suspendedReason: { type: 'string', nullable: true },
+      sessionsRevoked: { type: 'integer', description: 'Refresh sessions ended by this change.' },
     },
   },
   RefreshTokenRequest: {
@@ -765,6 +786,21 @@ export function generatePublicOpenApiDocument() {
         } else {
           operation.responses['204'] = { description: 'Signed out (also returned for an unknown token)' };
         }
+      }
+
+      if (route.method === 'patch' && service.service === 'auth' && route.path === '/users/:id/status') {
+        operation.requestBody = { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/AccountStatusRequest' } } } };
+        operation.responses['200'] = { description: 'The account status now', content: { 'application/json': { schema: { $ref: '#/components/schemas/AccountStatusResponse' } } } };
+        operation.responses['403'] = { description: 'Not staff, no users.manage permission, a staff account, or your own account' };
+        operation.responses['404'] = { description: 'No such user' };
+      }
+
+      // #202: a suspended account gets 403 AccountSuspended, only once its credentials checked out.
+      if (route.method === 'post' && service.service === 'auth' && (route.path === '/login' || route.path === '/refresh')) {
+        operation.responses['403'] = {
+          description: 'AccountSuspended: the account is suspended (show the suspended screen)',
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } },
+        };
       }
 
       if (route.method === 'post' && service.service === 'auth' && route.path === '/logout-all') {

@@ -29,7 +29,8 @@ import { LedgerEntryType } from '../entities/driver-ledger-entry.entity';
 import { LedgerRepository } from '../repositories/ledger.repository';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 
-const DISPATCH_ROLES = [UserRole.RESTAURANT_OWNER, UserRole.ADMIN];
+/** Manual dispatch by the order's restaurant owner or staff; automatic dispatch acts as SYSTEM (#202). */
+const DISPATCH_ROLES = [UserRole.RESTAURANT_OWNER, UserRole.ADMIN, UserRole.SYSTEM];
 
 /** PostgreSQL unique_violation, as surfaced by TypeORM's QueryFailedError. */
 function isUniqueViolation(error: unknown): boolean {

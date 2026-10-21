@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Credential } from '../entities/credential.entity';
+import { AccountStatus, Credential } from '../entities/credential.entity';
 
 @Injectable()
 export class CredentialsRepository {
@@ -71,6 +71,15 @@ export class CredentialsRepository {
         lastFailedLoginAt: null,
       },
     );
+  }
+
+  /** #202: suspend (with when and why) or reactivate an account. Returns the updated credential. */
+  async setStatus(id: string, status: AccountStatus, reason: string | null, now = new Date()): Promise<Credential | null> {
+    await this.repo.update(
+      { id },
+      status === 'SUSPENDED' ? { status, suspendedAt: now, suspendedReason: reason } : { status, suspendedAt: null, suspendedReason: null },
+    );
+    return this.findById(id);
   }
 
   async deleteById(id: string): Promise<void> {

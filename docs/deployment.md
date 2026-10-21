@@ -17,8 +17,9 @@ docker compose -f docker-compose.base.yml -f docker-compose.dev.yml ps
 npm run seed
 npm run e2e
 
-# start the full stack
-docker compose up -d --build
+# start the full stack. It runs with NODE_ENV=production, so it needs its own SYSTEM_JWT_SECRET (#202):
+# at least 32 characters and different from JWT_SECRET.
+SYSTEM_JWT_SECRET=$(openssl rand -hex 32) docker compose up -d --build
 
 # validate the committed development graph in Linux/WSL
 docker compose -f docker-compose.base.yml -f docker-compose.dev.yml config --quiet
@@ -27,6 +28,7 @@ docker compose -f docker-compose.base.yml -f docker-compose.dev.yml ps --all
 
 ```powershell
 # PowerShell (WSL-hosted validation is also supported)
+$env:SYSTEM_JWT_SECRET = -join ((1..64) | ForEach-Object { '{0:x}' -f (Get-Random -Maximum 16) })
 docker compose config --quiet
 docker compose up -d --build
 ```

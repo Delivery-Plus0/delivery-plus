@@ -6,6 +6,7 @@ This folder is the main human-readable documentation hub for the repository.
 
 - [Overview](../README.md) – project summary and quick start
 - [Current state](../.project-context/16-current-state.md) – what is implemented, partial, and missing today; toolchain; CI; recent changes
+- [Production roadmap](./roadmap/production.md) – the milestone order, the rules for every issue, and the owner decisions
 - [Architecture](./architecture.md) – service boundaries and communication model
 - [Media and storage](../.project-context/15-media-and-storage.md) – S3-compatible image uploads, key layout, and security rules
 - [Deployment](./deployment.md) – Docker, environment variables, and runtime setup

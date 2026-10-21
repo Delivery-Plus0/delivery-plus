@@ -38,7 +38,7 @@ Suggested sequence:
 
 This folder stays broad and high-level. Detailed service-level contract docs live in [../docs/services.md](../docs/services.md) and the per-service pages under [../docs/services](../docs/services).
 
-The repository has a local roadmap under [../issues/README.md](../issues/README.md), but `.gitignore` excludes `issues/` and the directory is not part of the tracked application tree. GitHub is the authoritative remote issue state; local issue files are working metadata only. This folder remains the architecture source of truth.
+The production roadmap is [../docs/roadmap/production.md](../docs/roadmap/production.md): the milestone order, the rules for every issue, and the open owner decisions. GitHub milestones and issues are the authoritative issue state. This folder remains the architecture source of truth.
 
 ## Scope
 

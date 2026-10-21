@@ -87,12 +87,17 @@ Honest status, tracked in this repository's [milestones](https://github.com/Deli
 - In-app notifications for each order stage (no push notifications)
 - S3-compatible media uploads via presigned POST
 
-**In progress** — [Product sprint · Business & UX](https://github.com/Delivery-Plus0/delivery-plus/milestone/10): live order screen (#140) and driver dashboard (#141) are done; driver/customer history, ratings, menu management UI, profiles, Egypt locale, Arabic/RTL and OTP are open (#142–#155).
+**In progress:** the [production roadmap](docs/roadmap/production.md), 10 milestones from a hotfix to a paid pilot.
+- Production 0 (hotfix) is done.
+- Production 1 (accounts and sessions) has refresh tokens, account suspension, staff permissions, a separate SYSTEM principal and verification email merged. Password change and reset (#35) and the apps' email-code screens are still open.
 
-**Planned / not built yet**
-- Real payment provider, driver earnings and wallet (#145, #146)
-- Push notifications ([Phase 6](https://github.com/Delivery-Plus0/delivery-plus/milestone/6)); ETA estimation (the contract exists, no estimator)
-- Production readiness: deployment target, observability, hardening ([Phase 9](https://github.com/Delivery-Plus0/delivery-plus/milestone/9))
+**Planned / not built yet** (see the roadmap):
+- Driver and restaurant onboarding, delivery areas, fair dispatch (M2).
+- The admin console (M3–M4).
+- Staging, hardening and the NestJS upgrade (M5).
+- Real payments, settlements and payouts (M6).
+- Real SMS, push notifications, background location (M7).
+- ETA estimation (the contract exists, no estimator).
 
 ## <img src="./assets/icons/architecture.png" width="26" valign="middle"> Architecture
 

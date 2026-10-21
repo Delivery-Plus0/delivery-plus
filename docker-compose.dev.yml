@@ -144,6 +144,8 @@ services:
       EMAIL_PROVIDER: ${EMAIL_PROVIDER:-test}
       # Access-token lifetime (#34). The apps' E2E runs set it short (e.g. 60s) to prove sessions survive refreshes.
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
+      # #252: off by default; the apps' E2E restarts auth-service with it on to test the email-code screen.
+      EMAIL_VERIFICATION_REQUIRED: ${EMAIL_VERIFICATION_REQUIRED:-false}
       # #202: the local stack's super admin (all permissions) for `npm run e2e`; refused in production.
       TEST_ADMIN_EMAIL: ${TEST_ADMIN_EMAIL:-qa.admin@delivery-plus.test}
       TEST_ADMIN_PASSWORD: ${TEST_ADMIN_PASSWORD:-Qa-Only-Admin-Passw0rd!}

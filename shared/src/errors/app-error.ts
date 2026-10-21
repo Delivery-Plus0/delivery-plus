@@ -93,6 +93,16 @@ export class AccountSuspendedError extends AppError {
 }
 
 /**
+ * #252: email verification is required and this account's email isn't verified yet. Like
+ * AccountSuspended, returned only after the password checked out; the apps open the code screen.
+ */
+export class EmailNotVerifiedError extends AppError {
+  constructor(message = 'Please verify your email before logging in') {
+    super(403, 'EmailNotVerified', message);
+  }
+}
+
+/**
  * F6 (#205): another request kept changing the same cart, so this change couldn't be applied. Its own
  * code so clients don't mistake it for the different-restaurant `Conflict`: the answer is "try again",
  * never "start a new cart".

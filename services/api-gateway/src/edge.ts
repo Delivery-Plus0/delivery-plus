@@ -12,7 +12,8 @@ export function trustedProxyHops(env: NodeJS.ProcessEnv = process.env): number {
   const raw = env.TRUSTED_PROXY_HOPS?.trim() ?? '';
   if (raw === '') return 0;
   if (!/^\d+$/.test(raw) || Number(raw) > MAX_TRUSTED_PROXY_HOPS) {
-    throw new Error(`TRUSTED_PROXY_HOPS must be a whole number from 0 to ${MAX_TRUSTED_PROXY_HOPS} (got "${raw}")`);
+    // The value isn't echoed: startup errors are logged, and environment values stay out of logs.
+    throw new Error(`TRUSTED_PROXY_HOPS must be a whole number from 0 to ${MAX_TRUSTED_PROXY_HOPS}`);
   }
   return Number(raw);
 }

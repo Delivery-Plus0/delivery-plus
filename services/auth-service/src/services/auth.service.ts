@@ -4,14 +4,14 @@ import * as bcrypt from 'bcrypt';
 import { createHash } from 'node:crypto';
 import { Logger } from '@nestjs/common';
 import {
+  AccountSuspendedError,
+  AppError,
+  BadRequestError,
+  ConflictError,
+  EmailNotVerifiedError,
   ForbiddenError,
   JwtPayload,
   NotFoundError,
-  AccountSuspendedError,
-  AppError,
-  ConflictError,
-  BadRequestError,
-  EmailNotVerifiedError,
   RateLimiterService,
   UnauthorizedError,
   generateCorrelationId,

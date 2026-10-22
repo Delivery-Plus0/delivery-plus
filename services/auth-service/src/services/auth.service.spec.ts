@@ -6,7 +6,7 @@ import { Logger } from '@nestjs/common';
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import { ChangePasswordDto } from '../dto/change-password.dto';
-import { UserRole, ConflictError, ForbiddenError, UnauthorizedError, RateLimitGuard, RATE_LIMIT_KEY, JwtPayload, JwtAuthGuard } from '@food-delivery/shared';
+import { UserRole, ConflictError, ForbiddenError, UnauthorizedError, RateLimitGuard, RATE_LIMIT_KEY, JwtPayload, JwtAuthGuard, AccountSuspendedError } from '@food-delivery/shared';
 import { SELF_SERVICE_ROLES } from '../dto/register.dto';
 import * as bcrypt from 'bcrypt';
 import { loadConfig, loadTestAdmin } from '../config/app-config';
@@ -937,6 +937,33 @@ describe('AuthService', () => {
         expect(logged).not.toContain(secret);
       }
       spies.forEach((s) => s.mockRestore());
+    });
+      it('refuses a suspended account with AccountSuspended and changes nothing', async () => {
+      credentials.findById.mockResolvedValue({ ...(await storedCredential()), status: 'SUSPENDED' });
+
+      await expect(service.changePassword(user, dto)).rejects.toThrow(AccountSuspendedError);
+
+      expect(credentials.update).not.toHaveBeenCalled();
+      expect(sessions.revokeAll).not.toHaveBeenCalled();
+    });
+
+    it('rejects a new password equal to the current one and changes nothing', async () => {
+      credentials.findById.mockResolvedValue(await storedCredential());
+
+      await expect(
+        service.changePassword(user, { currentPassword: 'old-password-1', newPassword: 'old-password-1' }),
+      ).rejects.toThrow('New password must differ from the current one');
+
+      expect(credentials.update).not.toHaveBeenCalled();
+      expect(sessions.revokeAll).not.toHaveBeenCalled();
+    });
+
+    it('answers a wrong current password with 401 even for a suspended account', async () => {
+      credentials.findById.mockResolvedValue({ ...(await storedCredential()), status: 'SUSPENDED' });
+
+      await expect(
+        service.changePassword(user, { ...dto, currentPassword: 'not-the-password' }),
+      ).rejects.toThrow(UnauthorizedError);
     });
   });
   

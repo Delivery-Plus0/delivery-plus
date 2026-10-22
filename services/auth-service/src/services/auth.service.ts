@@ -10,6 +10,7 @@ import {
   AccountSuspendedError,
   AppError,
   ConflictError,
+  BadRequestError,
   EmailNotVerifiedError,
   RateLimiterService,
   UnauthorizedError,
@@ -361,10 +362,18 @@ export class AuthService {
     if (!credential) {
       throw new UnauthorizedError('Invalid credentials');
     }
-
+    
     const matches = await bcrypt.compare(dto.currentPassword, credential.passwordHash);
     if (!matches) {
       throw new UnauthorizedError('Current password is incorrect');
+    }
+
+     if (credential.status === 'SUSPENDED') {
+      throw new AccountSuspendedError();
+    }
+
+     if (dto.newPassword === dto.currentPassword) {
+      throw new BadRequestError('New password must differ from the current one');
     }
 
     const passwordHash = await bcrypt.hash(dto.newPassword, SALT_ROUNDS);

@@ -221,6 +221,53 @@ async function assertRefreshSessions() {
   console.log('Refresh sessions: refresh rotates, reuse ends the session, logout and logout-all revoke (401 on refresh)');
 }
 
+/**
+ * Password change (#35): changing the password ends every OTHER session and keeps the one that made
+ * the change. The old password stops working, the new one signs in, a wrong current password is 401
+ * and an unchanged password is 400. Fresh account; two logins plus the register session stay under
+ * the 5-a-minute login limit.
+ */
+async function assertPasswordChange() {
+  //limit clear for e2e testing
+   await clearRateLimits();
+  const email = `e2e.pwchange.${Date.now()}@example.com`;
+  const oldPassword = 'password123';
+  const newPassword = 'newpassword456';
+  const refresh = (refreshToken: string) => axios.post(`${API_URL}/api/auth/refresh`, { refreshToken });
+  const bearer = (token: string) => ({ headers: { Authorization: `Bearer ${token}` } });
+  const change = (token: string, body: Record<string, string>) =>
+    axios.post(`${API_URL}/api/auth/password/change`, body, bearer(token));
+
+  // Session A is the register session, session B a second login.
+  const sessionA = (await axios.post(`${API_URL}/api/auth/register`, { email, password: oldPassword, fullName: 'E2E Password', appId: 'customer' })).data;
+  const sessionB = (await axios.post(`${API_URL}/api/auth/login`, { email, password: oldPassword })).data;
+
+  // Refused changes first: nothing may change for them.
+  const wrongCurrent = await statusOf(change(sessionA.accessToken, { currentPassword: 'not-the-password', newPassword }));
+  const unchanged = await statusOf(change(sessionA.accessToken, { currentPassword: oldPassword, newPassword: oldPassword }));
+  const tooShort = await statusOf(change(sessionA.accessToken, { currentPassword: oldPassword, newPassword: 'short1' }));
+  const noToken = await statusOf(axios.post(`${API_URL}/api/auth/password/change`, { currentPassword: oldPassword, newPassword }));
+  const bStillLiveAfterRefusals = await statusOf(refresh(sessionB.refreshToken));
+   //limit clear for e2e testing
+    await clearRateLimits();
+  // The real change, made from session A. B's refresh token was rotated above, so log in again for a fresh B.
+  const sessionB2 = (await axios.post(`${API_URL}/api/auth/login`, { email, password: oldPassword })).data;
+  const changed = await statusOf(change(sessionA.accessToken, { currentPassword: oldPassword, newPassword }));
+
+  const otherSession = await statusOf(refresh(sessionB2.refreshToken));
+  const ownSession = await statusOf(refresh(sessionA.refreshToken));
+  //limit clear for e2e testing
+   await clearRateLimits();
+  const oldLogin = await statusOf(axios.post(`${API_URL}/api/auth/login`, { email, password: oldPassword }));
+  const newLogin = await statusOf(axios.post(`${API_URL}/api/auth/login`, { email, password: newPassword }));
+
+  const got = { wrongCurrent, unchanged, tooShort, noToken, bStillLiveAfterRefusals, changed, otherSession, ownSession, oldLogin, newLogin };
+  const want = { wrongCurrent: 401, unchanged: 400, tooShort: 400, noToken: 401, bStillLiveAfterRefusals: 200, changed: 204, otherSession: 401, ownSession: 200, oldLogin: 401, newLogin: 200 };
+  if (JSON.stringify(got) !== JSON.stringify(want)) throw new Error(`Password change: got ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`);
+  console.log('Password change: wrong current 401, unchanged 400, other sessions revoked, own session kept, old password refused, new one signs in');
+  await clearRateLimits();
+}
+
 /** Clears the rate-limit counters (test Redis only). /auth/login allows 5 a minute for every client behind the gateway. */
 async function clearRateLimits() {
   const redis = new Redis(REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 2 });
@@ -367,6 +414,7 @@ async function runE2E() {
     // 0. Registration is a privilege boundary.
     await assertNoSelfRegisteredAdmin();
     await assertRefreshSessions();
+     await assertPasswordChange();
     await assertAccountSuspension();
     await assertEmailVerification();
 

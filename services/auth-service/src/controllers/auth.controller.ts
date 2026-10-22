@@ -22,6 +22,7 @@ import { VerifyEmailDto } from '../dto/verify-email.dto';
 import { ResendVerificationDto } from '../dto/resend-verification.dto';
 import { AuthResponseDto, VerificationRequiredResponseDto } from '../dto/auth-response.dto';
 import { RefreshTokenDto } from '../dto/session.dto';
+import { ChangePasswordDto } from '../dto/change-password.dto';
 import { RequestWithContext } from '@food-delivery/shared';
 import { SessionContext, sessionIdOf } from '../services/sessions.service';
 import { EmailLocale, localeFrom } from '../email/verification-email';
@@ -37,6 +38,7 @@ function sessionContext(req: { headers: Record<string, string | string[] | undef
   const userAgent = req.headers['user-agent'];
   return { userAgent: typeof userAgent === 'string' ? userAgent : null };
 }
+
 
 @ApiTags('auth')
 @Controller('auth')
@@ -127,5 +129,16 @@ export class AuthController {
   @ApiOperation({ summary: 'Return the current JWT payload' })
   me(@CurrentUser() user: JwtPayload): JwtPayload {
     return user;
+  }
+
+    
+  @Post('password/change')
+  @UseGuards(JwtAuthGuard, RateLimitGuard)
+  @RateLimit({ limit: 5, windowSeconds: 60, key: (request) => (request as { user?: { sub?: string } }).user?.sub })
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Change the current user password; ends every other session' })
+  async changePassword(@CurrentUser() user: JwtPayload, @Body() dto: ChangePasswordDto): Promise<void> {
+    await this.authService.changePassword(user, dto);
   }
 }

@@ -2,7 +2,11 @@ import { AuthService } from './auth.service';
 import { CredentialsRepository } from '../repositories/credentials.repository';
 import { UserServiceClient } from '../common/user-service.client';
 import { JwtService } from '@nestjs/jwt';
-import { UserRole, ConflictError, ForbiddenError, UnauthorizedError, RateLimitGuard, RATE_LIMIT_KEY } from '@food-delivery/shared';
+import { Logger } from '@nestjs/common';
+import { validate } from 'class-validator';
+import { plainToInstance } from 'class-transformer';
+import { ChangePasswordDto } from '../dto/change-password.dto';
+import { UserRole, ConflictError, ForbiddenError, UnauthorizedError, RateLimitGuard, RATE_LIMIT_KEY, JwtPayload, JwtAuthGuard } from '@food-delivery/shared';
 import { SELF_SERVICE_ROLES } from '../dto/register.dto';
 import * as bcrypt from 'bcrypt';
 import { loadConfig, loadTestAdmin } from '../config/app-config';
@@ -846,4 +850,114 @@ describe('AuthService', () => {
       expect(credentials.findByEmail).not.toHaveBeenCalled();
     });
   });
+
+    describe('changePassword', () => {
+    const user = { sub: 'u1', email: 'cp@example.com', role: UserRole.CUSTOMER, sid: 'session-1' } as JwtPayload;
+    const dto = { currentPassword: 'old-password-1', newPassword: 'new-password-2' };
+
+    const storedCredential = async () =>
+      ({
+        id: 'u1',
+        email: 'cp@example.com',
+        passwordHash: await bcrypt.hash('old-password-1', 4),
+        role: UserRole.CUSTOMER,
+        emailVerified: true,
+        failedLoginCount: 0,
+        lockedUntil: null,
+      }) as any;
+
+    it('hashes and saves the new password, then revokes the other sessions', async () => {
+      credentials.findById.mockResolvedValue(await storedCredential());
+
+      await service.changePassword(user, dto);
+
+      const [id, changes] = credentials.update.mock.calls[0];
+      expect(id).toBe('u1');
+      expect(changes.passwordHash).not.toBe('new-password-2');
+      await expect(bcrypt.compare('new-password-2', changes.passwordHash as string)).resolves.toBe(true);
+      expect(sessions.revokeAll).toHaveBeenCalledWith('u1', 'password_changed', 'session-1');
+    });
+
+    it('rejects a wrong current password and changes nothing', async () => {
+      credentials.findById.mockResolvedValue(await storedCredential());
+
+      await expect(
+        service.changePassword(user, { ...dto, currentPassword: 'not-the-password' }),
+      ).rejects.toThrow('Current password is incorrect');
+
+      expect(credentials.update).not.toHaveBeenCalled();
+      expect(sessions.revokeAll).not.toHaveBeenCalled();
+    });
+
+    it('rejects when the credential no longer exists', async () => {
+      credentials.findById.mockResolvedValue(null);
+
+      await expect(service.changePassword(user, dto)).rejects.toThrow(UnauthorizedError);
+
+      expect(credentials.update).not.toHaveBeenCalled();
+      expect(sessions.revokeAll).not.toHaveBeenCalled();
+    });
+
+    it('does not revoke sessions if saving the new password fails', async () => {
+      credentials.findById.mockResolvedValue(await storedCredential());
+      credentials.update.mockRejectedValue(new Error('db down'));
+
+      await expect(service.changePassword(user, dto)).rejects.toThrow('db down');
+
+      expect(sessions.revokeAll).not.toHaveBeenCalled();
+    });
+
+        it('keeps the current session: the session id is passed as the one to spare, and nothing ends it', async () => {
+      credentials.findById.mockResolvedValue(await storedCredential());
+
+      await service.changePassword(user, dto);
+
+      expect(sessions.revokeAll).toHaveBeenCalledTimes(1);
+      expect(sessions.revokeAll.mock.calls[0][2]).toBe('session-1');
+      expect(sessions.end).not.toHaveBeenCalled();
+      expect(sessions.endByToken).not.toHaveBeenCalled();
+    });
+
+    it('never logs either password', async () => {
+      const spies = [
+        jest.spyOn(console, 'log'),
+        jest.spyOn(console, 'warn'),
+        jest.spyOn(console, 'error'),
+        jest.spyOn(Logger.prototype, 'log'),
+        jest.spyOn(Logger.prototype, 'warn'),
+        jest.spyOn(Logger.prototype, 'error'),
+      ];
+      credentials.findById.mockResolvedValue(await storedCredential());
+
+      await service.changePassword(user, dto);
+      await service.changePassword(user, { ...dto, currentPassword: 'not-the-password' }).catch(() => undefined);
+
+      const logged = JSON.stringify(spies.flatMap((s) => s.mock.calls));
+      for (const secret of ['old-password-1', 'new-password-2', 'not-the-password']) {
+        expect(logged).not.toContain(secret);
+      }
+      spies.forEach((s) => s.mockRestore());
+    });
+  });
+  
+
+  describe('ChangePasswordDto', () => {
+  const check = (newPassword: string) =>
+    validate(plainToInstance(ChangePasswordDto, { currentPassword: 'x', newPassword }));
+
+  it('rejects a new password under 8 characters', async () => {
+    expect((await check('Short1')).length).toBeGreaterThan(0);
+  });
+
+  it('accepts an 8 character password', async () => {
+    expect(await check('Abcdefg1')).toHaveLength(0);
+  });
+});
+
+describe('POST /auth/password/change', () => {
+  it('requires a signed-in user', () => {
+    const guards = Reflect.getMetadata('__guards__', AuthController.prototype.changePassword) as unknown[];
+    expect(guards).toContain(JwtAuthGuard);
+  });
+});
 });

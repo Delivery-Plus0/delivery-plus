@@ -4,12 +4,13 @@ import * as bcrypt from 'bcrypt';
 import { createHash } from 'node:crypto';
 import { Logger } from '@nestjs/common';
 import {
+  ForbiddenError,
+  JwtPayload,
+  NotFoundError,
   AccountSuspendedError,
   AppError,
   ConflictError,
   EmailNotVerifiedError,
-  ForbiddenError,
-  NotFoundError,
   RateLimiterService,
   UnauthorizedError,
   generateCorrelationId,
@@ -20,6 +21,7 @@ import { CredentialsRepository } from '../repositories/credentials.repository';
 import { UserServiceClient } from '../common/user-service.client';
 import { RegisterDto, SELF_SERVICE_ROLES } from '../dto/register.dto';
 import { LoginDto } from '../dto/login.dto';
+import { ChangePasswordDto } from '../dto/change-password.dto';
 import { VerifyEmailDto } from '../dto/verify-email.dto';
 import { ResendVerificationDto } from '../dto/resend-verification.dto';
 import { AuthResponseDto, VerificationRequiredResponseDto } from '../dto/auth-response.dto';
@@ -348,5 +350,25 @@ export class AuthService {
 
   private addMinutes(date: Date, minutes: number): Date {
     return new Date(date.getTime() + minutes * 60_000);
+  }
+
+    /**
+   * Changes the password of the signed-in user. Every other session ends; the one this access
+   * token belongs to (`sid`) stays signed in. Access tokens already issued last up to 15 minutes.
+   */
+  async changePassword(user: JwtPayload, dto: ChangePasswordDto): Promise<void> {
+    const credential = await this.credentials.findById(user.sub);
+    if (!credential) {
+      throw new UnauthorizedError('Invalid credentials');
+    }
+
+    const matches = await bcrypt.compare(dto.currentPassword, credential.passwordHash);
+    if (!matches) {
+      throw new UnauthorizedError('Current password is incorrect');
+    }
+
+    const passwordHash = await bcrypt.hash(dto.newPassword, SALT_ROUNDS);
+    await this.credentials.update(credential.id, { passwordHash });
+    await this.sessions.revokeAll(credential.id, 'password_changed', user.sid);
   }
 }

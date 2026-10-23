@@ -14,7 +14,7 @@
     "migration:show": "node ../../scripts/typeorm-migration-runner.js auth-service show"
   },
   "dependencies": {
-    "@aws-sdk/client-sesv2": "^3.1141.0",
+    "@aws-sdk/client-sesv2": "^3.1154.0",
     "@food-delivery/shared": "0.1.0",
     "@nestjs/common": "^10.4.4",
     "@nestjs/config": "^3.2.3",

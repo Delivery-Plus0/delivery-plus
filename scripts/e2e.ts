@@ -268,6 +268,77 @@ async function assertPasswordChange() {
   await clearRateLimits();
 }
 
+/** #35: forgot + reset by SMS code. The test SMS sender keeps the text in Redis under test:sms:<phone>. */
+async function assertPasswordReset() {
+  await clearRateLimits();
+  const stamp = Date.now().toString().slice(-7);
+  const email = `e2e.pwreset.${Date.now()}@example.com`;
+  const oldPassword = 'password123';
+  const newPassword = 'newpassword456';
+  const typedPhone = `0100${stamp}`; // what a user types
+  const unknownPhone = `0155${stamp}`; // never registered
+  const bearer = (token: string) => ({ headers: { Authorization: `Bearer ${token}` } });
+  const call = (path: string, body: unknown) => axios.post(`${API_URL}/api/auth/password/${path}`, body, { validateStatus: () => true });
+  const refresh = (refreshToken: string) => statusOf(axios.post(`${API_URL}/api/auth/refresh`, { refreshToken }));
+  const login = (password: string) => statusOf(axios.post(`${API_URL}/api/auth/login`, { email, password }));
+  const withRedis = async <T>(fn: (redis: Redis) => Promise<T>): Promise<T> => {
+    const redis = new Redis(REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 2 });
+    await redis.connect();
+    try {
+      return await fn(redis);
+    } finally {
+      redis.disconnect();
+    }
+  };
+  const codeFor = async (phone: string) => /(\d{6})/.exec((await withRedis((redis) => redis.get(`test:sms:${phone}`))) ?? '')?.[1];
+
+  // Two sessions, then a verified phone (reset only works for a verified phone).
+  const sessionA = (await axios.post(`${API_URL}/api/auth/register`, { email, password: oldPassword, fullName: 'E2E Reset', appId: 'customer' })).data;
+  const sessionB = (await axios.post(`${API_URL}/api/auth/login`, { email, password: oldPassword })).data;
+  const auth = bearer(sessionA.accessToken);
+  await axios.patch(`${API_URL}/api/users/me`, { phone: typedPhone }, auth);
+  const otpStart = await axios.post(`${API_URL}/api/users/me/phone/verification`, {}, auth);
+  const phone = otpStart.data.phone as string; // the stored form: the Redis key uses it
+  const verifyCode = await codeFor(phone);
+  if (!verifyCode) throw new Error('Password reset: no phone verification code in Redis');
+  await axios.post(`${API_URL}/api/users/me/phone/verify`, { code: verifyCode }, auth);
+
+  // Forgot answers the same for an unknown phone and the real one.
+  await clearRateLimits();
+  await withRedis((redis) => redis.del(`test:sms:${phone}`)); // so the next text we read is the reset code
+  const forgotUnknown = await call('forgot', { phone: unknownPhone });
+  const forgotKnown = await call('forgot', { phone: typedPhone });
+  const resetCode = await codeFor(phone);
+  if (!resetCode) throw new Error('Password reset: no reset code in Redis');
+
+  const wrongCode = (await call('reset', { phone: typedPhone, code: resetCode === '000000' ? '111111' : '000000', newPassword })).status;
+  const reset = (await call('reset', { phone: typedPhone, code: resetCode, newPassword })).status;
+
+  await clearRateLimits();
+  const sessionARefresh = await refresh(sessionA.refreshToken);
+  const sessionBRefresh = await refresh(sessionB.refreshToken);
+  const oldLogin = await login(oldPassword);
+  const newLogin = await login(newPassword);
+  const reuse = (await call('reset', { phone: typedPhone, code: resetCode, newPassword: 'another-password-789' })).status;
+
+  const got = {
+    forgotUnknown: forgotUnknown.status,
+    forgotKnown: forgotKnown.status,
+    sameBody: JSON.stringify(forgotUnknown.data) === JSON.stringify(forgotKnown.data),
+    wrongCode,
+    reset,
+    sessionARefresh,
+    sessionBRefresh,
+    oldLogin,
+    newLogin,
+    reuse,
+  };
+  const want = { forgotUnknown: 202, forgotKnown: 202, sameBody: true, wrongCode: 401, reset: 204, sessionARefresh: 401, sessionBRefresh: 401, oldLogin: 401, newLogin: 200, reuse: 401 };
+  if (JSON.stringify(got) !== JSON.stringify(want)) throw new Error(`Password reset: got ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`);
+  console.log('Password reset: same 202 for known and unknown phones, wrong code 401, reset 204, all sessions revoked, old password refused, new one signs in, code single use');
+  await clearRateLimits();
+}
+
 /** Clears the rate-limit counters (test Redis only). /auth/login allows 5 a minute for every client behind the gateway. */
 async function clearRateLimits() {
   const redis = new Redis(REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 2 });
@@ -414,7 +485,8 @@ async function runE2E() {
     // 0. Registration is a privilege boundary.
     await assertNoSelfRegisteredAdmin();
     await assertRefreshSessions();
-     await assertPasswordChange();
+    await assertPasswordChange();
+    await assertPasswordReset();
     await assertAccountSuspension();
     await assertEmailVerification();
 

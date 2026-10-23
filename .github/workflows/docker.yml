@@ -61,7 +61,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       # Reuses the repository's actual Dockerfile and SERVICE_NAME build-arg
       # convention (the same one docker-compose.yml uses for every service)

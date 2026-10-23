@@ -10,6 +10,7 @@ import { ConfirmAvatarUploadDto } from '../dto/confirm-avatar-upload.dto';
 import { UpdateProfileDto } from '../dto/update-profile.dto';
 import { UserProfile } from '../entities/user-profile.entity';
 import { InternalAuthGuard } from '../guards/internal-auth.guard';
+import { PasswordResetSendDto, PasswordResetVerifyDto } from '../dto/password-reset.dto';
 
 @ApiTags('users')
 @Controller()
@@ -29,6 +30,23 @@ export class UsersController {
     @Req() request: { internalService?: string },
   ): Promise<UserProfile> {
     return this.usersService.createProfile(dto, request.internalService ?? '');
+  }
+
+  @Post('internal/users/password-reset/send')
+  @HttpCode(202)
+  @UseGuards(InternalAuthGuard)
+  @ApiOperation({ summary: 'Internal: text a password-reset code to the owner of a verified phone (always the same answer)' })
+  async sendPasswordResetCode(@Body() dto: PasswordResetSendDto): Promise<{ accepted: true }> {
+    await this.phoneVerification.startPasswordReset(dto.phone);
+    return { accepted: true };
+  }
+
+  @Post('internal/users/password-reset/verify')
+  @HttpCode(200)
+  @UseGuards(InternalAuthGuard)
+  @ApiOperation({ summary: 'Internal: consume a password-reset code; returns the user id only on success' })
+  verifyPasswordResetCode(@Body() dto: PasswordResetVerifyDto): Promise<{ userId: string }> {
+    return this.phoneVerification.verifyPasswordReset(dto.phone, dto.code);
   }
 
   @Get('users/me')

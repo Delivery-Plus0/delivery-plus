@@ -146,4 +146,7 @@ export class UsersService {
       throw new ConflictError('Auth identity does not match the stored profile');
     }
   }
+    findByVerifiedPhone(phone: string): Promise<UserProfile | null> {
+    return this.profiles.findByVerifiedPhone(phone);
+  }
 }

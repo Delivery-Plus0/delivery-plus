@@ -28,4 +28,13 @@ export class ProfilesRepository {
     await this.repo.update({ id }, data);
     return this.findById(id);
   }
+
+    /** The profile that owns this phone, only when the phone is verified . */
+  findByVerifiedPhone(phone: string): Promise<UserProfile | null> {
+    return this.repo
+      .createQueryBuilder('p')
+      .where('p.phone = :phone', { phone })
+      .andWhere('p.phoneVerifiedAt IS NOT NULL')
+      .getOne();
+  }
 }

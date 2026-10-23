@@ -1,6 +1,6 @@
 import { AuthService } from './auth.service';
 import { CredentialsRepository } from '../repositories/credentials.repository';
-import { UserServiceClient } from '../common/user-service.client';
+import { UserServiceClient, SmsUnavailableError } from '../common/user-service.client';
 import { JwtService } from '@nestjs/jwt';
 import { Logger } from '@nestjs/common';
 import { validate } from 'class-validator';
@@ -42,8 +42,10 @@ describe('AuthService', () => {
     } as unknown as jest.Mocked<CredentialsRepository>;
 
     userServiceClient = {
-      createProfile: jest.fn(),
-    } as unknown as jest.Mocked<UserServiceClient>;
+  createProfile: jest.fn(),
+  sendPasswordResetCode: jest.fn(),
+  verifyPasswordResetCode: jest.fn(),
+  } as unknown as jest.Mocked<UserServiceClient>
 
     jwtService = {
       signAsync: jest.fn().mockResolvedValue('signed.jwt.token'),
@@ -964,6 +966,73 @@ describe('AuthService', () => {
       await expect(
         service.changePassword(user, { ...dto, currentPassword: 'not-the-password' }),
       ).rejects.toThrow(UnauthorizedError);
+    });
+  });
+
+    describe('forgotPassword / resetPassword (#35)', () => {
+    const phone = '+201012345678';
+    const context = { correlationId: 'c-1', clientIp: '1.2.3.4' };
+    const resetDto = { phone, code: '123456', newPassword: 'new-password-2' };
+    const stored = (overrides = {}) => ({ id: 'u1', status: 'ACTIVE', passwordHash: 'old', ...overrides }) as any;
+
+    beforeEach(() => {
+      rateLimiter.incrementAndCheck.mockResolvedValue(true);
+    });
+
+    it('forgot: limits per IP and per phone first, then asks user-service, and always answers the same', async () => {
+      userServiceClient.sendPasswordResetCode.mockResolvedValue(undefined);
+      const result = await service.forgotPassword({ phone }, context);
+
+      expect(result).toEqual({ message: 'If that account exists, a code has been sent' });
+      expect(rateLimiter.incrementAndCheck).toHaveBeenCalledTimes(2);
+      expect(userServiceClient.sendPasswordResetCode).toHaveBeenCalledWith(phone, 'c-1');
+      const keys = rateLimiter.incrementAndCheck.mock.calls.map((call) => call[0]).join(' ');
+      expect(keys).not.toContain('1012345678');
+    });
+
+    it('forgot: a limit answers 429 and sends nothing', async () => {
+      rateLimiter.incrementAndCheck.mockResolvedValue(false);
+      await expect(service.forgotPassword({ phone }, context)).rejects.toMatchObject({ statusCode: 429 });
+      expect(userServiceClient.sendPasswordResetCode).not.toHaveBeenCalled();
+    });
+
+    it('forgot: passes on user-service 503 SmsUnavailable', async () => {
+      userServiceClient.sendPasswordResetCode.mockRejectedValue(new SmsUnavailableError());
+      await expect(service.forgotPassword({ phone }, context)).rejects.toBeInstanceOf(SmsUnavailableError);
+    });
+
+    it('reset: sets the hash, clears the lockout and revokes every session', async () => {
+      userServiceClient.verifyPasswordResetCode.mockResolvedValue({ userId: 'u1' });
+      credentials.findById.mockResolvedValue(stored());
+
+      await service.resetPassword(resetDto, 'c-1');
+
+      const [id, changes] = credentials.update.mock.calls[0];
+      expect(id).toBe('u1');
+      expect(changes).toMatchObject({ failedLoginCount: 0, lockedUntil: null, lastFailedLoginAt: null });
+      await expect(bcrypt.compare('new-password-2', changes.passwordHash as string)).resolves.toBe(true);
+      expect(sessions.revokeAll).toHaveBeenCalledWith('u1', 'password_reset');
+    });
+
+    it('reset: a bad code changes nothing', async () => {
+      userServiceClient.verifyPasswordResetCode.mockRejectedValue(new UnauthorizedError('Invalid or expired code'));
+      await expect(service.resetPassword(resetDto, 'c-1')).rejects.toBeInstanceOf(UnauthorizedError);
+      expect(credentials.update).not.toHaveBeenCalled();
+      expect(sessions.revokeAll).not.toHaveBeenCalled();
+    });
+
+    it('reset: refuses a suspended account with 403 and changes nothing', async () => {
+      userServiceClient.verifyPasswordResetCode.mockResolvedValue({ userId: 'u1' });
+      credentials.findById.mockResolvedValue(stored({ status: 'SUSPENDED' }));
+      await expect(service.resetPassword(resetDto, 'c-1')).rejects.toBeInstanceOf(AccountSuspendedError);
+      expect(credentials.update).not.toHaveBeenCalled();
+      expect(sessions.revokeAll).not.toHaveBeenCalled();
+    });
+
+    it('reset: an unknown credential is the same generic 401', async () => {
+      userServiceClient.verifyPasswordResetCode.mockResolvedValue({ userId: 'gone' });
+      credentials.findById.mockResolvedValue(null);
+      await expect(service.resetPassword(resetDto, 'c-1')).rejects.toThrow('Invalid or expired code');
     });
   });
   

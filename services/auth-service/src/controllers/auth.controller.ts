@@ -26,6 +26,9 @@ import { ChangePasswordDto } from '../dto/change-password.dto';
 import { RequestWithContext } from '@food-delivery/shared';
 import { SessionContext, sessionIdOf } from '../services/sessions.service';
 import { EmailLocale, localeFrom } from '../email/verification-email';
+import { ForgotPasswordDto } from '../dto/forgot-password.dto';
+import { ResetPasswordDto } from '../dto/reset-password.dto';
+
 
 /** #203: the verification email's language, from Accept-Language (Arabic by default, like the apps). */
 function localeOf(req: RequestWithContext): EmailLocale {
@@ -110,6 +113,27 @@ export class AuthController {
       locale: localeOf(req),
       clientIp: clientIpOf(req as never),
     });
+  }
+
+    @Post('password/forgot')
+  @UseGuards(RateLimitGuard)
+  @RateLimit({ limit: 5, windowSeconds: 60 })
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({ summary: 'Send a password reset code by SMS (same answer for unknown phones)' })
+  forgotPassword(@Body() dto: ForgotPasswordDto, @Req() req: RequestWithContext): Promise<{ message: string }> {
+    return this.authService.forgotPassword(dto, {
+      correlationId: req.correlationId ?? generateCorrelationId(),
+      clientIp: clientIpOf(req as never),
+    });
+  }
+
+  @Post('password/reset')
+  @UseGuards(RateLimitGuard)
+  @RateLimit({ limit: 10, windowSeconds: 60 })
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Set a new password using the SMS reset code' })
+  async resetPassword(@Body() dto: ResetPasswordDto, @Req() req: RequestWithContext): Promise<void> {
+    await this.authService.resetPassword(dto, req.correlationId ?? generateCorrelationId());
   }
 
   /** #202: suspend or reactivate a customer, owner or driver (staff with users.manage). */

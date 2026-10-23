@@ -70,7 +70,7 @@ jobs:
       # with integration.yml's own `docker compose build`, which is a
       # separate, smaller amount of duplication accepted for simplicity.
       - name: Build image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           build-args: |

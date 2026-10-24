@@ -1,8 +1,8 @@
-import { Inject, Injectable, InternalServerErrorException } from '@nestjs/common';
+import { Inject, Injectable, InternalServerErrorException, ServiceUnavailableException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { AppError, INTERNAL_AUTH_HEADERS, UnauthorizedError, signInternalRequest } from '@food-delivery/shared';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
-
+const USER_SERVICE_TIMEOUT_MS = 5000;
 export interface CreateProfilePayload {
   userId: string;
   email: string;
@@ -27,6 +27,7 @@ export class SmsUnavailableError extends AppError {
  */
 @Injectable()
 export class UserServiceClient {
+  
   constructor(@Inject(APP_CONFIG) private readonly config: AppConfig) {}
 
   async createProfile(payload: CreateProfilePayload, correlationId: string): Promise<void> {
@@ -72,7 +73,7 @@ export class UserServiceClient {
   }
 
     /** Signs and sends one internal call. The signed body is exactly the JSON that goes out (ADR 001). */
-  private signedPost(path: string, body: Record<string, unknown>, correlationId: string): Promise<Response> {
+    private async signedPost(path: string, body: Record<string, unknown>, correlationId: string): Promise<Response> {
     const timestamp = Math.floor(Date.now() / 1000).toString();
     const nonce = randomUUID();
     const signature = signInternalRequest({
@@ -84,18 +85,27 @@ export class UserServiceClient {
       service: this.config.internalAuthService,
       secret: this.config.internalAuthSecret,
     });
-    return fetch(`${this.config.userServiceUrl}${path}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-correlation-id': correlationId,
-        [INTERNAL_AUTH_HEADERS.service]: this.config.internalAuthService,
-        [INTERNAL_AUTH_HEADERS.timestamp]: timestamp,
-        [INTERNAL_AUTH_HEADERS.nonce]: nonce,
-        [INTERNAL_AUTH_HEADERS.signature]: signature,
-      },
-      body: JSON.stringify(body),
-    });
+    try {
+      return await fetch(`${this.config.userServiceUrl}${path}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-correlation-id': correlationId,
+          [INTERNAL_AUTH_HEADERS.service]: this.config.internalAuthService,
+          [INTERNAL_AUTH_HEADERS.timestamp]: timestamp,
+          [INTERNAL_AUTH_HEADERS.nonce]: nonce,
+          [INTERNAL_AUTH_HEADERS.signature]: signature,
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(USER_SERVICE_TIMEOUT_MS),
+      });
+    } catch (error) {
+      // No phone or code in the message; a timeout looks the same for every phone.
+      if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) {
+        throw new ServiceUnavailableException('Password reset is temporarily unavailable. Please try again shortly.');
+      }
+      throw error;
+    }
   }
 
   /** Asks user-service to text a reset code. It answers the same whether or not the phone has an account. */

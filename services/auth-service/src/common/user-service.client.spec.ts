@@ -1,5 +1,6 @@
 import { SmsUnavailableError, UserServiceClient } from './user-service.client';
 import { UnauthorizedError, signInternalRequest } from '@food-delivery/shared';
+import {ServiceUnavailableException} from '@nestjs/common';
 
 describe('UserServiceClient', () => {
   it('signs profile creation requests with the internal auth contract', async () => {
@@ -106,5 +107,21 @@ describe('UserServiceClient password reset calls (#35)', () => {
 
   it('maps a 401 on verify to the generic 401', async () => {
     await expect(clientWith({ ok: false, status: 401 }).client.verifyPasswordResetCode(phone, '000000', 'c-1')).rejects.toBeInstanceOf(UnauthorizedError);
+  });
+
+    it('gives the send request a timeout signal', async () => {
+    const { client, fetchMock } = clientWith({ ok: true, status: 202 });
+    await client.sendPasswordResetCode(phone, 'correlation-1');
+
+    expect(fetchMock.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('answers 503 when user-service does not answer in time, without the phone in the message', async () => {
+    global.fetch = jest.fn().mockRejectedValue(Object.assign(new Error('The operation timed out'), { name: 'TimeoutError' })) as any;
+    const client = new UserServiceClient(config);
+
+    const failure = client.sendPasswordResetCode(phone, 'c-1');
+    await expect(failure).rejects.toBeInstanceOf(ServiceUnavailableException);
+    await expect(failure).rejects.not.toThrow(phone);
   });
 });

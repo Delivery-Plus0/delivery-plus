@@ -928,7 +928,7 @@ export function generatePublicOpenApiDocument() {
         operation.responses['400'] = { description: 'Validation error: not an Egyptian mobile number' };
         operation.responses['429'] = { description: 'Too many requests: 5 a minute per client, and hourly limits per client IP (20) and per phone (5)' };
         operation.responses['503'] = {
-          description: 'SmsUnavailable: SMS is not set up yet, or the provider failed (show "try again later")',
+          description: 'SmsUnavailable: SMS is not set up yet. A provider failure still answers 202 so nothing reveals the account (show "try again later")',
           content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } },
         };
       }

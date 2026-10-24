@@ -405,6 +405,21 @@ describe('Auth sessions over HTTP (#34)', () => {
       expect((await post('/auth/password/reset', { phone: PHONE, code: '123456', newPassword: 'short' })).status).toBe(400);
     });
 
+    it('forgot is rate limited over HTTP', async () => {
+      const statuses: number[] = [];
+      for (let i = 0; i < 8; i++) statuses.push((await post('/auth/password/forgot', { phone: PHONE })).status);
+
+      expect(statuses[0]).toBe(202);
+      expect(statuses).toContain(429);
+    });
+
+    it('reset is public and answers 204 with no body', async () => {
+      userServiceClient.verifyPasswordResetCode.mockResolvedValueOnce({ userId });
+      const response = await post('/auth/password/reset', { phone: PHONE, code: '123456', newPassword: NEW_PASSWORD });
+
+      expect(response.status).toBe(204);
+      expect(response.body).toBeUndefined();
+    });
     it('reset is public and answers a generic 401 for a code user-service refuses', async () => {
       userServiceClient.verifyPasswordResetCode.mockRejectedValueOnce(new UnauthorizedError('Invalid or expired code'));
       const response = await post('/auth/password/reset', { phone: PHONE, code: '123456', newPassword: NEW_PASSWORD });

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, LessThan, Not, Repository } from 'typeorm';
+import { IsNull, LessThan, Not, Repository, EntityManager } from 'typeorm';
 import { AuthSession, SessionApp, SessionRevokeReason } from '../entities/auth-session.entity';
 
 export interface NewSession {
@@ -50,8 +50,9 @@ export class SessionsRepository {
   }
 
   /** Revokes every live session of a user, except `exceptSessionId` when given. Returns how many. */
-  async revokeAllForCredential(credentialId: string, reason: SessionRevokeReason, exceptSessionId?: string, now = new Date()): Promise<number> {
-    const result = await this.repo.update(
+  async revokeAllForCredential(credentialId: string, reason: SessionRevokeReason, exceptSessionId?: string, now = new Date(), manager?: EntityManager): Promise<number> {
+    const repo = manager ? manager.getRepository(AuthSession) : this.repo;
+    const result = await repo.update(
       { credentialId, revokedAt: IsNull(), ...(exceptSessionId ? { id: Not(exceptSessionId) } : {}) },
       { revokedAt: now, revokedReason: reason },
     );
@@ -64,4 +65,6 @@ export class SessionsRepository {
     const revoked = await this.repo.delete({ revokedAt: LessThan(before) });
     return (expired.affected ?? 0) + (revoked.affected ?? 0);
   }
+
+   
 }

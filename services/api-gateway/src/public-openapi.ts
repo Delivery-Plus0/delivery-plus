@@ -25,6 +25,9 @@ export const SERVICE_DEFINITIONS = [
       { method: 'patch', path: '/users/:id/status', summary: 'Suspend or reactivate an account (staff with users.manage; suspending ends its sessions)', auth: true, statusCode: 200 },
       { method: 'post', path: '/verify-email', summary: 'Verify an email address with the 6-digit code from the verification email', auth: false, statusCode: 200 },
       { method: 'post', path: '/resend-verification', summary: 'Email a new verification code (one a minute per address)', auth: false, statusCode: 200 },
+      { method: 'post', path: '/password/change', summary: 'Change the current user password; ends every other session', auth: true, statusCode: 204 },
+      { method: 'post', path: '/password/forgot', summary: 'Request a password reset code by SMS', auth: false, statusCode: 202 },
+      { method: 'post', path: '/password/reset', summary: 'Reset the password using the SMS code; ends every session', auth: false, statusCode: 204 },
       { method: 'get', path: '/me', summary: 'Get the current authenticated user', auth: true, statusCode: 200 },
     ],
   },
@@ -454,6 +457,33 @@ const baseSchemas = {
       email: { type: 'string', format: 'email' },
     },
   },
+    ChangePasswordRequest: {
+    type: 'object',
+    required: ['currentPassword', 'newPassword'],
+    properties: {
+      currentPassword: { type: 'string', minLength: 1 },
+      newPassword: { type: 'string', minLength: 8 },
+    },
+  },
+  ForgotPasswordRequest: {
+    type: 'object',
+    required: ['phone'],
+    properties: {
+      phone: {
+        type: 'string',
+        description: 'Egyptian mobile number associated with the account.',
+      },
+    },
+  },
+  ResetPasswordRequest: {
+    type: 'object',
+    required: ['phone', 'code', 'newPassword'],
+    properties: {
+      phone: { type: 'string', description: 'Egyptian mobile number.' },
+      code: { type: 'string', pattern: '^\\d{6}$', description: 'Six-digit SMS password-reset code.' },
+      newPassword: { type: 'string', minLength: 8 },
+    },
+  },
   AuthResponse: {
     type: 'object',
     description: '#34: a short-lived access token (Bearer) and a single-use refresh token.',
@@ -864,6 +894,59 @@ export function generatePublicOpenApiDocument() {
           description: 'EmailUnavailable: email is not set up yet, or the provider failed (show "try again later")',
           content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } },
         };
+      }
+
+      if (route.method === 'post' && service.service === 'auth' && route.path === '/password/change') {
+        operation.requestBody = {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/ChangePasswordRequest' } },
+          },
+        };
+        operation.responses[String(route.statusCode || 204)] = {
+          description: 'Password changed. Every other session is revoked; the current one stays signed in.',
+        };
+        operation.responses['400'] = { description: 'Validation error: the new password is under 8 characters or equals the current one' };
+        operation.responses['401'] = { description: 'Not signed in, or the current password is wrong' };
+        operation.responses['403'] = { description: 'AccountSuspended' };
+        operation.responses['429'] = { description: 'Too many attempts: 5 a minute per user' };
+      }
+
+       if (route.method === 'post' && service.service === 'auth' && route.path === '/password/forgot') {
+        operation.requestBody = {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/ForgotPasswordRequest' } },
+          },
+        };
+        operation.responses[String(route.statusCode || 202)] = {
+          description: 'The same answer whether or not the phone has an account',
+          content: {
+            'application/json': { schema: { type: 'object', properties: { message: { type: 'string' } } } },
+          },
+        };
+        operation.responses['400'] = { description: 'Validation error: not an Egyptian mobile number' };
+        operation.responses['429'] = { description: 'Too many requests: 5 a minute per client, and hourly limits per client IP (20) and per phone (5)' };
+        operation.responses['503'] = {
+          description: 'SmsUnavailable: SMS is not set up yet, or the provider failed (show "try again later")',
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } },
+        };
+      }
+
+      if (route.method === 'post' && service.service === 'auth' && route.path === '/password/reset') {
+        operation.requestBody = {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/ResetPasswordRequest' } },
+          },
+        };
+        operation.responses[String(route.statusCode || 204)] = {
+          description: 'Password reset. Every session of the account is revoked and the lockout is cleared.',
+        };
+        operation.responses['400'] = { description: 'Validation error: bad phone, code is not 6 digits, or password under 8 characters' };
+        operation.responses['401'] = { description: 'Invalid or expired code (wrong, used, expired or out of attempts): ask for a new one' };
+        operation.responses['403'] = { description: 'AccountSuspended' };
+        operation.responses['429'] = { description: 'Too many attempts: 10 a minute per client' };
       }
 
       if (!publicSpec.paths[pathKey]) {

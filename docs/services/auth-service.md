@@ -14,6 +14,7 @@ From `services/auth-service/src/controllers/auth.controller.ts`:
 - `POST /auth/logout` – sign out this device (ends the session of a refresh token).
 - `POST /auth/logout-all` – sign out every device (access token required).
 - `POST /auth/verify-email`, `POST /auth/resend-verification` – email verification by a 6-digit code (see [Email verification](#email-verification-203)).
+- `POST /auth/password/change`, `POST /auth/password/forgot`, `POST /auth/password/reset` – change the password while signed in, or reset it with an SMS code (see [Password change and reset](#password-change-and-reset-35)).
 - `GET /auth/me` – return the current user payload from the bearer token.
 - `PATCH /auth/users/:id/status` – suspend or reactivate an account (staff with `users.manage`, see [Account status](#account-status-202)).
 
@@ -126,8 +127,24 @@ Login and register accept an optional `appId` (`customer`, `driver`, `restaurant
 - **The first super admin** (every permission) is created out of band: see [docs/runbooks/bootstrap-admin.md](../runbooks/bootstrap-admin.md).
   - Test and dev stacks create theirs at startup from `TEST_ADMIN_EMAIL` and `TEST_ADMIN_PASSWORD`; auth-service refuses those variables in production.
 
+## Password change and reset (#35)
+
+- **Change** (`POST /auth/password/change { currentPassword, newPassword }`, access token → `204`):
+  - A wrong current password is `401`. A suspended account is `403 AccountSuspended`, checked only after the current password is verified.
+  - A new password equal to the current one is `400`.
+  - On success every **other** session ends (`revokedReason: password_changed`); the session of the access token (`sid`) stays signed in. Limited to 5 a minute per user.
+- **Forgot** (`POST /auth/password/forgot { phone }`, public → `202 { message }`):
+  - The code goes by SMS to the account's **verified** phone. user-service owns the phone and the code; auth-service owns the password.
+  - The answer is the same whether or not the phone has an account. Limits: 5 a minute per client, 20 an hour per client IP and 5 an hour per phone, counted for every phone (phones are hashed in the Redis keys), so a `429` reveals nothing.
+  - `503 SmsUnavailable` for everyone while SMS isn't set up.
+- **Reset** (`POST /auth/password/reset { phone, code, newPassword }`, public → `204`):
+  - auth-service asks user-service to consume the code (single use, 5 attempts, 5 minutes). Every failure (wrong, expired, used, exhausted, unknown phone) is one generic `401`.
+  - A suspended account is `403 AccountSuspended`. On success the hash changes, the failed-login lockout clears and **every** session ends (`revokedReason: password_reset`). Limited to 10 a minute per client.
+- **Password policy:** same as registration (minimum 8 characters), for change and reset.
+- Raw codes, phone numbers and passwords never appear in logs. As elsewhere, access tokens already issued stay valid until they expire.
+
 ## Dependencies
-- Calls `user-service` internally for user profile creation via `src/common/user-service.client.ts`, signing the request with the internal HMAC contract
+- Calls `user-service` internally for user profile creation via `src/common/user-service.client.ts`, signing the request with the internal HMAC contract, and for password reset codes (`POST /internal/users/password-reset/send` and `/verify`, same HMAC contract)
 - Requires `DATABASE_URL` and `JWT_SECRET`
 - Redis: rate limits and the internal-auth nonces
 

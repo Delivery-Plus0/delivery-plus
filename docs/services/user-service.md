@@ -7,6 +7,8 @@ Owns user profiles and order-history lookups for authenticated users.
 From `services/user-service/src/controllers/users.controller.ts`:
 
 - `POST /internal/users` – internal profile creation endpoint
+- `POST /internal/users/password-reset/send`, `POST /internal/users/password-reset/verify` – internal (HMAC) routes auth-service
+uses for password reset codes (#35)
 - `GET /users/me` – get the current authenticated profile
 - `PATCH /users/me` – update the current authenticated profile
 - `GET /users/me/orders` – fetch current user order history
@@ -48,6 +50,15 @@ SMS goes through the `SmsSender` port (`src/sms/sms-sender.ts`). No real provide
 - `test`: for isolated test stacks only (`docker-compose.test.yml`), and refused at startup in production. Each message is kept in Redis under `test:sms:<E.164>` for 15 minutes, so E2E suites can read the code. `scripts/e2e.ts` covers the whole flow this way.
 
 If the message can't be sent, its row is deleted, so the attempt neither counts against the limits nor blocks a retry. Ordering and going online can then require a verified phone: see the `PHONE_VERIFICATION_REQUIRED` gate in order-service and driver-service. Adding a real provider means a new `SmsSender` implementation, an `SMS_PROVIDER` value, and credentials from the environment.
+
+## Password reset codes (#35)
+
+auth-service's forgot and reset flow reuses the phone verification mechanics (HMAC-stored six-digit code, 5 minutes, 5 attempts, single use, resend cooldown and hourly limits) through two internal routes, both guarded by `InternalAuthGuard` (ADR 001):
+
+- `POST /internal/users/password-reset/send { phone }` → `202 { accepted: true }`. It texts a code to the profile that owns this **verified** phone. Unknown phones, cooldown, hourly limits and provider failures all answer the same, so nothing reveals which numbers have accounts. Only a disabled SMS provider answers `503 SmsUnavailable`, for every phone.
+- `POST /internal/users/password-reset/verify { phone, code }` → `200 { userId }`. It consumes the latest reset code for that verified phone. Every failure is one `401`. It never changes the profile.
+
+**Purpose.** `phone_verifications.purpose` (migration 006, default `phone_verification`) is `phone_verification` or `password_reset`. Code lookup, attempt counting, consumption, cooldowns and hourly limits are all scoped by purpose, so a reset code can't verify a phone, a phone code can't reset a password, and neither flow blocks or counts against the other.
 
 ## Dependencies
 - Calls `order-service` to fetch order history via `src/common/order-service.client.ts`

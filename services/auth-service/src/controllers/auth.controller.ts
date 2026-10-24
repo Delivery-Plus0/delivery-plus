@@ -115,7 +115,7 @@ export class AuthController {
     });
   }
 
-    @Post('password/forgot')
+  @Post('password/forgot')
   @UseGuards(RateLimitGuard)
   @RateLimit({ limit: 5, windowSeconds: 60 })
   @HttpCode(HttpStatus.ACCEPTED)

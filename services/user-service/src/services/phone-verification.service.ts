@@ -151,15 +151,23 @@ export class PhoneVerificationService {
       throw error;
     }
 
+       // Return now: the provider round trip must not be observable by the caller.
+    void this.deliverResetCode(row.id, profile.id, phone, code);
+  }
+
+  /** Runs after the response. It must never throw */
+  private async deliverResetCode(rowId: string, userId: string, phone: string, code: string): Promise<void> {
     try {
-      await this.sms.send(phone, `Your Delivery Plus password reset code is ${code}. It expires in ${PHONE_OTP_POLICY.ttlSeconds / 60} minutes.`);
+      await this.sms.send(
+        phone,
+        `Your Delivery Plus password reset code is ${code}. It expires in ${PHONE_OTP_POLICY.ttlSeconds / 60} minutes.`,
+      );
+      this.logger.log(`password_reset.sent user=${userId}`);
     } catch (error) {
-      await this.verifications.delete(row.id);
-      // Silent for the caller too; the number and the code stay out of the logs.
-      this.logger.warn(`password_reset.send_failed user=${profile.id} error=${(error as Error).message}`);
-      return;
+      // The number and the code stay out of the logs.
+      this.logger.warn(`password_reset.send_failed user=${userId} error=${(error as Error).name}`);
+      await this.verifications.delete(rowId).catch(() => undefined);
     }
-    this.logger.log(`password_reset.sent user=${profile.id}`);
   }
 
   /** Consumes the latest reset code for this verified phone; every failure is the same 401. */

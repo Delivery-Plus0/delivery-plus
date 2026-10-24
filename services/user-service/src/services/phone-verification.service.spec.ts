@@ -184,11 +184,13 @@ describe('PhoneVerificationService (#153)', () => {
   });
 
     describe('password reset (#35)', () => {
+    const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
     const phone = '+201012345678';
     const codeSent = () => /(\d{6})/.exec(sent[sent.length - 1].text)![1];
 
     it('texts a code to the verified phone and stores only its hash, for the reset purpose', async () => {
       await service().startPasswordReset(phone, now);
+      await flush();
       expect(sent).toHaveLength(1);
       expect(sent[0].to).toBe(phone);
       expect(stored?.purpose).toBe('password_reset');
@@ -219,7 +221,14 @@ describe('PhoneVerificationService (#153)', () => {
     it('drops the row and stays silent when the provider fails', async () => {
       const failing: SmsSender = { enabled: true, send: jest.fn().mockRejectedValue(new Error('boom')) };
       await expect(service(failing).startPasswordReset(phone, now)).resolves.toBeUndefined();
+      await flush();
       expect(repo.delete).toHaveBeenCalledWith(stored?.id);
+    });
+    it('answers before the provider does, so a known phone is not slower', async () => {
+      const hanging: SmsSender = { enabled: true, send: jest.fn(() => new Promise<void>(() => undefined)) };
+      await expect(service(hanging).startPasswordReset(phone, now)).resolves.toBeUndefined();
+      expect(hanging.send).toHaveBeenCalledTimes(1);
+      expect(repo.delete).not.toHaveBeenCalled();
     });
 
     it('verifies the right code once and returns only the user id, without touching the profile', async () => {

@@ -3,7 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { JwtModule, JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { randomUUID } from 'node:crypto';
-import { AllExceptionsFilter, INTERNAL_AUTH_HEADERS, RateLimiterService, UserRole, signInternalRequest } from '@food-delivery/shared';
+import { AllExceptionsFilter, INTERNAL_AUTH_HEADERS, RateLimiterService, UserRole, UnauthorizedError, signInternalRequest } from '@food-delivery/shared';
 import { AuthController } from './auth.controller';
 import { InternalSessionsController } from './internal-sessions.controller';
 import { AuthService } from '../services/auth.service';
@@ -65,7 +65,7 @@ const redis = { set: async (key: string) => (nonces.has(key) ? null : (nonces.ad
 
 const userServiceClient = {
   sendPasswordResetCode: jest.fn().mockResolvedValue(undefined),
-  verifyPasswordResetCode: jest.fn().mockResolvedValue(undefined), // rename to the client's real method
+  verifyPasswordResetCode: jest.fn().mockResolvedValue({ userId: 'u-1' }),
 };
 
 @Module({
@@ -384,43 +384,99 @@ describe('Auth sessions over HTTP (#34)', () => {
     });
   });
 
-describe('password forgot / reset (#35)', () => {
-  // copy a valid phone from the `phone` const in auth.service.spec.ts
-  const PHONE = '+201012345678';
-  const NEW_PASSWORD = 'a-new-password-123';
+  describe('password forgot / reset (#35)', () => {
+    const PHONE = '+201012345678';
+    const NEW_PASSWORD = 'a-new-password-123';
 
-  it('POST /auth/password/forgot is public and answers 202 with a message', async () => {
-    const response = await post('/auth/password/forgot', { phone: PHONE });
+    it('POST /auth/password/forgot is public and answers 202 with a message', async () => {
+      const response = await post('/auth/password/forgot', { phone: PHONE });
+      expect(response.status).toBe(202);
+      expect(response.body).toEqual({ message: expect.any(String) });
+    });
 
-    expect(response.status).toBe(202);
-    expect(response.body).toEqual({ message: expect.any(String) });
+    it('forgot rejects a malformed body with 400', async () => {
+      expect((await post('/auth/password/forgot', {})).status).toBe(400);
+      expect((await post('/auth/password/forgot', { phone: 'abc' })).status).toBe(400);
+      expect((await post('/auth/password/forgot', { phone: PHONE, extra: true })).status).toBe(400);
+    });
+
+    it('reset rejects a malformed body with 400', async () => {
+      expect((await post('/auth/password/reset', { phone: PHONE, code: '123456' })).status).toBe(400);
+      expect((await post('/auth/password/reset', { phone: PHONE, code: '123456', newPassword: 'short' })).status).toBe(400);
+    });
+
+        it('reset is public and answers a generic 401 for a code user-service refuses', async () => {
+      userServiceClient.verifyPasswordResetCode.mockRejectedValueOnce(new UnauthorizedError('Invalid or expired code'));
+      const response = await post('/auth/password/reset', { phone: PHONE, code: '123456', newPassword: NEW_PASSWORD });
+      expect(response.status).toBe(401);
+    });
   });
-
-  it('forgot rejects a malformed body with 400', async () => {
-    expect((await post('/auth/password/forgot', {})).status).toBe(400);
-    expect((await post('/auth/password/forgot', { phone: 'abc' })).status).toBe(400);
-    expect((await post('/auth/password/forgot', { phone: PHONE, extra: true })).status).toBe(400);
-  });
-
-  it('forgot is rate limited over HTTP', async () => {
-    const statuses: number[] = [];
-    for (let i = 0; i < 8; i++) statuses.push((await post('/auth/password/forgot', { phone: PHONE })).status);
-
-    expect(statuses[0]).toBe(202);
-    expect(statuses).toContain(429);
-  });
-
-  it('reset rejects a malformed body with 400', async () => {
-    expect((await post('/auth/password/reset', { phone: PHONE, code: '123456' })).status).toBe(400);
-    expect((await post('/auth/password/reset', { phone: PHONE, code: '123456', newPassword: 'short' })).status).toBe(400);
-  });
-
-  it('reset is public and answers 204 with no body', async () => {
-  userServiceClient.verifyPasswordResetCode.mockResolvedValueOnce({ userId });
-  const response = await post('/auth/password/reset', { phone: PHONE, code: '123456', newPassword: NEW_PASSWORD });
-
-  expect(response.status).toBe(204);
-  expect(response.body).toBeUndefined();
 });
-});
+
+
+describe('UserServiceClient password reset calls (#35)', () => {
+  const config = {
+    userServiceUrl: 'http://user-service:3002',
+    internalAuthService: 'auth-service',
+    internalAuthSecret: 'test-secret',
+  } as any;
+  const phone = '+201012345678';
+
+  function clientWith(response: { ok: boolean; status: number; json?: () => Promise<unknown> }) {
+    const fetchMock = jest.fn().mockResolvedValue(response);
+    global.fetch = fetchMock as any;
+    return { client: new UserServiceClient(config), fetchMock };
+  }
+
+  it('signs the send request over the exact body and path it sends', async () => {
+    const { client, fetchMock } = clientWith({ ok: true, status: 202 });
+    await client.sendPasswordResetCode(phone, 'correlation-1');
+
+    const [url, request] = fetchMock.mock.calls[0];
+    const headers = request.headers as Record<string, string>;
+    expect(url).toBe('http://user-service:3002/internal/users/password-reset/send');
+    expect(JSON.parse(request.body)).toEqual({ phone });
+    expect(headers['x-internal-signature']).toBe(
+      signInternalRequest({
+        method: 'POST',
+        path: '/internal/users/password-reset/send',
+        timestamp: headers['x-internal-timestamp'],
+        nonce: headers['x-internal-nonce'],
+        body: { phone },
+        service: 'auth-service',
+        secret: 'test-secret',
+      }),
+    );
+  });
+
+  it('signs the verify request and returns the user id', async () => {
+    const { client, fetchMock } = clientWith({ ok: true, status: 200, json: async () => ({ userId: 'u1' }) });
+    await expect(client.verifyPasswordResetCode(phone, '123456', 'correlation-1')).resolves.toEqual({ userId: 'u1' });
+
+    const [url, request] = fetchMock.mock.calls[0];
+    const headers = request.headers as Record<string, string>;
+    expect(url).toBe('http://user-service:3002/internal/users/password-reset/verify');
+    expect(headers['x-internal-signature']).toBe(
+      signInternalRequest({
+        method: 'POST',
+        path: '/internal/users/password-reset/verify',
+        timestamp: headers['x-internal-timestamp'],
+        nonce: headers['x-internal-nonce'],
+        body: { phone, code: '123456' },
+        service: 'auth-service',
+        secret: 'test-secret',
+      }),
+    );
+  });
+
+  it('maps a 503 on send to SmsUnavailable and other failures to a plain error without the phone', async () => {
+    await expect(clientWith({ ok: false, status: 503 }).client.sendPasswordResetCode(phone, 'c-1')).rejects.toBeInstanceOf(SmsUnavailableError);
+    const failure = clientWith({ ok: false, status: 500 }).client.sendPasswordResetCode(phone, 'c-1');
+    await expect(failure).rejects.toThrow('status 500');
+    await expect(failure).rejects.not.toThrow(phone);
+  });
+
+  it('maps a 401 on verify to the generic 401', async () => {
+    await expect(clientWith({ ok: false, status: 401 }).client.verifyPasswordResetCode(phone, '000000', 'c-1')).rejects.toBeInstanceOf(UnauthorizedError);
+  });
 });

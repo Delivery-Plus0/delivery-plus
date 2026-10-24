@@ -6,9 +6,11 @@ import { Logger } from '@nestjs/common';
 import {
   AccountSuspendedError,
   AppError,
+  BadRequestError,
   ConflictError,
   EmailNotVerifiedError,
   ForbiddenError,
+  JwtPayload,
   NotFoundError,
   RateLimiterService,
   UnauthorizedError,
@@ -19,7 +21,8 @@ import { EmailLocale, buildVerificationEmail, hashVerificationCode, newVerificat
 import { CredentialsRepository } from '../repositories/credentials.repository';
 import { UserServiceClient } from '../common/user-service.client';
 import { RegisterDto, SELF_SERVICE_ROLES } from '../dto/register.dto';
-import { LoginDto } from '../dto/login.dto';
+import { LoginDto} from '../dto/login.dto';
+import { ChangePasswordDto } from '../dto/change-password.dto';
 import { VerifyEmailDto } from '../dto/verify-email.dto';
 import { ResendVerificationDto } from '../dto/resend-verification.dto';
 import { AuthResponseDto, VerificationRequiredResponseDto } from '../dto/auth-response.dto';
@@ -28,6 +31,8 @@ import { UserRole } from '@food-delivery/shared';
 import { AccountStatus, Credential } from '../entities/credential.entity';
 import { StaffPermissionsRepository } from '../repositories/staff-permissions.repository';
 import { InvalidRefreshTokenError, SessionContext, SessionsService } from './sessions.service';
+import { ResetPasswordDto } from '../dto/reset-password.dto';
+import { ForgotPasswordDto } from '../dto/forgot-password.dto';
 
 const SALT_ROUNDS = 10;
 
@@ -36,6 +41,10 @@ const RESEND_PER_EMAIL_PER_HOUR = 5;
 const RESEND_PER_IP_PER_HOUR = 20;
 const GENERIC_RESEND_MESSAGE = 'If that account exists, a verification email has been sent';
 const INVALID_CODE_MESSAGE = 'Invalid or expired verification code';
+/** #35: forgot limits, counted whether or not the phone has an account, so a 429 reveals nothing. */
+const FORGOT_PER_PHONE_PER_HOUR = 5;
+const FORGOT_PER_IP_PER_HOUR = 20;
+const GENERIC_FORGOT_MESSAGE = 'If that account exists, a code has been sent';
 
 export interface VerificationRequestContext {
   correlationId: string;
@@ -348,5 +357,65 @@ export class AuthService {
 
   private addMinutes(date: Date, minutes: number): Date {
     return new Date(date.getTime() + minutes * 60_000);
+  }
+
+    /**
+   * Changes the password of the signed-in user. Every other session ends; the one this access
+   * token belongs to (`sid`) stays signed in. Access tokens already issued last up to 15 minutes.
+   */
+  async changePassword(user: JwtPayload, dto: ChangePasswordDto): Promise<void> {
+    const credential = await this.credentials.findById(user.sub);
+    if (!credential) {
+      throw new UnauthorizedError('Invalid credentials');
+    }
+    
+    const matches = await bcrypt.compare(dto.currentPassword, credential.passwordHash);
+    if (!matches) {
+      throw new UnauthorizedError('Current password is incorrect');
+    }
+
+     if (credential.status === 'SUSPENDED') {
+      throw new AccountSuspendedError();
+    }
+
+     if (dto.newPassword === dto.currentPassword) {
+      throw new BadRequestError('New password must differ from the current one');
+    }
+
+    const passwordHash = await bcrypt.hash(dto.newPassword, SALT_ROUNDS);
+    await this.credentials.update(credential.id, { passwordHash });
+    await this.sessions.revokeAll(credential.id, 'password_changed', user.sid);
+  }
+
+    /**
+   * #35: texts a reset code. The limits run first and count every phone, known or not. user-service
+   * answers the same for unknown phones, so this always returns the same body. 503 when SMS is off.
+   */
+  async forgotPassword(dto: ForgotPasswordDto, context: { correlationId: string; clientIp: string }): Promise<{ message: string }> {
+    // Hashed, so no phone number sits in a Redis key.
+    const phoneKey = createHash('sha256').update(dto.phone).digest('hex');
+    const allowed =
+      (await this.rateLimiter.incrementAndCheck(`ratelimit:password-forgot:ip:${context.clientIp}`, FORGOT_PER_IP_PER_HOUR, 3600)) &&
+      (await this.rateLimiter.incrementAndCheck(`ratelimit:password-forgot:phone:${phoneKey}`, FORGOT_PER_PHONE_PER_HOUR, 3600));
+    if (!allowed) {
+      throw new AppError(429, 'TooManyRequests', 'Too many requests. Please try again later.');
+    }
+    await this.userServiceClient.sendPasswordResetCode(dto.phone, context.correlationId);
+    return { message: GENERIC_FORGOT_MESSAGE };
+  }
+
+  /**
+   * #35: user-service consumes the code (single use, attempt limits) and names the owner. Then the
+   * password changes, the lockout clears and every session ends. A suspended account is refused.
+   */
+  async resetPassword(dto: ResetPasswordDto, correlationId: string): Promise<void> {
+    const { userId } = await this.userServiceClient.verifyPasswordResetCode(dto.phone, dto.code, correlationId);
+    const credential = await this.credentials.findById(userId);
+    if (!credential) throw new UnauthorizedError('Invalid or expired code');
+    if (credential.status === 'SUSPENDED') throw new AccountSuspendedError();
+
+    const passwordHash = await bcrypt.hash(dto.newPassword, SALT_ROUNDS);
+    await this.credentials.update(credential.id, { passwordHash, failedLoginCount: 0, lockedUntil: null, lastFailedLoginAt: null });
+    await this.sessions.revokeAll(credential.id, 'password_reset');
   }
 }

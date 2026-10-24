@@ -1,5 +1,8 @@
 import { Column, CreateDateColumn, Entity, Index, PrimaryColumn } from 'typeorm';
 
+/**  What a code is for. A code only works for its own purpose (#35). */
+export type OtpPurpose = 'phone_verification' | 'password_reset';
+
 /**
  * One code sent to a phone (#153). Only an HMAC of the code is stored; a row is used up by a correct
  * code (`consumedAt`), by running out of attempts, or by expiring. A newer row for the same user
@@ -30,6 +33,9 @@ export class PhoneVerification {
 
   @Column({ type: 'timestamptz', nullable: true })
   consumedAt!: Date | null;
+
+  @Column({ type: 'varchar', length: 32, default: 'phone_verification' })
+  purpose!: OtpPurpose;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt!: Date;

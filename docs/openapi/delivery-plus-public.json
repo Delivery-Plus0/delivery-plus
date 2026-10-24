@@ -492,6 +492,143 @@
         }
       }
     },
+    "/api/auth/password/change": {
+      "post": {
+        "summary": "Change the current user password; ends every other session",
+        "tags": [
+          "auth"
+        ],
+        "operationId": "auth_post_api_auth_password_change",
+        "responses": {
+          "204": {
+            "description": "Password changed. Every other session is revoked; the current one stays signed in."
+          },
+          "400": {
+            "description": "Validation error: the new password is under 8 characters or equals the current one"
+          },
+          "401": {
+            "description": "Not signed in, or the current password is wrong"
+          },
+          "403": {
+            "description": "AccountSuspended"
+          },
+          "429": {
+            "description": "Too many attempts: 5 a minute per user"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePasswordRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/password/forgot": {
+      "post": {
+        "summary": "Request a password reset code by SMS",
+        "tags": [
+          "auth"
+        ],
+        "operationId": "auth_post_api_auth_password_forgot",
+        "responses": {
+          "202": {
+            "description": "The same answer whether or not the phone has an account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error: not an Egyptian mobile number"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "429": {
+            "description": "Too many requests: 5 a minute per client, and hourly limits per client IP (20) and per phone (5)"
+          },
+          "503": {
+            "description": "SmsUnavailable: SMS is not set up yet, or the provider failed (show \"try again later\")",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForgotPasswordRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/password/reset": {
+      "post": {
+        "summary": "Reset the password using the SMS code; ends every session",
+        "tags": [
+          "auth"
+        ],
+        "operationId": "auth_post_api_auth_password_reset",
+        "responses": {
+          "204": {
+            "description": "Password reset. Every session of the account is revoked and the lockout is cleared."
+          },
+          "400": {
+            "description": "Validation error: bad phone, code is not 6 digits, or password under 8 characters"
+          },
+          "401": {
+            "description": "Invalid or expired code (wrong, used, expired or out of attempts): ask for a new one"
+          },
+          "403": {
+            "description": "AccountSuspended"
+          },
+          "429": {
+            "description": "Too many attempts: 10 a minute per client"
+          }
+        },
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetPasswordRequest"
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/auth/me": {
       "get": {
         "summary": "Get the current authenticated user",
@@ -4724,6 +4861,58 @@
           "email": {
             "type": "string",
             "format": "email"
+          }
+        }
+      },
+      "ChangePasswordRequest": {
+        "type": "object",
+        "required": [
+          "currentPassword",
+          "newPassword"
+        ],
+        "properties": {
+          "currentPassword": {
+            "type": "string",
+            "minLength": 1
+          },
+          "newPassword": {
+            "type": "string",
+            "minLength": 8
+          }
+        }
+      },
+      "ForgotPasswordRequest": {
+        "type": "object",
+        "required": [
+          "phone"
+        ],
+        "properties": {
+          "phone": {
+            "type": "string",
+            "description": "Egyptian mobile number associated with the account."
+          }
+        }
+      },
+      "ResetPasswordRequest": {
+        "type": "object",
+        "required": [
+          "phone",
+          "code",
+          "newPassword"
+        ],
+        "properties": {
+          "phone": {
+            "type": "string",
+            "description": "Egyptian mobile number."
+          },
+          "code": {
+            "type": "string",
+            "pattern": "^\\d{6}$",
+            "description": "Six-digit SMS password-reset code."
+          },
+          "newPassword": {
+            "type": "string",
+            "minLength": 8
           }
         }
       },

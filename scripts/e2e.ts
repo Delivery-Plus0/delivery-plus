@@ -228,8 +228,7 @@ async function assertRefreshSessions() {
  * the 5-a-minute login limit.
  */
 async function assertPasswordChange() {
-  //limit clear for e2e testing
-   await clearRateLimits();
+  await clearRateLimits();
   const email = `e2e.pwchange.${Date.now()}@example.com`;
   const oldPassword = 'password123';
   const newPassword = 'newpassword456';
@@ -248,19 +247,15 @@ async function assertPasswordChange() {
   const tooShort = await statusOf(change(sessionA.accessToken, { currentPassword: oldPassword, newPassword: 'short1' }));
   const noToken = await statusOf(axios.post(`${API_URL}/api/auth/password/change`, { currentPassword: oldPassword, newPassword }));
   const bStillLiveAfterRefusals = await statusOf(refresh(sessionB.refreshToken));
-   //limit clear for e2e testing
-    await clearRateLimits();
+  await clearRateLimits();
   // The real change, made from session A. B's refresh token was rotated above, so log in again for a fresh B.
   const sessionB2 = (await axios.post(`${API_URL}/api/auth/login`, { email, password: oldPassword })).data;
   const changed = await statusOf(change(sessionA.accessToken, { currentPassword: oldPassword, newPassword }));
-
   const otherSession = await statusOf(refresh(sessionB2.refreshToken));
   const ownSession = await statusOf(refresh(sessionA.refreshToken));
-  //limit clear for e2e testing
-   await clearRateLimits();
+  await clearRateLimits();
   const oldLogin = await statusOf(axios.post(`${API_URL}/api/auth/login`, { email, password: oldPassword }));
   const newLogin = await statusOf(axios.post(`${API_URL}/api/auth/login`, { email, password: newPassword }));
-
   const got = { wrongCurrent, unchanged, tooShort, noToken, bStillLiveAfterRefusals, changed, otherSession, ownSession, oldLogin, newLogin };
   const want = { wrongCurrent: 401, unchanged: 400, tooShort: 400, noToken: 401, bStillLiveAfterRefusals: 200, changed: 204, otherSession: 401, ownSession: 200, oldLogin: 401, newLogin: 200 };
   if (JSON.stringify(got) !== JSON.stringify(want)) throw new Error(`Password change: got ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`);
@@ -290,7 +285,16 @@ async function assertPasswordReset() {
       redis.disconnect();
     }
   };
-  const codeFor = async (phone: string) => /(\d{6})/.exec((await withRedis((redis) => redis.get(`test:sms:${phone}`))) ?? '')?.[1];
+  const codeFor = async (phone: string, timeoutMs = 3000): Promise<string> => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const text = await withRedis((redis) => redis.get(`test:sms:${phone}`));
+      const code = /\b(\d{6})\b/.exec(text ?? '')?.[1];
+      if (code) return code;
+      await sleep(100);
+    }
+    throw new Error('Timed out waiting for the text message');
+  };
 
   // Two sessions, then a verified phone (reset only works for a verified phone).
   const sessionA = (await axios.post(`${API_URL}/api/auth/register`, { email, password: oldPassword, fullName: 'E2E Reset', appId: 'customer' })).data;
@@ -300,7 +304,6 @@ async function assertPasswordReset() {
   const otpStart = await axios.post(`${API_URL}/api/users/me/phone/verification`, {}, auth);
   const phone = otpStart.data.phone as string; // the stored form: the Redis key uses it
   const verifyCode = await codeFor(phone);
-  if (!verifyCode) throw new Error('Password reset: no phone verification code in Redis');
   await axios.post(`${API_URL}/api/users/me/phone/verify`, { code: verifyCode }, auth);
 
   // Forgot answers the same for an unknown phone and the real one.
@@ -309,7 +312,6 @@ async function assertPasswordReset() {
   const forgotUnknown = await call('forgot', { phone: unknownPhone });
   const forgotKnown = await call('forgot', { phone: typedPhone });
   const resetCode = await codeFor(phone);
-  if (!resetCode) throw new Error('Password reset: no reset code in Redis');
 
   const wrongCode = (await call('reset', { phone: typedPhone, code: resetCode === '000000' ? '111111' : '000000', newPassword })).status;
   const reset = (await call('reset', { phone: typedPhone, code: resetCode, newPassword })).status;

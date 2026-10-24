@@ -145,16 +145,7 @@ export class AuthService {
 
     const passwordMatches = await bcrypt.compare(dto.password, credential.passwordHash);
     if (!passwordMatches) {
-      const updatedCredential = await this.credentials.recordFailedLogin(credential.id, new Date());
-      const nextCount = updatedCredential?.failedLoginCount ?? 1;
-      const shouldLock = nextCount >= this.config.maxFailedLoginAttempts;
-
-      if (shouldLock) {
-        await this.credentials.update(credential.id, {
-          lockedUntil: this.addMinutes(new Date(), this.config.lockoutMinutes),
-        });
-      }
-
+      await this.registerFailedPasswordAttempt(credential.id);
       throw new UnauthorizedError('Invalid email or password');
     }
 
@@ -359,35 +350,57 @@ export class AuthService {
     return new Date(date.getTime() + minutes * 60_000);
   }
 
-    /**
-   * Changes the password of the signed-in user. Every other session ends; the one this access
-   * token belongs to (`sid`) stays signed in. Access tokens already issued last up to 15 minutes.
-   */
+  private async registerFailedPasswordAttempt(credentialId: string): Promise<void> {
+    const updated = await this.credentials.recordFailedLogin(credentialId, new Date());
+    if ((updated?.failedLoginCount ?? 1) >= this.config.maxFailedLoginAttempts) {
+      await this.credentials.update(credentialId, { lockedUntil: this.addMinutes(new Date(), this.config.lockoutMinutes) });
+    }
+  }
+
+  /**
+  * Changes the password of the signed-in user. Every other session ends; the one this access
+  * token belongs to (`sid`) stays signed in. Access tokens already issued last up to 15 minutes.
+  */
   async changePassword(user: JwtPayload, dto: ChangePasswordDto): Promise<void> {
     const credential = await this.credentials.findById(user.sub);
     if (!credential) {
       throw new UnauthorizedError('Invalid credentials');
     }
-    
-    const matches = await bcrypt.compare(dto.currentPassword, credential.passwordHash);
-    if (!matches) {
+    // A locked account answers like a wrong password, so the two can't be told apart.
+    if (credential.lockedUntil && credential.lockedUntil.getTime() > Date.now()) {
       throw new UnauthorizedError('Current password is incorrect');
     }
 
-     if (credential.status === 'SUSPENDED') {
+    if (credential.lockedUntil && credential.lockedUntil.getTime() <= Date.now()) {
+      await this.credentials.resetFailureState(credential.id);
+    }
+
+    const matches = await bcrypt.compare(dto.currentPassword, credential.passwordHash);
+    if (!matches) {
+      await this.registerFailedPasswordAttempt(credential.id);
+      throw new UnauthorizedError('Current password is incorrect');
+    }
+
+    if (credential.status === 'SUSPENDED') {
       throw new AccountSuspendedError();
     }
 
-     if (dto.newPassword === dto.currentPassword) {
+    if (dto.newPassword === dto.currentPassword) {
       throw new BadRequestError('New password must differ from the current one');
     }
 
     const passwordHash = await bcrypt.hash(dto.newPassword, SALT_ROUNDS);
-    await this.credentials.update(credential.id, { passwordHash });
-    await this.sessions.revokeAll(credential.id, 'password_changed', user.sid);
+    await this.credentials.transaction(async (manager) => {
+      await this.credentials.update(
+        credential.id,
+        { passwordHash, failedLoginCount: 0, lockedUntil: null, lastFailedLoginAt: null },
+        manager,
+      );
+      await this.sessions.revokeAll(credential.id, 'password_changed', user.sid, manager);
+    });
   }
 
-    /**
+  /**
    * #35: texts a reset code. The limits run first and count every phone, known or not. user-service
    * answers the same for unknown phones, so this always returns the same body. 503 when SMS is off.
    */
@@ -415,7 +428,13 @@ export class AuthService {
     if (credential.status === 'SUSPENDED') throw new AccountSuspendedError();
 
     const passwordHash = await bcrypt.hash(dto.newPassword, SALT_ROUNDS);
-    await this.credentials.update(credential.id, { passwordHash, failedLoginCount: 0, lockedUntil: null, lastFailedLoginAt: null });
-    await this.sessions.revokeAll(credential.id, 'password_reset');
+    await this.credentials.transaction(async (manager) => {
+      await this.credentials.update(
+        credential.id,
+        { passwordHash, failedLoginCount: 0, lockedUntil: null, lastFailedLoginAt: null },
+        manager,
+      );
+      await this.sessions.revokeAll(credential.id, 'password_reset', undefined, manager);
+    });
   }
 }

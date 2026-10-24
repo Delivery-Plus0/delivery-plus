@@ -18,6 +18,7 @@ import { hashVerificationCode } from '../email/verification-email';
 import { RateLimiterService } from '@food-delivery/shared';
 
 describe('AuthService', () => {
+  const manager = {} as never;
   let service: AuthService;
   let credentials: jest.Mocked<CredentialsRepository>;
   let userServiceClient: jest.Mocked<UserServiceClient>;
@@ -35,6 +36,7 @@ describe('AuthService', () => {
       update: jest.fn(),
       recordFailedLogin: jest.fn(),
       resetFailureState: jest.fn(),
+      transaction: jest.fn(async (work: (m: unknown) => Promise<unknown>) => work(manager)),   
       deleteById: jest.fn(),
       setVerificationCode: jest.fn(),
       consumeVerificationCode: jest.fn(),
@@ -45,7 +47,7 @@ describe('AuthService', () => {
   createProfile: jest.fn(),
   sendPasswordResetCode: jest.fn(),
   verifyPasswordResetCode: jest.fn(),
-  } as unknown as jest.Mocked<UserServiceClient>
+  } as unknown as jest.Mocked<UserServiceClient>;
 
     jwtService = {
       signAsync: jest.fn().mockResolvedValue('signed.jwt.token'),
@@ -877,7 +879,7 @@ describe('AuthService', () => {
       expect(id).toBe('u1');
       expect(changes.passwordHash).not.toBe('new-password-2');
       await expect(bcrypt.compare('new-password-2', changes.passwordHash as string)).resolves.toBe(true);
-      expect(sessions.revokeAll).toHaveBeenCalledWith('u1', 'password_changed', 'session-1');
+      expect(sessions.revokeAll).toHaveBeenCalledWith('u1', 'password_changed', 'session-1', manager);
     });
 
     it('rejects a wrong current password and changes nothing', async () => {
@@ -968,6 +970,97 @@ describe('AuthService', () => {
       ).rejects.toThrow(UnauthorizedError);
     });
   });
+   describe('changePassword lockout and atomicity (#35)', () => {
+    const user = { sub: 'u1', sid: 'session-1' } as JwtPayload;
+    const dto = { currentPassword: 'current-password', newPassword: 'brand-new-password' } as ChangePasswordDto;
+    const wrong = { ...dto, currentPassword: 'not-the-password' } as ChangePasswordDto;
+    let hash: string;
+
+    beforeAll(async () => {
+      hash = await bcrypt.hash(dto.currentPassword, 4);
+    });
+
+    const credential = (overrides: Record<string, unknown> = {}) =>
+      ({ id: 'u1', passwordHash: hash, status: 'ACTIVE', lockedUntil: null, failedLoginCount: 0, ...overrides }) as never;
+
+    it('counts a wrong current password as a failed attempt and changes nothing', async () => {
+      credentials.findById.mockResolvedValue(credential());
+      credentials.recordFailedLogin.mockResolvedValue({ failedLoginCount: 1 } as never);
+
+      await expect(service.changePassword(user, wrong)).rejects.toThrow('Current password is incorrect');
+
+      expect(credentials.recordFailedLogin).toHaveBeenCalledWith('u1', expect.any(Date));
+      expect(credentials.update).not.toHaveBeenCalled();
+      expect(sessions.revokeAll).not.toHaveBeenCalled();
+    });
+
+    it('locks the account when the failed attempts reach the threshold', async () => {
+      credentials.findById.mockResolvedValue(credential());
+      credentials.recordFailedLogin.mockResolvedValue({ failedLoginCount: 99 } as never);
+
+      await expect(service.changePassword(user, wrong)).rejects.toThrow('Current password is incorrect');
+
+      expect(credentials.update).toHaveBeenCalledWith('u1', { lockedUntil: expect.any(Date) });
+    });
+
+    it('answers a locked account like a wrong password, even with the right one, and counts nothing', async () => {
+      credentials.findById.mockResolvedValue(credential({ lockedUntil: new Date(Date.now() + 60_000) }));
+
+      await expect(service.changePassword(user, dto)).rejects.toThrow('Current password is incorrect');
+
+      expect(credentials.recordFailedLogin).not.toHaveBeenCalled();
+      expect(credentials.update).not.toHaveBeenCalled();
+      expect(sessions.revokeAll).not.toHaveBeenCalled();
+    });
+
+    it('starts a new failure sequence after an expired lockout', async () => {
+      credentials.findById.mockResolvedValue(credential({ lockedUntil: new Date(Date.now() - 1000), failedLoginCount: 5 }));
+      credentials.recordFailedLogin.mockResolvedValue({ failedLoginCount: 1 } as never);
+
+      await expect(service.changePassword(user, wrong)).rejects.toThrow('Current password is incorrect');
+
+      expect(credentials.resetFailureState).toHaveBeenCalledWith('u1');
+      expect(credentials.resetFailureState.mock.invocationCallOrder[0]).toBeLessThan(
+        credentials.recordFailedLogin.mock.invocationCallOrder[0],
+      );
+      expect(credentials.update).not.toHaveBeenCalled();
+    });
+
+    it('clears the failure state with the new hash, in the same transaction as the revoke', async () => {
+      credentials.findById.mockResolvedValue(credential({ failedLoginCount: 3 }));
+
+      await service.changePassword(user, dto);
+
+      expect(credentials.transaction).toHaveBeenCalledTimes(1);
+      expect(credentials.update).toHaveBeenCalledWith(
+        'u1',
+        expect.objectContaining({ failedLoginCount: 0, lockedUntil: null, lastFailedLoginAt: null }),
+        manager,
+      );
+      expect(sessions.revokeAll).toHaveBeenCalledWith('u1', 'password_changed', 'session-1', manager);
+    });
+
+    it('fails the whole change when ending the sessions fails', async () => {
+      credentials.findById.mockResolvedValue(credential());
+      sessions.revokeAll.mockRejectedValue(new Error('revoke down'));
+
+      await expect(service.changePassword(user, dto)).rejects.toThrow('revoke down');
+
+      expect(credentials.transaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('reset: fails the whole reset when ending the sessions fails', async () => {
+      userServiceClient.verifyPasswordResetCode.mockResolvedValue({ userId: 'u1' });
+      credentials.findById.mockResolvedValue(credential());
+      sessions.revokeAll.mockRejectedValue(new Error('revoke down'));
+
+      await expect(
+        service.resetPassword({ phone: '+201012345678', code: '123456', newPassword: 'brand-new-password' } as never, 'c-1'),
+      ).rejects.toThrow('revoke down');
+
+      expect(credentials.transaction).toHaveBeenCalledTimes(1);
+    });
+  });
 
     describe('forgotPassword / resetPassword (#35)', () => {
     const phone = '+201012345678';
@@ -1011,7 +1104,7 @@ describe('AuthService', () => {
       expect(id).toBe('u1');
       expect(changes).toMatchObject({ failedLoginCount: 0, lockedUntil: null, lastFailedLoginAt: null });
       await expect(bcrypt.compare('new-password-2', changes.passwordHash as string)).resolves.toBe(true);
-      expect(sessions.revokeAll).toHaveBeenCalledWith('u1', 'password_reset');
+      expect(sessions.revokeAll).toHaveBeenCalledWith('u1', 'password_reset', undefined, manager);
     });
 
     it('reset: a bad code changes nothing', async () => {

@@ -4,7 +4,7 @@ import { AppError, safeEqual } from '@food-delivery/shared';
 import { SessionsRepository } from '../repositories/sessions.repository';
 import { AuthSession, SessionApp, SessionRevokeReason } from '../entities/auth-session.entity';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
-import { EntityManager} from 'typeorm'
+import { EntityManager} from 'typeorm';
 
 /**
  * One answer for every refresh token that can't be used, so a client learns nothing from it.

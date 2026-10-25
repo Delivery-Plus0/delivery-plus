@@ -46,16 +46,24 @@ export function loadConfig(): AppConfig {
 export function loadSmsConfig(nodeEnv: string): Pick<AppConfig, 'smsProvider' | 'otpHashSecret'> {
   const provider = (process.env.SMS_PROVIDER || 'disabled').trim().toLowerCase();
   if (provider !== 'disabled' && provider !== 'test') {
-    throw new Error(`Unsupported SMS_PROVIDER "${provider}": use "disabled" until a real provider is added`);
+    throw new Error(
+      `Unsupported SMS_PROVIDER "${provider}": use "disabled" until a real provider is added`,
+    );
   }
   if (provider === 'test' && nodeEnv === 'production') {
-    throw new Error('SMS_PROVIDER=test is for isolated test environments and cannot run in production');
+    throw new Error(
+      'SMS_PROVIDER=test is for isolated test environments and cannot run in production',
+    );
   }
   const secret = process.env.OTP_HASH_SECRET;
-  if (!secret && nodeEnv === 'production' && provider !== 'disabled') {
+  const isLocal = nodeEnv === 'development' || nodeEnv === 'test';
+  if (!secret && !isLocal && provider !== 'disabled') {
     throw new Error('Missing required environment variables: OTP_HASH_SECRET');
   }
-  return { smsProvider: provider, otpHashSecret: secret || 'local-otp-development-only' };
+  return {
+    smsProvider: provider,
+    otpHashSecret: secret || (isLocal ? 'local-otp-development-only' : ''),
+  };
 }
 
 function requireInternalAuthSecret(): string {

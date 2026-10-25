@@ -3,7 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { JwtModule, JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { randomUUID } from 'node:crypto';
-import { AllExceptionsFilter, INTERNAL_AUTH_HEADERS, RateLimiterService, UserRole, signInternalRequest } from '@food-delivery/shared';
+import { AllExceptionsFilter, INTERNAL_AUTH_HEADERS, RateLimiterService, UserRole, UnauthorizedError, signInternalRequest } from '@food-delivery/shared';
 import { AuthController } from './auth.controller';
 import { InternalSessionsController } from './internal-sessions.controller';
 import { AuthService } from '../services/auth.service';
@@ -42,6 +42,7 @@ const credentials = {
   resetFailureState: async () => undefined,
   recordFailedLogin: async (id: string) => credentialRows.get(id) ?? null,
   update: async () => null,
+  transaction: async (work: (manager: unknown) => Promise<unknown>) => work({}),
   setStatus: async (id: string, status: AccountStatus, reason: string | null) => {
     const row = credentialRows.get(id);
     if (!row) return null;
@@ -63,6 +64,11 @@ const limiter = {
 const nonces = new Set<string>();
 const redis = { set: async (key: string) => (nonces.has(key) ? null : (nonces.add(key), 'OK')) };
 
+const userServiceClient = {
+  sendPasswordResetCode: jest.fn().mockResolvedValue(undefined),
+  verifyPasswordResetCode: jest.fn().mockResolvedValue({ userId: 'u-1' }),
+};
+
 @Module({
   imports: [JwtModule.register({ secret: JWT_SECRET, signOptions: { expiresIn: '15m' } })],
   controllers: [AuthController, InternalSessionsController],
@@ -75,7 +81,7 @@ const redis = { set: async (key: string) => (nonces.has(key) ? null : (nonces.ad
       provide: AuthService,
       inject: [JwtService, SessionsService],
       useFactory: (jwt: JwtService, sessions: SessionsService) =>
-        new AuthService(credentials as unknown as CredentialsRepository, {} as UserServiceClient, jwt, config, sessions, staffPermissions as unknown as StaffPermissionsRepository, new DisabledEmailSender(), limiter as unknown as RateLimiterService),
+        new AuthService(credentials as unknown as CredentialsRepository, userServiceClient as unknown  as UserServiceClient, jwt, config, sessions, staffPermissions as unknown as StaffPermissionsRepository, new DisabledEmailSender(), limiter as unknown as RateLimiterService),
     },
     InternalAuthGuard,
   ],
@@ -376,6 +382,50 @@ describe('Auth sessions over HTTP (#34)', () => {
         [INTERNAL_AUTH_HEADERS.signature]: signInternalRequest({ method: 'POST', path: badPath, timestamp, nonce, body: valid, service: 'user-service', secret: INTERNAL_SECRET }),
       };
       expect((await post(badPath, valid, headers)).status).toBe(400);
+    });
+  });
+
+  describe('password forgot / reset (#35)', () => {
+    const PHONE = '+201012345678';
+    const NEW_PASSWORD = 'a-new-password-123';
+
+    it('POST /auth/password/forgot is public and answers 202 with a message', async () => {
+      const response = await post('/auth/password/forgot', { phone: PHONE });
+      expect(response.status).toBe(202);
+      expect(response.body).toEqual({ message: expect.any(String) });
+    });
+
+    it('forgot rejects a malformed body with 400', async () => {
+      expect((await post('/auth/password/forgot', {})).status).toBe(400);
+      expect((await post('/auth/password/forgot', { phone: 'abc' })).status).toBe(400);
+      expect((await post('/auth/password/forgot', { phone: PHONE, extra: true })).status).toBe(400);
+    });
+
+    it('reset rejects a malformed body with 400', async () => {
+      expect((await post('/auth/password/reset', { phone: PHONE, code: '123456' })).status).toBe(400);
+      expect((await post('/auth/password/reset', { phone: PHONE, code: '123456', newPassword: 'short' })).status).toBe(400);
+    });
+
+    it('forgot is rate limited over HTTP', async () => {
+      const statuses: number[] = [];
+      for (let i = 0; i < 8; i++) statuses.push((await post('/auth/password/forgot', { phone: PHONE })).status);
+
+      expect(statuses[0]).toBe(202);
+      expect(statuses).toContain(429);
+    });
+
+    it('reset is public and answers 204 with no body', async () => {
+      userServiceClient.verifyPasswordResetCode.mockResolvedValueOnce({ userId });
+      const response = await post('/auth/password/reset', { phone: PHONE, code: '123456', newPassword: NEW_PASSWORD });
+
+      expect(response.status).toBe(204);
+      expect(response.body).toBeUndefined();
+    });
+
+    it('reset is public and answers a generic 401 for a code user-service refuses', async () => {
+      userServiceClient.verifyPasswordResetCode.mockRejectedValueOnce(new UnauthorizedError('Invalid or expired code'));
+      const response = await post('/auth/password/reset', { phone: PHONE, code: '123456', newPassword: NEW_PASSWORD });
+      expect(response.status).toBe(401);
     });
   });
 });

@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { createHmac, randomInt, randomUUID } from 'crypto';
-import { AppError, BadRequestError, ConflictError, JwtPayload, safeEqual } from '@food-delivery/shared';
+import { AppError, BadRequestError, ConflictError, JwtPayload, UnauthorizedError, safeEqual } from '@food-delivery/shared';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { PhoneVerificationsRepository } from '../repositories/phone-verifications.repository';
 import { SmsSender, SmsUnavailableError } from '../sms/sms-sender';
@@ -108,6 +108,82 @@ export class PhoneVerificationService {
     }
     this.logger.log(`phone.verification.verified user=${profile.id}`);
     return this.users.getOwnProfile(requester);
+  }
+
+    /**
+   * Password reset (#35): texts a code to the profile that owns this VERIFIED phone. Answers the same
+   * whether or not the phone exists, so nothing here reveals which numbers have accounts. Only a
+   * disabled provider is reported, and that is the same for everyone.
+   */
+  async startPasswordReset(phone: string, now = new Date()): Promise<void> {
+    if (!this.sms.enabled) throw new SmsUnavailableError();
+    const profile = await this.users.findByVerifiedPhone(phone);
+    if (!profile) return;
+
+    const code = randomInt(0, 10 ** PHONE_OTP_POLICY.codeLength).toString().padStart(PHONE_OTP_POLICY.codeLength, '0');
+    const id = randomUUID();
+    const hourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+    let row;
+    try {
+      row = await this.verifications.createUnderLimits(
+        profile.id,
+        phone,
+        hourAgo,
+        (history) => {
+          const cooldownEnds = history.latestSentAt ? history.latestSentAt.getTime() + PHONE_OTP_POLICY.resendCooldownSeconds * 1000 : 0;
+          if (cooldownEnds > now.getTime()) throw new TooManyRequestsError('cooldown');
+          if (history.sentByUser >= PHONE_OTP_POLICY.maxSendsPerHour || history.sentToPhone >= PHONE_OTP_POLICY.maxSendsPerHour) {
+            throw new TooManyRequestsError('limit');
+          }
+          return {
+            id,
+            userId: profile.id,
+            phone,
+            codeHash: this.hash(id, code),
+            expiresAt: new Date(now.getTime() + PHONE_OTP_POLICY.ttlSeconds * 1000),
+          };
+        },
+        'password_reset',
+      );
+    } catch (error) {
+      // Silent: a 429 here would reveal that the account exists.
+      if (error instanceof TooManyRequestsError) return;
+      throw error;
+    }
+
+       // Return now: the provider round trip must not be observable by the caller.
+    void this.deliverResetCode(row.id, profile.id, phone, code);
+  }
+
+  /** Runs after the response. It must never throw */
+  private async deliverResetCode(rowId: string, userId: string, phone: string, code: string): Promise<void> {
+    try {
+      await this.sms.send(
+        phone,
+        `Your Delivery Plus password reset code is ${code}. It expires in ${PHONE_OTP_POLICY.ttlSeconds / 60} minutes.`,
+      );
+      this.logger.log(`password_reset.sent user=${userId}`);
+    } catch (error) {
+      // The number and the code stay out of the logs.
+      this.logger.warn(`password_reset.send_failed user=${userId} error=${(error as Error).name}`);
+      await this.verifications.delete(rowId).catch(() => undefined);
+    }
+  }
+
+  /** Consumes the latest reset code for this verified phone; every failure is the same 401. */
+  async verifyPasswordReset(phone: string, code: string, now = new Date()): Promise<{ userId: string }> {
+    const refused = () => new UnauthorizedError('Invalid or expired code');
+    const profile = await this.users.findByVerifiedPhone(phone);
+    if (!profile) throw refused();
+    const latest = await this.verifications.latestForUser(profile.id, 'password_reset');
+    if (!latest || latest.consumedAt || latest.phone !== phone || latest.expiresAt.getTime() <= now.getTime()) throw refused();
+
+    const attempts = await this.verifications.registerAttempt(latest.id, PHONE_OTP_POLICY.maxAttempts, 'password_reset');
+    if (attempts === null) throw refused();
+    if (!safeEqual(this.hash(latest.id, code), latest.codeHash)) throw refused();
+    if (!(await this.verifications.consume(latest.id, 'password_reset'))) throw refused();
+    this.logger.log(`password_reset.verified user=${profile.id}`);
+    return { userId: profile.id };
   }
 
   /** Keyed with a server secret and bound to the row, so a leaked table doesn't give the codes away. */

@@ -1,4 +1,7 @@
-import { Column, CreateDateColumn, Entity, Index, PrimaryColumn } from 'typeorm';
+import { Column, CreateDateColumn, Entity, Index, PrimaryColumn, Check } from 'typeorm';
+
+/**  What a code is for. A code only works for its own purpose (#35). */
+export type OtpPurpose = 'phone_verification' | 'password_reset';
 
 /**
  * One code sent to a phone (#153). Only an HMAC of the code is stored; a row is used up by a correct
@@ -8,6 +11,7 @@ import { Column, CreateDateColumn, Entity, Index, PrimaryColumn } from 'typeorm'
 @Entity('phone_verifications')
 @Index('IDX_phone_verifications_user_created', ['userId', 'createdAt'])
 @Index('IDX_phone_verifications_phone_created', ['phone', 'createdAt'])
+@Check('CHK_phone_verifications_purpose', `"purpose" IN ('phone_verification', 'password_reset')`)
 export class PhoneVerification {
   @PrimaryColumn('uuid')
   id!: string;
@@ -30,6 +34,9 @@ export class PhoneVerification {
 
   @Column({ type: 'timestamptz', nullable: true })
   consumedAt!: Date | null;
+
+  @Column({ type: 'varchar', length: 32, default: 'phone_verification' })
+  purpose!: OtpPurpose;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt!: Date;

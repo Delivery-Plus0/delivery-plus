@@ -1,13 +1,19 @@
-import { Inject, Injectable, InternalServerErrorException } from '@nestjs/common';
+import { Inject, Injectable, InternalServerErrorException, ServiceUnavailableException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { INTERNAL_AUTH_HEADERS, signInternalRequest } from '@food-delivery/shared';
+import { AppError, INTERNAL_AUTH_HEADERS, UnauthorizedError, signInternalRequest } from '@food-delivery/shared';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
-
+const USER_SERVICE_TIMEOUT_MS = 5000;
 export interface CreateProfilePayload {
   userId: string;
   email: string;
   fullName: string;
   phone?: string;
+}
+/** user-service has no SMS provider configured (or it failed). The same answer for every phone. */
+export class SmsUnavailableError extends AppError {
+  constructor(message = 'Password reset by text message is not available right now. Please try again later.') {
+    super(503, 'SmsUnavailable', message);
+  }
 }
 
 /**
@@ -21,6 +27,7 @@ export interface CreateProfilePayload {
  */
 @Injectable()
 export class UserServiceClient {
+  
   constructor(@Inject(APP_CONFIG) private readonly config: AppConfig) {}
 
   async createProfile(payload: CreateProfilePayload, correlationId: string): Promise<void> {
@@ -63,5 +70,60 @@ export class UserServiceClient {
         `Failed to create user profile (status ${response.status})`,
       );
     }
+  }
+
+    /** Signs and sends one internal call. The signed body is exactly the JSON that goes out (ADR 001). */
+    private async signedPost(path: string, body: Record<string, unknown>, correlationId: string): Promise<Response> {
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const nonce = randomUUID();
+    const signature = signInternalRequest({
+      method: 'POST',
+      path,
+      timestamp,
+      nonce,
+      body,
+      service: this.config.internalAuthService,
+      secret: this.config.internalAuthSecret,
+    });
+    try {
+      return await fetch(`${this.config.userServiceUrl}${path}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-correlation-id': correlationId,
+          [INTERNAL_AUTH_HEADERS.service]: this.config.internalAuthService,
+          [INTERNAL_AUTH_HEADERS.timestamp]: timestamp,
+          [INTERNAL_AUTH_HEADERS.nonce]: nonce,
+          [INTERNAL_AUTH_HEADERS.signature]: signature,
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(USER_SERVICE_TIMEOUT_MS),
+      });
+    } catch (error) {
+      // No phone or code in the message; a timeout looks the same for every phone.
+      if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) {
+        throw new ServiceUnavailableException('Password reset is temporarily unavailable. Please try again shortly.');
+      }
+      throw error;
+    }
+  }
+
+  /** Asks user-service to text a reset code. It answers the same whether or not the phone has an account. */
+  async sendPasswordResetCode(phone: string, correlationId: string): Promise<void> {
+    const response = await this.signedPost('/internal/users/password-reset/send', { phone }, correlationId);
+    if (response.status === 503) throw new SmsUnavailableError();
+    if (!response.ok) {
+      throw new InternalServerErrorException(`Failed to request a password reset code (status ${response.status})`);
+    }
+  }
+
+  /** Returns the owner's user id when the code is right; one generic 401 otherwise. */
+  async verifyPasswordResetCode(phone: string, code: string, correlationId: string): Promise<{ userId: string }> {
+    const response = await this.signedPost('/internal/users/password-reset/verify', { phone, code }, correlationId);
+    if (response.status === 401) throw new UnauthorizedError('Invalid or expired code');
+    if (!response.ok) {
+      throw new InternalServerErrorException(`Failed to verify a password reset code (status ${response.status})`);
+    }
+    return (await response.json()) as { userId: string };
   }
 }

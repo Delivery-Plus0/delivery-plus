@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, MoreThan, Repository } from 'typeorm';
-import { PhoneVerification } from '../entities/phone-verification.entity';
+import { OtpPurpose, PhoneVerification } from '../entities/phone-verification.entity';
 
 export type NewPhoneVerification = Pick<PhoneVerification, 'id' | 'userId' | 'phone' | 'codeHash' | 'expiresAt'>;
 
@@ -25,26 +25,27 @@ export class PhoneVerificationsRepository {
     phone: string,
     since: Date,
     decide: (history: SendHistory) => NewPhoneVerification,
+    purpose: OtpPurpose = 'phone_verification',
   ): Promise<PhoneVerification> {
     return this.repo.manager.transaction(async (manager: EntityManager) => {
       await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`phone-verification:${userId}`]);
       const repo = manager.getRepository(PhoneVerification);
       const [latest, sentByUser, sentToPhone] = await Promise.all([
-        repo.findOne({ where: { userId }, order: { createdAt: 'DESC' } }),
-        repo.count({ where: { userId, createdAt: MoreThan(since) } }),
-        repo.count({ where: { phone, createdAt: MoreThan(since) } }),
+        repo.findOne({ where: { userId, purpose }, order: { createdAt: 'DESC' } }),
+        repo.count({ where: { userId, purpose, createdAt: MoreThan(since) } }),
+        repo.count({ where: { phone, purpose, createdAt: MoreThan(since) } }),
       ]);
       const row = decide({ latestSentAt: latest?.createdAt ?? null, sentByUser, sentToPhone });
-      return repo.save(repo.create(row));
+      return repo.save(repo.create({...row, purpose}));
     });
   }
 
   /** The user's most recent code, with its hash; only this one can be verified. */
-  latestForUser(userId: string): Promise<PhoneVerification | null> {
+  latestForUser(userId: string, purpose: OtpPurpose = 'phone_verification'): Promise<PhoneVerification | null> {
     return this.repo
       .createQueryBuilder('v')
       .addSelect('v.codeHash')
-      .where('v.userId = :userId', { userId })
+      .where('v.userId = :userId AND v.purpose = :purpose', { userId, purpose })
       .orderBy('v.createdAt', 'DESC')
       .getOne();
   }
@@ -53,12 +54,12 @@ export class PhoneVerificationsRepository {
    * Counts one attempt, atomically and only while attempts remain and the code is unused. Returns the
    * new attempt count, or null when no attempt was left.
    */
-  async registerAttempt(id: string, maxAttempts: number): Promise<number | null> {
+  async registerAttempt(id: string, maxAttempts: number, purpose: OtpPurpose = 'phone_verification'): Promise<number | null> {
     const result: unknown = await this.repo.query(
       `UPDATE "phone_verifications" SET "attempts" = "attempts" + 1
-       WHERE "id" = $1 AND "attempts" < $2 AND "consumedAt" IS NULL
+       WHERE "id" = $1 AND "attempts" < $2 AND "consumedAt" IS NULL AND "purpose" = $3
        RETURNING "attempts"`,
-      [id, maxAttempts],
+      [id, maxAttempts, purpose],
     );
     return updatedRows<{ attempts: number }>(result)[0]?.attempts ?? null;
   }
@@ -70,7 +71,7 @@ export class PhoneVerificationsRepository {
   async consumeAndVerify(id: string, userId: string, phone: string): Promise<boolean> {
     return this.repo.manager.transaction(async (manager: EntityManager) => {
       const used = updatedRows(await manager.query(
-        `UPDATE "phone_verifications" SET "consumedAt" = now() WHERE "id" = $1 AND "consumedAt" IS NULL RETURNING "id"`,
+        `UPDATE "phone_verifications" SET "consumedAt" = now() WHERE "id" = $1 AND "consumedAt" IS NULL AND "purpose" = 'phone_verification' RETURNING "id"`,
         [id],
       ));
       if (!used.length) return false;
@@ -85,6 +86,16 @@ export class PhoneVerificationsRepository {
   /** Drops a row whose message could not be sent, so it neither counts nor blocks a retry. */
   async delete(id: string): Promise<void> {
     await this.repo.delete({ id });
+  }
+
+   /** Password reset (and any non-profile purpose): single use, never touches the profile. */
+  async consume(id: string, purpose: OtpPurpose): Promise<boolean> {
+    const used = updatedRows(await this.repo.query(
+      `UPDATE "phone_verifications" SET "consumedAt" = now()
+       WHERE "id" = $1 AND "consumedAt" IS NULL AND "purpose" = $2 RETURNING "id"`,
+      [id, purpose],
+    ));
+    return used.length > 0;
   }
 }
 

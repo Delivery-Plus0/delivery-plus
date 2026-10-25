@@ -4,6 +4,7 @@ import { AppError, safeEqual } from '@food-delivery/shared';
 import { SessionsRepository } from '../repositories/sessions.repository';
 import { AuthSession, SessionApp, SessionRevokeReason } from '../entities/auth-session.entity';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
+import { EntityManager} from 'typeorm';
 
 /**
  * One answer for every refresh token that can't be used, so a client learns nothing from it.
@@ -123,8 +124,8 @@ export class SessionsService {
   }
 
   /** Ends every live session of a user, except `exceptSessionId` when given. Returns how many. */
-  revokeAll(credentialId: string, reason: SessionRevokeReason, exceptSessionId?: string): Promise<number> {
-    return this.sessions.revokeAllForCredential(credentialId, reason, exceptSessionId);
+ revokeAll(credentialId: string, reason: SessionRevokeReason, exceptSessionId?: string, manager?: EntityManager): Promise<number> {
+    return this.sessions.revokeAllForCredential(credentialId, reason, exceptSessionId, new Date(), manager);
   }
 
   /** Revokes the session; used when the credential behind it is gone. */

@@ -1,6 +1,6 @@
-import { BadRequestError, ConflictError, UserRole } from '@food-delivery/shared';
+import { BadRequestError, ConflictError, UnauthorizedError, UserRole } from '@food-delivery/shared';
 import { AppConfig, loadSmsConfig } from '../config/app-config';
-import { PhoneVerification } from '../entities/phone-verification.entity';
+import { PhoneVerification, OtpPurpose} from '../entities/phone-verification.entity';
 import { UserProfile } from '../entities/user-profile.entity';
 import { NewPhoneVerification, PhoneVerificationsRepository, SendHistory } from '../repositories/phone-verifications.repository';
 import { DisabledSmsSender, SmsSender, SmsUnavailableError, TestSmsSender, testSmsKey } from '../sms/sms-sender';
@@ -12,7 +12,7 @@ describe('PhoneVerificationService (#153)', () => {
   const now = new Date('2026-10-07T10:00:00.000Z');
   const config = { otpHashSecret: 'test-secret' } as AppConfig;
 
-  let users: jest.Mocked<Pick<UsersService, 'getOwnProfile'>>;
+ let users: jest.Mocked<Pick<UsersService, 'getOwnProfile' | 'findByVerifiedPhone'>>;
   let repo: jest.Mocked<PhoneVerificationsRepository>;
   let sent: { to: string; text: string }[];
   let sms: SmsSender;
@@ -47,25 +47,35 @@ describe('PhoneVerificationService (#153)', () => {
   }
 
   beforeEach(() => {
-    users = { getOwnProfile: jest.fn().mockResolvedValue(profile()) };
+       users = {
+      getOwnProfile: jest.fn().mockResolvedValue(profile()),
+      findByVerifiedPhone: jest.fn().mockResolvedValue(profile({ phoneVerifiedAt: now })),
+    };
     sent = [];
     sms = { enabled: true, send: jest.fn(async (to: string, text: string) => void sent.push({ to, text })) };
     history = { latestSentAt: null, sentByUser: 0, sentToPhone: 0 };
     stored = null;
-    repo = {
-      createUnderLimits: jest.fn(async (_userId: string, _phone: string, _since: Date, decide: (h: SendHistory) => NewPhoneVerification) => {
-        const row = decide(history);
-        stored = { ...row, attempts: 0, consumedAt: null, createdAt: now };
-        return stored;
-      }),
-      latestForUser: jest.fn(async () => stored),
-      registerAttempt: jest.fn(async (_id: string, max: number) => {
-        if (!stored || stored.consumedAt || stored.attempts >= max) return null;
+        repo = {
+      createUnderLimits: jest.fn(
+        async (_u: string, _p: string, _s: Date, decide: (h: SendHistory) => NewPhoneVerification, purpose: OtpPurpose = 'phone_verification') => {
+          const row = decide(history);
+          stored = { ...row, purpose, attempts: 0, consumedAt: null, createdAt: now };
+          return stored;
+        },
+      ),
+      latestForUser: jest.fn(async (_id: string, purpose: OtpPurpose = 'phone_verification') => (stored?.purpose === purpose ? stored : null)),
+      registerAttempt: jest.fn(async (_id: string, max: number, purpose: OtpPurpose = 'phone_verification') => {
+        if (!stored || stored.purpose !== purpose || stored.consumedAt || stored.attempts >= max) return null;
         stored.attempts += 1;
         return stored.attempts;
       }),
       consumeAndVerify: jest.fn(async () => {
-        if (!stored || stored.consumedAt) return false;
+        if (!stored || stored.purpose !== 'phone_verification' || stored.consumedAt) return false;
+        stored.consumedAt = now;
+        return true;
+      }),
+      consume: jest.fn(async (_id: string, purpose: OtpPurpose) => {
+        if (!stored || stored.purpose !== purpose || stored.consumedAt) return false;
         stored.consumedAt = now;
         return true;
       }),
@@ -172,6 +182,99 @@ describe('PhoneVerificationService (#153)', () => {
       await expect(service().verify(requester, '123456', now)).rejects.toThrow('Request a new code first.');
     });
   });
+
+    describe('password reset (#35)', () => {
+    const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+    const phone = '+201012345678';
+    const codeSent = () => /(\d{6})/.exec(sent[sent.length - 1].text)![1];
+
+    it('texts a code to the verified phone and stores only its hash, for the reset purpose', async () => {
+      await service().startPasswordReset(phone, now);
+      await flush();
+      expect(sent).toHaveLength(1);
+      expect(sent[0].to).toBe(phone);
+      expect(stored?.purpose).toBe('password_reset');
+      expect(stored?.codeHash).not.toContain(codeSent());
+    });
+
+    it('answers the same and sends nothing for a phone with no verified account', async () => {
+      users.findByVerifiedPhone.mockResolvedValue(null);
+      await expect(service().startPasswordReset(phone, now)).resolves.toBeUndefined();
+      expect(sent).toHaveLength(0);
+      expect(repo.createUnderLimits).not.toHaveBeenCalled();
+    });
+
+    it('stays silent on cooldown and hourly limits, so a 429 never reveals the account', async () => {
+      history.latestSentAt = new Date(now.getTime() - 10_000);
+      await expect(service().startPasswordReset(phone, now)).resolves.toBeUndefined();
+      history.latestSentAt = null;
+      history.sentToPhone = PHONE_OTP_POLICY.maxSendsPerHour;
+      await expect(service().startPasswordReset(phone, now)).resolves.toBeUndefined();
+      expect(sent).toHaveLength(0);
+    });
+
+    it('is 503 for everyone while no SMS provider is configured, even for unknown phones', async () => {
+      users.findByVerifiedPhone.mockResolvedValue(null);
+      await expect(service(new DisabledSmsSender()).startPasswordReset(phone, now)).rejects.toBeInstanceOf(SmsUnavailableError);
+    });
+
+    it('drops the row and stays silent when the provider fails', async () => {
+      const failing: SmsSender = { enabled: true, send: jest.fn().mockRejectedValue(new Error('boom')) };
+      await expect(service(failing).startPasswordReset(phone, now)).resolves.toBeUndefined();
+      await flush();
+      expect(repo.delete).toHaveBeenCalledWith(stored?.id);
+    });
+    it('answers before the provider does, so a known phone is not slower', async () => {
+      const hanging: SmsSender = { enabled: true, send: jest.fn(() => new Promise<void>(() => undefined)) };
+      await expect(service(hanging).startPasswordReset(phone, now)).resolves.toBeUndefined();
+      expect(hanging.send).toHaveBeenCalledTimes(1);
+      expect(repo.delete).not.toHaveBeenCalled();
+    });
+
+    it('verifies the right code once and returns only the user id, without touching the profile', async () => {
+      await service().startPasswordReset(phone, now);
+      const code = codeSent();
+      await expect(service().verifyPasswordReset(phone, code, now)).resolves.toEqual({ userId: 'u-1' });
+      expect(repo.consumeAndVerify).not.toHaveBeenCalled();
+      await expect(service().verifyPasswordReset(phone, code, now)).rejects.toBeInstanceOf(UnauthorizedError);
+    });
+
+    it('refuses wrong, expired, unknown-phone and exhausted codes with the same 401', async () => {
+      await service().startPasswordReset(phone, now);
+      const code = codeSent();
+      const wrong = code === '000000' ? '111111' : '000000';
+      await expect(service().verifyPasswordReset(phone, wrong, now)).rejects.toThrow('Invalid or expired code');
+      const later = new Date(now.getTime() + (PHONE_OTP_POLICY.ttlSeconds + 1) * 1000);
+      await expect(service().verifyPasswordReset(phone, code, later)).rejects.toThrow('Invalid or expired code');
+      users.findByVerifiedPhone.mockResolvedValue(null);
+      await expect(service().verifyPasswordReset(phone, code, now)).rejects.toThrow('Invalid or expired code');
+      users.findByVerifiedPhone.mockResolvedValue(profile({ phoneVerifiedAt: now }));
+      stored!.attempts = PHONE_OTP_POLICY.maxAttempts;
+      await expect(service().verifyPasswordReset(phone, code, now)).rejects.toThrow('Invalid or expired code');
+      expect(repo.consume).not.toHaveBeenCalled();
+    });
+
+    describe('isolation from phone verification', () => {
+      it('a reset code cannot verify a phone', async () => {
+        await service().startPasswordReset(phone, now);
+        await expect(service().verify(requester, codeSent(), now)).rejects.toBeInstanceOf(BadRequestError);
+        expect(repo.consumeAndVerify).not.toHaveBeenCalled();
+      });
+
+      it('a phone-verification code cannot reset a password', async () => {
+        await service().start(requester, undefined, now);
+        await expect(service().verifyPasswordReset(phone, codeSent(), now)).rejects.toBeInstanceOf(UnauthorizedError);
+        expect(repo.consume).not.toHaveBeenCalled();
+      });
+
+      it('each flow asks the repository for its own purpose', async () => {
+        await service().start(requester, undefined, now);
+        await service().startPasswordReset(phone, now);
+        const purposes = repo.createUnderLimits.mock.calls.map((call) => call[4] ?? 'phone_verification');
+        expect(purposes).toEqual(['phone_verification', 'password_reset']);
+      });
+    });
+  });
 });
 
 describe('SMS config (#153)', () => {
@@ -194,6 +297,19 @@ describe('SMS config (#153)', () => {
   it('rejects unknown providers', () => {
     process.env.SMS_PROVIDER = 'twilio';
     expect(() => loadSmsConfig('development')).toThrow('Unsupported SMS_PROVIDER');
+  });
+
+  it('has no default OTP secret outside development and test', () => {
+    delete process.env.OTP_HASH_SECRET;
+    process.env.SMS_PROVIDER = 'disabled';
+    expect(loadSmsConfig('production').otpHashSecret).toBe('');
+    expect(loadSmsConfig('development').otpHashSecret).toBe('local-otp-development-only');
+  });
+
+  it('requires the OTP secret once a provider is on outside development and test', () => {
+    delete process.env.OTP_HASH_SECRET;
+    process.env.SMS_PROVIDER = 'test';
+    expect(() => loadSmsConfig('staging')).toThrow('OTP_HASH_SECRET');
   });
 });
 

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, EntityManager } from 'typeorm';
 import { AccountStatus, Credential } from '../entities/credential.entity';
 
 @Injectable()
@@ -35,9 +35,14 @@ export class CredentialsRepository {
     const entity = this.repo.create(data);
     return this.repo.save(entity);
   }
+  /** Runs `work` in one transaction, so a password change and the session revoke land together or not at all. */
+  transaction<T>(work: (manager: EntityManager) => Promise<T>): Promise<T> {
+    return this.repo.manager.transaction(work);
+  }
 
-  async update(id: string, data: Partial<Credential>): Promise<Credential | null> {
-    await this.repo.update({ id }, data);
+  async update(id: string, data: Partial<Credential>, manager?: EntityManager): Promise<Credential | null> {
+    const repo = manager ? manager.getRepository(Credential) : this.repo;
+    await repo.update({ id }, data);
     return this.findById(id);
   }
 

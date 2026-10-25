@@ -71,6 +71,8 @@ No workflow collects test coverage.
 
 ## Recent changes (newest first)
 
+- #210: dispatch lists VERIFIED available drivers longest-idle first, with id tie-breaking. Migration 005 adds `availableSince`, backfills existing available drivers from `updatedAt`, and indexes the queue. Atomic status transitions set/reset idle time; the claim retry loop stays unchanged.
+
 | PR | Change |
 | --- | --- |
 | (#252) | While `EMAIL_VERIFICATION_REQUIRED=true`, login answers `403 EmailNotVerified` (after the password checked out; a wrong password stays `401`) so the apps can open their code screen; `verify-email` keeps one `401` for every failure. The test and dev stacks read `EMAIL_VERIFICATION_REQUIRED` (default `false`) |

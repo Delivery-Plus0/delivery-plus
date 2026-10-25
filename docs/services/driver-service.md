@@ -16,6 +16,12 @@ From `services/driver-service/src/controllers/drivers.controller.ts`:
 - `GET /drivers/:id` – fetch a driver by ID
 - `PATCH /drivers/:id/status` – claim or release a driver (SYSTEM token only: delivery-service, #202)
 
+## Dispatch fairness (#210)
+
+Available, VERIFIED drivers are listed by `availableSince ASC, id ASC`: the longest-idle driver is offered work first, with a deterministic tie-breaker. Going online or being released from a delivery records database time in the same compare-and-set update as the status. Leaving AVAILABLE clears the timestamp. Repeated online/release requests are no-ops and retain the current queue position; unrelated profile or verification edits do not change it.
+
+Migration 005 backfills existing AVAILABLE drivers from `updatedAt` (the best historical approximation), leaves other drivers null, and adds a partial queue index. Driver profile responses include nullable ISO timestamp `availableSince`. The delivery-service claim/retry loop and VERIFIED gate are unchanged. This is the fair baseline; nearest-driver selection is a later issue.
+
 ## Dependencies
 - Persists driver data in PostgreSQL
 - Used by `delivery-service` to assign drivers and by `tracking-service` to resolve current driver information

@@ -145,7 +145,7 @@ export const SERVICE_DEFINITIONS = [
       { method: 'post', path: '/me/online', summary: 'Go online (VERIFIED drivers only)', auth: true, statusCode: 201 },
       { method: 'post', path: '/me/offline', summary: 'Go offline', auth: true, statusCode: 201 },
       { method: 'post', path: '/me/status', summary: 'Set driver status explicitly', auth: true, statusCode: 201 },
-      { method: 'get', path: '/available', summary: 'List the drivers dispatch may claim: available and verified (services only, SYSTEM token; not callable through the gateway)', auth: true, statusCode: 200 },
+      { method: 'get', path: '/available', summary: 'List available, verified drivers longest-idle first (availableSince ASC, id ASC; services only, SYSTEM token; not callable through the gateway)', auth: true, statusCode: 200 },
       { method: 'get', path: '/:id', summary: 'Get a driver by id (self or admin)', auth: true, statusCode: 200 },
       { method: 'patch', path: '/:id/status', summary: 'Claim or release a driver (services only, SYSTEM token; not callable through the gateway)', auth: true, statusCode: 200 },
       { method: 'patch', path: '/:id/verification', summary: "Set a driver's verification status (admin only)", auth: true, statusCode: 200 },

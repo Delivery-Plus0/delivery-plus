@@ -42,6 +42,7 @@ const credentials = {
   resetFailureState: async () => undefined,
   recordFailedLogin: async (id: string) => credentialRows.get(id) ?? null,
   update: async () => null,
+  transaction: async (work: (manager: unknown) => Promise<unknown>) => work({}),
   setStatus: async (id: string, status: AccountStatus, reason: string | null) => {
     const row = credentialRows.get(id);
     if (!row) return null;
@@ -420,6 +421,7 @@ describe('Auth sessions over HTTP (#34)', () => {
       expect(response.status).toBe(204);
       expect(response.body).toBeUndefined();
     });
+
     it('reset is public and answers a generic 401 for a code user-service refuses', async () => {
       userServiceClient.verifyPasswordResetCode.mockRejectedValueOnce(new UnauthorizedError('Invalid or expired code'));
       const response = await post('/auth/password/reset', { phone: PHONE, code: '123456', newPassword: NEW_PASSWORD });

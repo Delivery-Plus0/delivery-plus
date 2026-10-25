@@ -298,6 +298,19 @@ describe('SMS config (#153)', () => {
     process.env.SMS_PROVIDER = 'twilio';
     expect(() => loadSmsConfig('development')).toThrow('Unsupported SMS_PROVIDER');
   });
+
+  it('has no default OTP secret outside development and test', () => {
+    delete process.env.OTP_HASH_SECRET;
+    process.env.SMS_PROVIDER = 'disabled';
+    expect(loadSmsConfig('production').otpHashSecret).toBe('');
+    expect(loadSmsConfig('development').otpHashSecret).toBe('local-otp-development-only');
+  });
+
+  it('requires the OTP secret once a provider is on outside development and test', () => {
+    delete process.env.OTP_HASH_SECRET;
+    process.env.SMS_PROVIDER = 'test';
+    expect(() => loadSmsConfig('staging')).toThrow('OTP_HASH_SECRET');
+  });
 });
 
 describe('TestSmsSender (#153)', () => {

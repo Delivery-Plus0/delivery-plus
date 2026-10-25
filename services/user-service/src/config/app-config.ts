@@ -52,10 +52,11 @@ export function loadSmsConfig(nodeEnv: string): Pick<AppConfig, 'smsProvider' | 
     throw new Error('SMS_PROVIDER=test is for isolated test environments and cannot run in production');
   }
   const secret = process.env.OTP_HASH_SECRET;
-  if (!secret && nodeEnv === 'production' && provider !== 'disabled') {
+  const isLocal = nodeEnv === 'development' || nodeEnv === 'test';
+  if (!secret && !isLocal && provider !== 'disabled') {
     throw new Error('Missing required environment variables: OTP_HASH_SECRET');
   }
-  return { smsProvider: provider, otpHashSecret: secret || 'local-otp-development-only' };
+  return { smsProvider: provider, otpHashSecret: secret || (isLocal ? 'local-otp-development-only' : '') };;
 }
 
 function requireInternalAuthSecret(): string {

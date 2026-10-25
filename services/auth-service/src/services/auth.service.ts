@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { Logger } from '@nestjs/common';
 import {
   AccountSuspendedError,
@@ -405,8 +405,8 @@ export class AuthService {
    * answers the same for unknown phones, so this always returns the same body. 503 when SMS is off.
    */
   async forgotPassword(dto: ForgotPasswordDto, context: { correlationId: string; clientIp: string }): Promise<{ message: string }> {
-    // Hashed, so no phone number sits in a Redis key.
-    const phoneKey = createHash('sha256').update(dto.phone).digest('hex');
+    // Keyed, so Redis doesn't hold anything that reverses to a phone number (~10^8 mobiles are brute-forceable unkeyed).
+    const phoneKey = createHmac('sha256', this.config.internalAuthSecret).update(`forgot-phone:${dto.phone}`).digest('hex');
     const allowed =
       (await this.rateLimiter.incrementAndCheck(`ratelimit:password-forgot:ip:${context.clientIp}`, FORGOT_PER_IP_PER_HOUR, 3600)) &&
       (await this.rateLimiter.incrementAndCheck(`ratelimit:password-forgot:phone:${phoneKey}`, FORGOT_PER_PHONE_PER_HOUR, 3600));

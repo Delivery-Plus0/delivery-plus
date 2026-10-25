@@ -29,6 +29,7 @@ import { EmailLocale, localeFrom } from '../email/verification-email';
 import { ForgotPasswordDto } from '../dto/forgot-password.dto';
 import { ResetPasswordDto } from '../dto/reset-password.dto';
 
+type ClientRequest = RequestWithContext & { headers?: Record<string, unknown>; ip?: string };
 
 /** #203: the verification email's language, from Accept-Language (Arabic by default, like the apps). */
 function localeOf(req: RequestWithContext): EmailLocale {
@@ -120,10 +121,10 @@ export class AuthController {
   @RateLimit({ limit: 5, windowSeconds: 60 })
   @HttpCode(HttpStatus.ACCEPTED)
   @ApiOperation({ summary: 'Send a password reset code by SMS (same answer for unknown phones)' })
-  forgotPassword(@Body() dto: ForgotPasswordDto, @Req() req: RequestWithContext): Promise<{ message: string }> {
+  forgotPassword(@Body() dto: ForgotPasswordDto, @Req() req: ClientRequest): Promise<{ message: string }> {
     return this.authService.forgotPassword(dto, {
       correlationId: req.correlationId ?? generateCorrelationId(),
-      clientIp: clientIpOf(req as never),
+      clientIp: clientIpOf(req),
     });
   }
 

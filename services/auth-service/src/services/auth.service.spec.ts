@@ -931,18 +931,21 @@ describe('AuthService', () => {
         jest.spyOn(Logger.prototype, 'warn'),
         jest.spyOn(Logger.prototype, 'error'),
       ];
-      credentials.findById.mockResolvedValue(await storedCredential());
+      try {
+        credentials.findById.mockResolvedValue(await storedCredential());
 
-      await service.changePassword(user, dto);
-      await service.changePassword(user, { ...dto, currentPassword: 'not-the-password' }).catch(() => undefined);
+        await service.changePassword(user, dto);
+        await service.changePassword(user, { ...dto, currentPassword: 'not-the-password' }).catch(() => undefined);
 
-      const logged = JSON.stringify(spies.flatMap((s) => s.mock.calls));
-      for (const secret of ['old-password-1', 'new-password-2', 'not-the-password']) {
-        expect(logged).not.toContain(secret);
+        const logged = JSON.stringify(spies.flatMap((s) => s.mock.calls));
+        for (const secret of ['old-password-1', 'new-password-2', 'not-the-password']) {
+          expect(logged).not.toContain(secret);
+        }
+      } finally {
+        spies.forEach((s) => s.mockRestore());
       }
-      spies.forEach((s) => s.mockRestore());
     });
-      it('refuses a suspended account with AccountSuspended and changes nothing', async () => {
+    it('refuses a suspended account with AccountSuspended and changes nothing', async () => {
       credentials.findById.mockResolvedValue({ ...(await storedCredential()), status: 'SUSPENDED' });
 
       await expect(service.changePassword(user, dto)).rejects.toThrow(AccountSuspendedError);

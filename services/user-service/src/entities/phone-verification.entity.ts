@@ -1,4 +1,4 @@
-import { Column, CreateDateColumn, Entity, Index, PrimaryColumn } from 'typeorm';
+import { Column, CreateDateColumn, Entity, Index, PrimaryColumn, Check } from 'typeorm';
 
 /**  What a code is for. A code only works for its own purpose (#35). */
 export type OtpPurpose = 'phone_verification' | 'password_reset';
@@ -11,6 +11,7 @@ export type OtpPurpose = 'phone_verification' | 'password_reset';
 @Entity('phone_verifications')
 @Index('IDX_phone_verifications_user_created', ['userId', 'createdAt'])
 @Index('IDX_phone_verifications_phone_created', ['phone', 'createdAt'])
+@Check('CHK_phone_verifications_purpose', `"purpose" IN ('phone_verification', 'password_reset')`)
 export class PhoneVerification {
   @PrimaryColumn('uuid')
   id!: string;

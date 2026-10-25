@@ -71,7 +71,7 @@ No workflow collects test coverage.
 
 ## Recent changes (newest first)
 
-- #210: dispatch lists VERIFIED available drivers longest-idle first, with id tie-breaking. Migration 005 adds `availableSince`, backfills existing available drivers from `updatedAt`, and indexes the queue. Atomic status transitions set/reset idle time; the claim retry loop stays unchanged.
+- #210: dispatch lists VERIFIED available drivers longest-idle first, with id tie-breaking. Migration 005 adds `availableSince`, backfills existing available drivers from `updatedAt`, and indexes the queue. Atomic status transitions set/reset idle time; the claim retry loop stays unchanged. Seeds preserve idle position and pause the base fixture during demo dispatch. Full-stack startup also requires auth-service to declare its directly imported ioredis dependency.
 
 | PR | Change |
 | --- | --- |

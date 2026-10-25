@@ -134,9 +134,7 @@ async function seed() {
     await axios.post(`${API_URL}/api/payments/${payment.id}/process`, {}, customerAuth);
     await waitForOrder(order.id, customerAuth, 'CONFIRMED');
     await axios.patch(`${API_URL}/api/orders/${order.id}/status`, { status: 'PREPARING' }, ownerAuth);
-    // Auto-dispatch picks the most recently updated AVAILABLE driver: cycle ours just before "ready".
-    await axios.post(`${API_URL}/api/drivers/me/offline`, {}, driverAuth).catch(() => undefined);
-    await axios.post(`${API_URL}/api/drivers/me/online`, {}, driverAuth);
+    // #210: preserve the fixture driver's idle position; do not cycle offline/online.
     await axios.patch(`${API_URL}/api/orders/${order.id}/status`, { status: 'READY_FOR_PICKUP' }, ownerAuth);
 
     console.log('Waiting for auto-dispatch to assign the driver...');

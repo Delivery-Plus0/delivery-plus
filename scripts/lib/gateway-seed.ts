@@ -310,16 +310,15 @@ export async function placeOrder(
 }
 
 /**
- * delivery-service assigns the most recently updated AVAILABLE driver, so cycle the driver
- * offline → online right before the order becomes ready to make sure it is the one picked.
+ * Dispatch is longest-idle first (#210). Bring an offline fixture driver online without resetting
+ * an existing queue position. Run deterministic seeds with no competing AVAILABLE drivers.
  */
 export async function prepareDriver(driver: Auth) {
   const { status } = await get<{ status: string }>('/api/drivers/me', driver);
   if (status === 'BUSY' || status === 'SUSPENDED') {
     throw new Error(`Driver is ${status}; it must be AVAILABLE to take a new delivery.`);
   }
-  if (status === 'AVAILABLE') await post('/api/drivers/me/offline', {}, driver);
-  await post('/api/drivers/me/online', {}, driver);
+  if (status === 'OFFLINE') await post('/api/drivers/me/online', {}, driver);
 }
 
 /** Polls the order's delivery until a driver is assigned (auto-dispatch creates and assigns it). */
@@ -347,7 +346,7 @@ export async function waitForAssignment(
 
 /**
  * Restaurant side: prepare and mark ready. delivery-service then creates the delivery and assigns a
- * driver by itself (auto-dispatch). `driver` is brought online last so it is the one picked.
+ * driver by itself (auto-dispatch). The expected driver must be the oldest available fixture.
  * Returns the delivery id.
  */
 export async function dispatch(
@@ -362,7 +361,7 @@ export async function dispatch(
   const delivery = await waitForAssignment(orderId, owner);
   if (delivery.driverId !== driverId) {
     throw new Error(
-      `Delivery was assigned to driver ${delivery.driverId}, not the expected driver — another driver went online at the same moment; rerun.`,
+      `Delivery was assigned to driver ${delivery.driverId}, not the expected driver — another driver was ahead in the idle queue; run this seed without competing available drivers.`,
     );
   }
   return delivery.id;

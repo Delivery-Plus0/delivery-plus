@@ -619,11 +619,9 @@ async function runE2E() {
     // CONFIRMED -> PREPARING -> READY_FOR_PICKUP (ORDER_TRANSITIONS does not
     // allow skipping PREPARING).
     await axios.patch(`${API_URL}/api/orders/${orderId}/status`, { status: 'PREPARING' }, ownerAuth);
-    // Auto-dispatch picks the most recently updated AVAILABLE driver: cycle the seeded driver
-    // (scripts/seed.ts) just before the order becomes ready so it is the one picked.
+    // #210: keep the seeded driver's existing place in the longest-idle queue.
     const driverProfile = (await axios.get(`${API_URL}/api/drivers/me`, driverAuth)).data;
-    if (driverProfile.status === 'AVAILABLE') await axios.post(`${API_URL}/api/drivers/me/offline`, {}, driverAuth);
-    await axios.post(`${API_URL}/api/drivers/me/online`, {}, driverAuth);
+    if (driverProfile.status !== 'AVAILABLE') await axios.post(`${API_URL}/api/drivers/me/online`, {}, driverAuth);
     await axios.patch(`${API_URL}/api/orders/${orderId}/status`, { status: 'READY_FOR_PICKUP' }, ownerAuth);
     console.log('Order marked READY_FOR_PICKUP');
 

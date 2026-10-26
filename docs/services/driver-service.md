@@ -18,9 +18,13 @@ From `services/driver-service/src/controllers/drivers.controller.ts`:
 
 ## Dispatch fairness (#210)
 
-Available, VERIFIED drivers are listed by `availableSince ASC, id ASC`: the longest-idle driver is offered work first, with a deterministic tie-breaker. Going online or being released from a delivery records database time in the same compare-and-set update as the status. Leaving AVAILABLE clears the timestamp. Repeated online/release requests are no-ops and retain the current queue position; unrelated profile or verification edits do not change it.
+Available, VERIFIED drivers are listed by `availableSince ASC NULLS FIRST, id ASC`: the longest-idle driver is offered work first, with a deterministic tie-breaker. Going online or being released from a delivery records database time in the same compare-and-set update as the status. Leaving AVAILABLE clears the timestamp. Repeated online/release requests are no-ops and retain the current queue position; unrelated profile or verification edits do not change it.
 
-Migration 005 backfills existing AVAILABLE drivers from `updatedAt` (the best historical approximation), leaves other drivers null, and adds a partial queue index. Driver profile responses include nullable ISO timestamp `availableSince`. The delivery-service claim/retry loop and VERIFIED gate are unchanged. This is the fair baseline; nearest-driver selection is a later issue.
+Migration 005 backfills existing AVAILABLE drivers from `updatedAt` (the best historical approximation), leaves other drivers null, and adds a partial queue index. Driver profile responses include nullable ISO timestamp `availableSince`. Apply migration 005 before starting the new driver-service code. During a rolling deploy, old instances can still write AVAILABLE rows without an idle timestamp; NULLS FIRST prevents these legacy drivers from being starved, using id to break ties among them. Fresh databases build the partial index with matching NULL ordering; an already-applied migration need not be rerun for correctness (the query can sort).
+
+Queue accounting follows status, not the delivery outcome: every successful BUSY → AVAILABLE release starts a new idle period. This includes a failed assignment being rolled back and a delivery cancelled before pickup; the previous position is not restored. This documents the implemented baseline, not a special compensation policy. A claim rejected by compare-and-set never changes the timestamp, and a repeated release/online request is a no-op. Restoring pre-claim positions would require a separate owner-approved rule and storage/contract change.
+
+The delivery-service claim/retry loop and VERIFIED gate are unchanged. Its internal client re-reads page 1, limit 1 after a lost claim, rather than incrementing an offset and skipping the new head. A future atomic claim with SKIP LOCKED is separate work. This is the fair baseline; nearest-driver selection is a later issue.
 
 ## Dependencies
 - Persists driver data in PostgreSQL

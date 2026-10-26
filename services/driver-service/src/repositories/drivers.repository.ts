@@ -62,7 +62,8 @@ export class DriversRepository {
   findAvailable(page: number, limit: number): Promise<[Driver[], number]> {
     return this.repo.findAndCount({
       where: { status: DriverStatus.AVAILABLE, verificationStatus: 'VERIFIED' },
-      order: { availableSince: 'ASC', id: 'ASC' },
+      // Old instances can write AVAILABLE with no timestamp during a rolling deploy.
+      order: { availableSince: { direction: 'ASC', nulls: 'FIRST' }, id: 'ASC' },
       skip: (page - 1) * limit,
       take: limit,
     });

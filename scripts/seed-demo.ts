@@ -402,7 +402,11 @@ async function markSomeNotificationsRead(customer: Auth, expectedAtLeast: number
 
 // ---------------------------------------------------------------------------------------------
 
-/** Keep the known base fixture from taking the demo driver's deliveries under fair dispatch. */
+/**
+ * Pause only the known baseline fixture; this is not isolation from arbitrary drivers.
+ * Use a dedicated seed stack with no other AVAILABLE drivers (docs/e2e.md).
+ * Restoring online starts a new idle period; run critical-path E2E before demo scenarios.
+ */
 async function withBaseDriverPaused(action: () => Promise<void>): Promise<void> {
   let base: Auth | undefined;
   let restore = false;

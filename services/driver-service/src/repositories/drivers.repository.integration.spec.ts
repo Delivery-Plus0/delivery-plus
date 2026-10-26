@@ -1,5 +1,5 @@
 /**
- * Integration tests for the driver verification gate (#206) against a real PostgreSQL: the real
+ * Integration tests for driver verification (#206) and the idle queue (#210) against real PostgreSQL: the real
  * migrations build the schema, and the gate lives in the repository's WHERE clauses, which a mocked
  * repository cannot prove.
  *
@@ -39,7 +39,7 @@ function dataSource(migrations: Array<new () => MigrationInterface>): DataSource
 
 type Verification = Driver['verificationStatus'];
 
-describeDb('DriversRepository (PostgreSQL integration, #206)', () => {
+describeDb('DriversRepository (PostgreSQL integration, #206, #210)', () => {
   jest.setTimeout(30_000);
 
   let ds: DataSource;
@@ -142,6 +142,42 @@ describeDb('DriversRepository (PostgreSQL integration, #206)', () => {
       expect(second.map(d => d.id)).toEqual([b]);
     });
 
+    it('puts legacy AVAILABLE drivers with NULL idle times first, ordered by id', async () => {
+      const timed = await available(30);
+      const legacy = [await insert(DriverStatus.AVAILABLE, 'VERIFIED'), await insert(DriverStatus.AVAILABLE, 'VERIFIED')].sort();
+      expect((await repo.findAvailable(1, 20))[0].map(driver => driver.id)).toEqual([...legacy, timed]);
+      expect((await repo.findAvailable(1, 1))[0].map(driver => driver.id)).toEqual([legacy[0]]);
+      expect((await repo.findAvailable(2, 1))[0].map(driver => driver.id)).toEqual([legacy[1]]);
+    });
+
+    it('two parallel queue consumers claim distinct drivers after racing for the same oldest one', async () => {
+      const a = await available(30);
+      const b = await available(1);
+      let initialReads = 0;
+      let release!: () => void;
+      const bothRead = new Promise<void>(resolve => { release = resolve; });
+      const firstChoices: string[] = [];
+      const claim = async (): Promise<string> => {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const [queue] = await repo.findAvailable(1, 1);
+          const driver = queue[0];
+          if (!driver) throw new Error('Queue unexpectedly empty');
+          if (attempt === 0) {
+            firstChoices.push(driver.id);
+            if (++initialReads === 2) release();
+            await bothRead;
+          }
+          const claimed = await repo.transitionStatus(driver.id, DriverStatus.AVAILABLE, DriverStatus.BUSY);
+          if (claimed) return claimed.id;
+        }
+        throw new Error('Claim retry budget exhausted');
+      };
+      const claimed = await Promise.all([claim(), claim()]);
+      expect(firstChoices).toEqual([a, a]);
+      expect(claimed.sort()).toEqual([a, b].sort());
+      expect((await repo.findAvailable(1, 20))[1]).toBe(0);
+    });
+
     it('puts a driver finishing a delivery at the back and clears idle time while busy', async () => {
       const a = await available(30);
       const b = await available(1);
@@ -167,7 +203,7 @@ describeDb('DriversRepository (PostgreSQL integration, #206)', () => {
 
     it('breaks equal idle times deterministically by id', async () => {
       const ids = [await available(1), await available(1)].sort();
-      await ds.query(`UPDATE drivers SET "availableSince" = '2026-01-01T00:00:00Z'`);
+      await ds.query(`UPDATE drivers SET "availableSince" = '2026-01-01T00:00:00Z' WHERE id = ANY($1::uuid[])`, [ids]);
       expect((await repo.findAvailable(1, 20))[0].map(d => d.id)).toEqual(ids);
     });
   });

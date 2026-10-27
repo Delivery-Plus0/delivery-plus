@@ -71,10 +71,9 @@ No workflow collects test coverage.
 
 ## Recent changes (newest first)
 
-
 | PR | Change |
 | --- | --- |
-| #272 | #210: VERIFIED available drivers are ordered by `availableSince ASC NULLS FIRST, id ASC`. Migration 005 adds/backfills idle time and the partial index; status and queue time change in one compare-and-set. Automated PostgreSQL queue races and delivery-service parallel dispatch tests cover exclusive claims. Seeds preserve idle position and require an isolated fixture queue. |
+| (#210) | VERIFIED available drivers are ordered by `availableSince ASC NULLS FIRST, id ASC`. Migration 005 adds/backfills idle time and the partial index; status and queue time change in one compare-and-set. Automated PostgreSQL queue races and delivery-service parallel dispatch tests cover exclusive claims. Seeds preserve idle position and require an isolated fixture queue. |
 | (#252) | While `EMAIL_VERIFICATION_REQUIRED=true`, login answers `403 EmailNotVerified` (after the password checked out; a wrong password stays `401`) so the apps can open their code screen; `verify-email` keeps one `401` for every failure. The test and dev stacks read `EMAIL_VERIFICATION_REQUIRED` (default `false`) |
 | (#251) | Real client IP behind trusted proxies: `TRUSTED_PROXY_HOPS` (default 0, 0–5, else startup fails) sets Express `trust proxy`; the gateway forwards `request.ip` as `x-delivery-plus-client-ip`, so per-client rate limits hold behind a load balancer and a client's own `X-Forwarded-For` can't choose its address. Fixes the gateway `.env.example`, which was a copy of menu-service's |
 | (#203) | Verification emails: `EmailSender` port (`DisabledEmailSender`, Redis `TestEmailSender`, `SesEmailSender` on SESv2 with one retry on throttling/5xx); 6-digit codes (HMAC, 10 min, single use via compare-and-set, 5 attempts then invalidated, migration 006); resend cooldown and per-email/per-IP limits; AR/EN multipart email; production config refuses `test`, `ses` without region/sender and required verification with `disabled`. The gateway forwards the client IP (unspoofable), so per-IP rate limits count real clients |

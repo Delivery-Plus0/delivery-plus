@@ -67,6 +67,8 @@ Every PR and push to `main`/`testing`/`dev` runs these workflows (`.github/workf
 | Integration | Boots the full Compose test stack, seeds data, runs the critical-path E2E script (`npm run e2e`) |
 | Migration Verification | Runs every service's TypeORM migrations on fresh databases and checks none are pending; payment SQL upgrade test on real Postgres |
 
+Not a check: **Pull request email** (`pr-email.yml`) emails the team a branded summary when a pull request is opened or merged, here and, as a reusable workflow, in the app repositories. It runs on `pull_request_target` but never checks out pull request code. Setup: [docs/runbooks/pr-email-notifications.md](../docs/runbooks/pr-email-notifications.md).
+
 No workflow collects test coverage.
 
 ## Recent changes (newest first)

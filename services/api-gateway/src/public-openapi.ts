@@ -906,8 +906,11 @@ export function generatePublicOpenApiDocument() {
         operation.responses[String(route.statusCode || 204)] = {
           description: 'Password changed. Every other session is revoked; the current one stays signed in.',
         };
-        operation.responses['400'] = { description: 'Validation error: the new password is under 8 characters or equals the current one' };
-        operation.responses['401'] = { description: 'Not signed in, or the current password is wrong' };
+        operation.responses['400'] = {
+          description:
+            'CurrentPasswordIncorrect: the current password is wrong (or the account is locked); counts as a failed sign-in attempt. Or a validation error: the new password is under 8 characters or equals the current one',
+        };
+        operation.responses['401'] = { description: 'Not signed in (missing, expired or revoked access token)' };
         operation.responses['403'] = { description: 'AccountSuspended' };
         operation.responses['429'] = { description: 'Too many attempts: 5 a minute per user' };
       }

@@ -504,10 +504,10 @@
             "description": "Password changed. Every other session is revoked; the current one stays signed in."
           },
           "400": {
-            "description": "Validation error: the new password is under 8 characters or equals the current one"
+            "description": "CurrentPasswordIncorrect: the current password is wrong (or the account is locked); counts as a failed sign-in attempt. Or a validation error: the new password is under 8 characters or equals the current one"
           },
           "401": {
-            "description": "Not signed in, or the current password is wrong"
+            "description": "Not signed in (missing, expired or revoked access token)"
           },
           "403": {
             "description": "AccountSuspended"

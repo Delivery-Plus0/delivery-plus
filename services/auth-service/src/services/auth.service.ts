@@ -8,6 +8,7 @@ import {
   AppError,
   BadRequestError,
   ConflictError,
+  CurrentPasswordIncorrectError,
   EmailNotVerifiedError,
   ForbiddenError,
   JwtPayload,
@@ -360,6 +361,7 @@ export class AuthService {
   /**
   * Changes the password of the signed-in user. Every other session ends; the one this access
   * token belongs to (`sid`) stays signed in. Access tokens already issued last up to 15 minutes.
+  * A wrong current password is `400 CurrentPasswordIncorrect`, never a 401 (see the error class).
   */
   async changePassword(user: JwtPayload, dto: ChangePasswordDto): Promise<void> {
     const credential = await this.credentials.findById(user.sub);
@@ -368,7 +370,7 @@ export class AuthService {
     }
     // A locked account answers like a wrong password, so the two can't be told apart.
     if (credential.lockedUntil && credential.lockedUntil.getTime() > Date.now()) {
-      throw new UnauthorizedError('Current password is incorrect');
+      throw new CurrentPasswordIncorrectError();
     }
 
     if (credential.lockedUntil && credential.lockedUntil.getTime() <= Date.now()) {
@@ -378,7 +380,7 @@ export class AuthService {
     const matches = await bcrypt.compare(dto.currentPassword, credential.passwordHash);
     if (!matches) {
       await this.registerFailedPasswordAttempt(credential.id);
-      throw new UnauthorizedError('Current password is incorrect');
+      throw new CurrentPasswordIncorrectError();
     }
 
     if (credential.status === 'SUSPENDED') {

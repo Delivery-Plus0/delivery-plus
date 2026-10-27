@@ -13,6 +13,7 @@ import {
   renderHtml,
   renderText,
   safeUrl,
+  stripComments,
 } from './render.mjs';
 
 const REPO = 'Delivery-Plus0/delivery-plus';
@@ -56,13 +57,13 @@ test('sends nothing for drafts, bots, or a pull request closed without merging',
 test('escapes everything a contributor controls', () => {
   const hostile = pr({
     title: '<img src=x onerror=alert(1)> "quotes" & <b>bold</b>',
-    body: '<script>alert(1)</script>\n<a href="javascript:alert(1)">x</a>',
+    body: '<SCRIPT>alert(1)</SCRIPT>\n<script>alert(2)</script>\n<a href="javascript:alert(1)">x</a>',
     head: { label: 'evil:<svg/onload=alert(1)>' },
     labels: [{ name: '<i>label</i>' }],
     user: { login: 'x"><script>', type: 'User', html_url: 'javascript:alert(1)', avatar_url: 'javascript:alert(1)' },
   });
   const html = renderHtml(emailModel(hostile, REPO, 'opened'));
-  assert.doesNotMatch(html, /<script>|<img src=x|<svg|<i>label|<b>bold/);
+  assert.doesNotMatch(html, /<script|<img src=x|<svg|<i>label|<b>bold/i);
   assert.doesNotMatch(html, /href="javascript:/i);
   assert.doesNotMatch(html, /src="javascript:/i);
   assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
@@ -99,6 +100,14 @@ test('turns the description into a short plain excerpt, headings marked for bold
   assert.equal(descriptionExcerpt('- [x] tests\n- docs'), '• tests\n• docs');
   const long = descriptionExcerpt('word '.repeat(300));
   assert.ok(long.length <= 601 && long.endsWith('…'));
+});
+
+test('removes HTML comments completely, nested or unterminated ones included', () => {
+  assert.equal(stripComments('a<!-- x -->b'), 'ab');
+  // Removing the inner comment leaves an unterminated `<!--`, which then takes the rest with it.
+  assert.equal(stripComments('a<!<!---->--b'), 'a');
+  assert.equal(stripComments('keep <!-- never closed'), 'keep ');
+  assert.doesNotMatch(stripComments('<!<!--- x --->-- y'), /<!--|-->/);
 });
 
 test('only http(s) URLs make it into links', () => {

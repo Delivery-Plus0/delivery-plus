@@ -95,10 +95,18 @@ export function linkedIssues(body, repository) {
 export const HEADING = '\u0002';
 
 /** A short, plain excerpt of the description: no HTML comments, no markdown markers, ~600 chars. */
+/** Removes HTML comments, repeating until none is left (nested or broken ones included). */
+export function stripComments(value) {
+  let text = String(value ?? '');
+  for (let previous = ''; previous !== text; ) {
+    previous = text;
+    text = text.replace(/<!--[\s\S]*?(?:-->|$)/g, '');
+  }
+  return text.replace(/<!--|-->/g, '');
+}
+
 export function descriptionExcerpt(body, max = 600) {
-  const text = String(body ?? '')
-    .replace(/\r\n?/g, '\n')
-    .replace(/<!--[\s\S]*?-->/g, '')
+  const text = stripComments(String(body ?? '').replace(/\r\n?/g, '\n'))
     .replace(/[\u0000-\u0008\u000B-\u001F]/g, '')
     .replace(/^#{1,6}\s*(.+)\n+/gm, `${HEADING}$1\n`)
     .replace(/\*\*(.+?)\*\*/g, '$1')

@@ -94,17 +94,36 @@ export function linkedIssues(body, repository) {
 /** Marks a heading line in an excerpt; the HTML shows it bold, the text version drops the mark. */
 export const HEADING = '\u0002';
 
-/** A short, plain excerpt of the description: no HTML comments, no markdown markers, ~600 chars. */
-/** Removes HTML comments, repeating until none is left (nested or broken ones included). */
+/** One pass: drops each `<!--` up to its `-->` or `--!>`, or to the end when it never closes. */
+function stripCommentsOnce(text) {
+  let out = '';
+  let at = 0;
+  while (at < text.length) {
+    const start = text.indexOf('<!--', at);
+    if (start === -1) return out + text.slice(at);
+    out += text.slice(at, start);
+    const ends = [text.indexOf('-->', start + 4), text.indexOf('--!>', start + 4)].filter((i) => i !== -1);
+    if (ends.length === 0) return out;
+    const end = Math.min(...ends);
+    at = end + (text.startsWith('-->', end) ? 3 : 4);
+  }
+  return out;
+}
+
+/**
+ * Removes HTML comments, repeating until none is left (nested or broken ones included). Cosmetic:
+ * the excerpt is HTML-escaped when rendered either way.
+ */
 export function stripComments(value) {
   let text = String(value ?? '');
   for (let previous = ''; previous !== text; ) {
     previous = text;
-    text = text.replace(/<!--[\s\S]*?(?:-->|$)/g, '');
+    text = stripCommentsOnce(text);
   }
-  return text.replace(/<!--|-->/g, '');
+  return text;
 }
 
+/** A short, plain excerpt of the description: no HTML comments, no markdown markers, ~600 chars. */
 export function descriptionExcerpt(body, max = 600) {
   const text = stripComments(String(body ?? '').replace(/\r\n?/g, '\n'))
     .replace(/[\u0000-\u0008\u000B-\u001F]/g, '')

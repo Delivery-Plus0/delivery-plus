@@ -107,7 +107,9 @@ test('removes HTML comments completely, nested or unterminated ones included', (
   // Removing the inner comment leaves an unterminated `<!--`, which then takes the rest with it.
   assert.equal(stripComments('a<!<!---->--b'), 'a');
   assert.equal(stripComments('keep <!-- never closed'), 'keep ');
-  assert.doesNotMatch(stripComments('<!<!--- x --->-- y'), /<!--|-->/);
+  assert.equal(stripComments('a<!-- x --!>b'), 'ab');
+  const rebuilt = stripComments('<!<!--- x --->-- y');
+  assert.ok(!rebuilt.includes('<!--') && !rebuilt.includes('-->'), rebuilt);
 });
 
 test('only http(s) URLs make it into links', () => {

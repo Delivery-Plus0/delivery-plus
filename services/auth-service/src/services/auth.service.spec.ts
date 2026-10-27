@@ -6,7 +6,7 @@ import { Logger } from '@nestjs/common';
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import { ChangePasswordDto } from '../dto/change-password.dto';
-import { UserRole, ConflictError, ForbiddenError, UnauthorizedError, RateLimitGuard, RATE_LIMIT_KEY, JwtPayload, JwtAuthGuard, AccountSuspendedError } from '@food-delivery/shared';
+import { UserRole, ConflictError, CurrentPasswordIncorrectError, ForbiddenError, UnauthorizedError, RateLimitGuard, RATE_LIMIT_KEY, JwtPayload, JwtAuthGuard, AccountSuspendedError } from '@food-delivery/shared';
 import { SELF_SERVICE_ROLES } from '../dto/register.dto';
 import * as bcrypt from 'bcrypt';
 import { loadConfig, loadTestAdmin } from '../config/app-config';
@@ -965,12 +965,12 @@ describe('AuthService', () => {
       expect(sessions.revokeAll).not.toHaveBeenCalled();
     });
 
-    it('answers a wrong current password with 401 even for a suspended account', async () => {
+    it('answers a wrong current password as wrong even for a suspended account', async () => {
       credentials.findById.mockResolvedValue({ ...(await storedCredential()), status: 'SUSPENDED' });
 
       await expect(
         service.changePassword(user, { ...dto, currentPassword: 'not-the-password' }),
-      ).rejects.toThrow(UnauthorizedError);
+      ).rejects.toThrow(CurrentPasswordIncorrectError);
     });
   });
    describe('changePassword lockout and atomicity (#35)', () => {
@@ -990,7 +990,12 @@ describe('AuthService', () => {
       credentials.findById.mockResolvedValue(credential());
       credentials.recordFailedLogin.mockResolvedValue({ failedLoginCount: 1 } as never);
 
-      await expect(service.changePassword(user, wrong)).rejects.toThrow('Current password is incorrect');
+      // 400, not 401: a signed-in app takes a 401 for an expired session and would sign the person out.
+      await expect(service.changePassword(user, wrong)).rejects.toMatchObject({
+        statusCode: 400,
+        error: 'CurrentPasswordIncorrect',
+        message: 'Current password is incorrect',
+      });
 
       expect(credentials.recordFailedLogin).toHaveBeenCalledWith('u1', expect.any(Date));
       expect(credentials.update).not.toHaveBeenCalled();
@@ -1009,7 +1014,7 @@ describe('AuthService', () => {
     it('answers a locked account like a wrong password, even with the right one, and counts nothing', async () => {
       credentials.findById.mockResolvedValue(credential({ lockedUntil: new Date(Date.now() + 60_000) }));
 
-      await expect(service.changePassword(user, dto)).rejects.toThrow('Current password is incorrect');
+      await expect(service.changePassword(user, dto)).rejects.toMatchObject({ statusCode: 400, error: 'CurrentPasswordIncorrect' });
 
       expect(credentials.recordFailedLogin).not.toHaveBeenCalled();
       expect(credentials.update).not.toHaveBeenCalled();

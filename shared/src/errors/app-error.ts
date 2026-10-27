@@ -103,6 +103,17 @@ export class EmailNotVerifiedError extends AppError {
 }
 
 /**
+ * #35: a password change whose current password is wrong (or whose account is locked). Not a 401: the
+ * caller is signed in, and the apps take a 401 on a signed-in call as an expired session (refresh,
+ * replay, sign out), which would count the wrong password twice and sign the person out.
+ */
+export class CurrentPasswordIncorrectError extends AppError {
+  constructor(message = 'Current password is incorrect') {
+    super(400, 'CurrentPasswordIncorrect', message);
+  }
+}
+
+/**
  * F6 (#205): another request kept changing the same cart, so this change couldn't be applied. Its own
  * code so clients don't mistake it for the different-restaurant `Conflict`: the answer is "try again",
  * never "start a new cart".

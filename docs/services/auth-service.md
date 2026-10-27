@@ -130,7 +130,7 @@ Login and register accept an optional `appId` (`customer`, `driver`, `restaurant
 ## Password change and reset (#35)
 
 - **Change** (`POST /auth/password/change { currentPassword, newPassword }`, access token → `204`):
-  - A wrong current password is `401`. A suspended account is `403 AccountSuspended`, checked only after the current password is verified.
+  - A wrong current password (or a locked account) is `400 CurrentPasswordIncorrect` and counts as a failed sign-in attempt. It is not a `401`: the apps take a `401` on a signed-in call as an expired session (refresh, replay, then sign out). A suspended account is `403 AccountSuspended`, checked only after the current password is verified.
   - A new password equal to the current one is `400`.
   - On success every **other** session ends (`revokedReason: password_changed`); the session of the access token (`sid`) stays signed in. Limited to 5 a minute per user.
 - **Forgot** (`POST /auth/password/forgot { phone }`, public → `202 { message }`):

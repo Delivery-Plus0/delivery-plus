@@ -223,8 +223,9 @@ async function assertRefreshSessions() {
 
 /**
  * Password change (#35): changing the password ends every OTHER session and keeps the one that made
- * the change. The old password stops working, the new one signs in, a wrong current password is 401
- * and an unchanged password is 400. Fresh account; two logins plus the register session stay under
+ * the change. The old password stops working, the new one signs in, a wrong current password is
+ * 400 CurrentPasswordIncorrect (never a 401, which apps read as an expired session) and an unchanged
+ * password is 400. Fresh account; two logins plus the register session stay under
  * the 5-a-minute login limit.
  */
 async function assertPasswordChange() {
@@ -257,9 +258,9 @@ async function assertPasswordChange() {
   const oldLogin = await statusOf(axios.post(`${API_URL}/api/auth/login`, { email, password: oldPassword }));
   const newLogin = await statusOf(axios.post(`${API_URL}/api/auth/login`, { email, password: newPassword }));
   const got = { wrongCurrent, unchanged, tooShort, noToken, bStillLiveAfterRefusals, changed, otherSession, ownSession, oldLogin, newLogin };
-  const want = { wrongCurrent: 401, unchanged: 400, tooShort: 400, noToken: 401, bStillLiveAfterRefusals: 200, changed: 204, otherSession: 401, ownSession: 200, oldLogin: 401, newLogin: 200 };
+  const want = { wrongCurrent: 400, unchanged: 400, tooShort: 400, noToken: 401, bStillLiveAfterRefusals: 200, changed: 204, otherSession: 401, ownSession: 200, oldLogin: 401, newLogin: 200 };
   if (JSON.stringify(got) !== JSON.stringify(want)) throw new Error(`Password change: got ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`);
-  console.log('Password change: wrong current 401, unchanged 400, other sessions revoked, own session kept, old password refused, new one signs in');
+  console.log('Password change: wrong current 400, unchanged 400, other sessions revoked, own session kept, old password refused, new one signs in');
   await clearRateLimits();
 }
 

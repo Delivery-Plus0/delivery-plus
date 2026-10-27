@@ -24,13 +24,14 @@ import { DriverVerification1700000000002 } from '../database/migrations/003-driv
 import { VerifyExistingDrivers1700000000003 } from '../database/migrations/004-verify-existing-drivers';
 
 import { DriverAvailableSince1700000000004 } from '../database/migrations/005-driver-available-since';
+import { DriverEffectiveIdleIndex1700000000005 } from '../database/migrations/006-driver-effective-idle-index';
 
 const DATABASE_URL = process.env.DRIVER_TEST_DATABASE_URL;
 const describeDb = DATABASE_URL ? describe : describe.skip;
 
 const BEFORE_206 = [InitialSchema1700000000000, UuidPrimaryKeyDefaults1700000000001, DriverVerification1700000000002];
 const BEFORE_210 = [...BEFORE_206, VerifyExistingDrivers1700000000003];
-const ALL_MIGRATIONS = [...BEFORE_210, DriverAvailableSince1700000000004];
+const ALL_MIGRATIONS = [...BEFORE_210, DriverAvailableSince1700000000004, DriverEffectiveIdleIndex1700000000005];
 
 /** The service's own DataSource options, with an explicit migration list. */
 function dataSource(migrations: Array<new () => MigrationInterface>): DataSource {
@@ -83,7 +84,7 @@ describeDb('DriversRepository (PostgreSQL integration, #206, #210)', () => {
       await before.destroy();
 
       await open();
-      expect(await ds.runMigrations()).toHaveLength(2);
+      expect(await ds.runMigrations()).toHaveLength(3);
 
       expect(await repo.findById(pending)).toMatchObject({ verificationStatus: 'VERIFIED', verifiedAt: expect.any(Date) });
       expect(await repo.findById(rejected)).toMatchObject({ verificationStatus: 'REJECTED', verifiedAt: null });
@@ -109,11 +110,12 @@ describeDb('DriversRepository (PostgreSQL integration, #206, #210)', () => {
       await before.query(`UPDATE drivers SET "updatedAt" = '2026-01-01T00:00:00Z' WHERE id = $1`, [online]);
       await before.destroy();
       await open();
-      expect(await ds.runMigrations()).toHaveLength(1);
+      expect(await ds.runMigrations()).toHaveLength(2);
       expect((await repo.findById(online))?.availableSince).toEqual(new Date('2026-01-01T00:00:00Z'));
       expect((await repo.findById(offline))?.availableSince).toBeNull();
-      await ds.undoLastMigration();
-      expect(await ds.runMigrations()).toHaveLength(1);
+      await ds.undoLastMigration(); // Undo the expression index first.
+      await ds.undoLastMigration(); // Then undo the idle column.
+      expect(await ds.runMigrations()).toHaveLength(2);
       expect((await repo.findById(online))?.availableSince).toEqual(new Date('2026-01-01T00:00:00Z'));
     });
   });
@@ -142,12 +144,31 @@ describeDb('DriversRepository (PostgreSQL integration, #206, #210)', () => {
       expect(second.map(d => d.id)).toEqual([b]);
     });
 
-    it('puts legacy AVAILABLE drivers with NULL idle times first, ordered by id', async () => {
+    it('orders NULL idle timestamps by historical update time, not driver id', async () => {
+      const ids = [await insert(DriverStatus.AVAILABLE, 'VERIFIED'), await insert(DriverStatus.AVAILABLE, 'VERIFIED')].sort();
+      const [newer, older] = ids;
+      await ds.query(`UPDATE drivers SET "updatedAt" = clock_timestamp() - interval '60 minutes' WHERE id = $1`, [older]);
+      await ds.query(`UPDATE drivers SET "updatedAt" = clock_timestamp() - interval '1 minute' WHERE id = $1`, [newer]);
       const timed = await available(30);
-      const legacy = [await insert(DriverStatus.AVAILABLE, 'VERIFIED'), await insert(DriverStatus.AVAILABLE, 'VERIFIED')].sort();
-      expect((await repo.findAvailable(1, 20))[0].map(driver => driver.id)).toEqual([...legacy, timed]);
-      expect((await repo.findAvailable(1, 1))[0].map(driver => driver.id)).toEqual([legacy[0]]);
-      expect((await repo.findAvailable(2, 1))[0].map(driver => driver.id)).toEqual([legacy[1]]);
+      expect((await repo.findAvailable(1, 20))[0].map(driver => driver.id)).toEqual([older, timed, newer]);
+      expect((await repo.findAvailable(1, 1))[0][0].id).toBe(older);
+      expect((await repo.findAvailable(2, 1))[0][0].id).toBe(timed);
+    });
+
+    it('rotates three available drivers over two complete rounds regardless of id order', async () => {
+      const ids = [await available(1), await available(1), await available(1)].sort();
+      const initial = [...ids].reverse();
+      for (let i = 0; i < initial.length; i++) {
+        await ds.query(`UPDATE drivers SET "availableSince" = clock_timestamp() - ($1 * interval '1 minute') WHERE id = $2`, [30 - i, initial[i]]);
+      }
+      const selected: string[] = [];
+      for (let i = 0; i < 6; i++) {
+        const [[driver]] = await repo.findAvailable(1, 1);
+        selected.push(driver.id);
+        expect(await repo.transitionStatus(driver.id, DriverStatus.AVAILABLE, DriverStatus.BUSY)).not.toBeNull();
+        expect(await repo.transitionStatus(driver.id, DriverStatus.BUSY, DriverStatus.AVAILABLE)).not.toBeNull();
+      }
+      expect(selected).toEqual([...initial, ...initial]);
     });
 
     it('two parallel queue consumers claim distinct drivers after racing for the same oldest one', async () => {

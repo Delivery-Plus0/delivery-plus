@@ -60,12 +60,14 @@ export class DriversRepository {
 
   /** Drivers auto-dispatch may claim: online and VERIFIED (#206). */
   findAvailable(page: number, limit: number): Promise<[Driver[], number]> {
-    return this.repo.findAndCount({
-      where: { status: DriverStatus.AVAILABLE, verificationStatus: 'VERIFIED' },
-      // Old instances can write AVAILABLE with no timestamp during a rolling deploy.
-      order: { availableSince: { direction: 'ASC', nulls: 'FIRST' }, id: 'ASC' },
-      skip: (page - 1) * limit,
-      take: limit,
-    });
+    return this.repo.createQueryBuilder('driver')
+      .where('driver.status = :status', { status: DriverStatus.AVAILABLE })
+      .andWhere('driver.verificationStatus = :verification', { verification: 'VERIFIED' })
+      // Legacy rows still participate by their best known idle time, not by UUID.
+      .orderBy('COALESCE(driver.availableSince, driver.updatedAt)', 'ASC')
+      .addOrderBy('driver.id', 'ASC')
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
   }
 }

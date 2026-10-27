@@ -39,7 +39,11 @@ export class DriversRepository {
   async transitionStatus(id: string, from: DriverStatus, to: DriverStatus): Promise<Driver | null> {
     const where: FindOptionsWhere<Driver> = { id, status: from };
     if (ON_DUTY_STATUSES.includes(to)) where.verificationStatus = 'VERIFIED';
-    const result = await this.repo.update(where, { status: to });
+    const result = await this.repo.update(where, {
+      status: to,
+      // Database time and status change are one compare-and-set write.
+      ...(from !== to ? { availableSince: to === DriverStatus.AVAILABLE ? () => 'clock_timestamp()' : null } : {}),
+    });
     return result.affected ? this.findById(id) : null;
   }
 
@@ -56,11 +60,14 @@ export class DriversRepository {
 
   /** Drivers auto-dispatch may claim: online and VERIFIED (#206). */
   findAvailable(page: number, limit: number): Promise<[Driver[], number]> {
-    return this.repo.findAndCount({
-      where: { status: DriverStatus.AVAILABLE, verificationStatus: 'VERIFIED' },
-      order: { updatedAt: 'DESC' },
-      skip: (page - 1) * limit,
-      take: limit,
-    });
+    return this.repo.createQueryBuilder('driver')
+      .where('driver.status = :status', { status: DriverStatus.AVAILABLE })
+      .andWhere('driver.verificationStatus = :verification', { verification: 'VERIFIED' })
+      // Legacy rows still participate by their best known idle time, not by UUID.
+      .orderBy('COALESCE(driver.availableSince, driver.updatedAt)', 'ASC')
+      .addOrderBy('driver.id', 'ASC')
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
   }
 }

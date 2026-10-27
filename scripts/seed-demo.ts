@@ -10,8 +10,8 @@
  * each order scenario (delivered, cancelled, failed payment, preparing, on the way) is only created
  * if the demo customer has no order in that state yet. Pass `--more-orders` to add a full batch.
  *
- * Deliveries use a dedicated demo driver so the base `driver@example.com` stays AVAILABLE for
- * `npm run seed` / `npm run e2e` while the demo's "on the way" order keeps the demo driver BUSY.
+ * Deliveries use a dedicated demo driver. The base fixture driver is temporarily paused while
+ * creating demo deliveries, then restored, so longest-idle dispatch cannot select it instead (#210).
  */
 import {
   del,
@@ -26,6 +26,7 @@ import {
   post,
   runSeed,
   seedRestaurant,
+  statusOf,
   sleep,
   tryImage,
   uploadAvatar,
@@ -401,6 +402,34 @@ async function markSomeNotificationsRead(customer: Auth, expectedAtLeast: number
 
 // ---------------------------------------------------------------------------------------------
 
+/**
+ * Pause only the known baseline fixture; this is not isolation from arbitrary drivers.
+ * Use a dedicated seed stack with no other AVAILABLE drivers (docs/e2e.md).
+ * Restoring online starts a new idle period; run critical-path E2E before demo scenarios.
+ */
+async function withBaseDriverPaused(action: () => Promise<void>): Promise<void> {
+  let base: Auth | undefined;
+  let restore = false;
+  try {
+    const response = await post<{ accessToken: string; userId: string }>('/api/auth/login', {
+      email: 'driver@example.com', password: PASSWORD,
+    });
+    base = { headers: { Authorization: `Bearer ${response.accessToken}` }, userId: response.userId };
+    const profile = await get<{ status: string }>('/api/drivers/me', base);
+    if (profile.status === 'AVAILABLE') {
+      await post('/api/drivers/me/offline', {}, base);
+      restore = true;
+    }
+  } catch (error) {
+    if (statusOf(error) !== 401 && statusOf(error) !== 404) throw error;
+  }
+  try {
+    await action();
+  } finally {
+    if (restore && base) await post('/api/drivers/me/online', {}, base);
+  }
+}
+
 async function seedDemo() {
   const moreOrders = process.argv.includes('--more-orders');
   log(`Seeding demo data through ${API_URL}
@@ -446,7 +475,7 @@ async function seedDemo() {
   const statuses = new Set(existing.items.map((order) => order.status));
   const missing = (status: string) => moreOrders || !statuses.has(status);
   if (['DELIVERED', 'CANCELLED', 'FAILED', 'PREPARING', 'PICKED_UP'].some(missing)) {
-    await seedOrders(customer, owner, driver, catalog, missing);
+    await withBaseDriverPaused(() => seedOrders(customer, owner, driver, catalog, missing));
     await markSomeNotificationsRead(customer, 4);
   } else {
     log(

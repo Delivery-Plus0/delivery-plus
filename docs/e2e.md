@@ -34,3 +34,14 @@ S1 delivered, S2 payment declined, S4 another customer's confirmed order). There
 "waiting for a driver" order (formerly S3): with auto-dispatch a ready order is assigned as soon as a driver
 is free, so UI tests create that state at runtime (driver offline → order ready → driver online). The E2E
 stack retries waiting deliveries every 2 s (`AUTO_DISPATCH_SWEEP_MS`).
+
+
+## Fair-dispatch seed isolation (#210)
+
+Run deterministic seed scripts and critical-path E2E only against a disposable, dedicated stack with no unrelated AVAILABLE drivers or concurrent dispatch clients. Fair dispatch always chooses the oldest available driver, not the account the script happens to own. Reusing an arbitrary development database does not satisfy this precondition.
+
+For a clean run use the E2E Compose project (never delete a development/production volume): reset its disposable volumes, seed the baseline, then run the critical-path E2E. Run demo scenarios last, or use a separate clean disposable stack for them. Demo seeding can leave its driver BUSY on an in-transit scenario; it must not be followed by an assumption that the baseline is the only or oldest AVAILABLE driver.
+
+The demo helper pauses only the known baseline fixture and restores it in finally. It does not isolate unknown drivers, and restoring the baseline online starts a fresh idle period at the back of the queue. Take unrelated drivers offline manually before using the demo seed, or recreate the disposable stack. The scripts do not mutate arbitrary users' availability to make fixtures win.
+
+seed.ts brings its fixture online during setup and verifies AVAILABLE again immediately before READY_FOR_PICKUP. prepareDriver only brings OFFLINE online and preserves an existing AVAILABLE timestamp. Neither helper bypasses the VERIFIED gate.

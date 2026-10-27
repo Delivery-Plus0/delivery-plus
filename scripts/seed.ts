@@ -134,9 +134,16 @@ async function seed() {
     await axios.post(`${API_URL}/api/payments/${payment.id}/process`, {}, customerAuth);
     await waitForOrder(order.id, customerAuth, 'CONFIRMED');
     await axios.patch(`${API_URL}/api/orders/${order.id}/status`, { status: 'PREPARING' }, ownerAuth);
-    // Auto-dispatch picks the most recently updated AVAILABLE driver: cycle ours just before "ready".
-    await axios.post(`${API_URL}/api/drivers/me/offline`, {}, driverAuth).catch(() => undefined);
-    await axios.post(`${API_URL}/api/drivers/me/online`, {}, driverAuth);
+    // The profile is brought online above. Recheck immediately before READY: never reset an
+    // already AVAILABLE driver's idle position, and fail fast for BUSY/SUSPENDED fixtures.
+    const beforeReady = await axios.get(`${API_URL}/api/drivers/me`, driverAuth);
+    if (beforeReady.data.status === 'OFFLINE') {
+      await axios.post(`${API_URL}/api/drivers/me/online`, {}, driverAuth);
+    }
+    const readyDriver = await axios.get(`${API_URL}/api/drivers/me`, driverAuth);
+    if (readyDriver.data.status !== 'AVAILABLE') {
+      throw new Error(`Fixture driver must be AVAILABLE before READY_FOR_PICKUP (got ${readyDriver.data.status}); use an isolated seed stack.`);
+    }
     await axios.patch(`${API_URL}/api/orders/${order.id}/status`, { status: 'READY_FOR_PICKUP' }, ownerAuth);
 
     console.log('Waiting for auto-dispatch to assign the driver...');

@@ -57,7 +57,7 @@ The workspace root defines commands, but actual validation is still service-spec
 - The payment service contains a manual SQL idempotency upgrade outside the normal TypeORM migration runner.
 - Health routes (gateway included) are liveness checks; they do not verify Kafka, Redis, or downstream services.
 - No CI workflow collects coverage.
-- Automatic dispatch depends on `order.ready_for_pickup` being published; the outbox guarantees that once the order change committed (verified with Kafka down and order-service killed before publishing). Driver choice is "most recently updated AVAILABLE driver": no location, distance or fairness. The waiting-delivery sweep runs in every delivery-service replica (safe, because claims and transitions are compare-and-set, but redundant).
+- Automatic dispatch depends on `order.ready_for_pickup` being published; the outbox guarantees that once the order change committed (verified with Kafka down and order-service killed before publishing). Driver choice is longest-idle AVAILABLE and VERIFIED first (`availableSince ASC`, then id, #210); location and distance are not used. The waiting-delivery sweep runs in every delivery-service replica (safe, because claims and transitions are compare-and-set, but redundant).
 - A driver left BUSY by a crash **between claim and assignment** (no delivery ever recorded the driver) is still not reconciled: the reconciliation sweep only looks at drivers of finished deliveries.
 - Self-registered `DRIVER` and `RESTAURANT_OWNER` accounts need no approval.
 

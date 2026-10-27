@@ -26,6 +26,10 @@ export class Driver {
   @Column({ type: 'enum', enum: DriverStatus, default: DriverStatus.OFFLINE })
   status!: DriverStatus;
 
+  /** Start of the current idle period; null when not AVAILABLE (#210). */
+  @Column({ type: 'timestamptz', nullable: true })
+  availableSince!: Date | null;
+
   /** Admin review of the driver (#147). No identity documents are stored. */
   @Column({ type: 'varchar', length: 20, default: 'PENDING' })
   verificationStatus!: 'PENDING' | 'VERIFIED' | 'REJECTED';

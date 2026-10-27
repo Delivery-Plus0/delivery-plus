@@ -3738,7 +3738,7 @@
     },
     "/api/drivers/available": {
       "get": {
-        "summary": "List the drivers dispatch may claim: available and verified (services only, SYSTEM token; not callable through the gateway)",
+        "summary": "List available, verified drivers longest-idle first (availableSince ASC, id ASC; services only, SYSTEM token; not callable through the gateway)",
         "tags": [
           "drivers"
         ],

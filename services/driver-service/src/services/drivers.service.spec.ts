@@ -19,6 +19,7 @@ describe('DriversService', () => {
     status: DriverStatus.OFFLINE,
     // Verified, so the status tests below are about status rules; the #206 gate has its own tests.
     verificationStatus: 'VERIFIED' as 'PENDING' | 'VERIFIED' | 'REJECTED',
+    availableSince: null as Date | null,
     verificationNote: null,
     verifiedAt: new Date('2026-10-01T00:00:00Z') as Date | null,
     createdAt: new Date(),

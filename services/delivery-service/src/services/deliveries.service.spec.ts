@@ -197,6 +197,53 @@ describe('DeliveriesService', () => {
       expect(result.status).toBe(DeliveryStatus.DRIVER_ASSIGNED);
     });
 
+    it('assigns the first (longest-idle) driver returned by the queue without selecting a newer one', async () => {
+      deliveries.findById.mockResolvedValue(baseDelivery);
+      driverClient.findAvailableDriver.mockResolvedValue({ id: 'oldest-driver', userId: 'oldest-user', status: DriverStatus.AVAILABLE });
+      deliveries.transition.mockImplementation(async (_id, _from, data) => ({ ...baseDelivery, ...data }) as Delivery);
+
+      const assigned = await service.assignDriver('delivery-1', actor(UserRole.ADMIN));
+
+      expect(assigned.driverId).toBe('oldest-driver');
+      expect(driverClient.findAvailableDriver).toHaveBeenCalledTimes(1);
+      expect(driverClient.updateDriverStatus).toHaveBeenCalledTimes(1);
+      expect(driverClient.updateDriverStatus).toHaveBeenCalledWith('oldest-driver', DriverStatus.BUSY);
+    });
+
+    it('concurrent dispatches retry a lost claim and assign different drivers', async () => {
+      const queue = [
+        { id: 'driver-a', userId: 'user-a', status: DriverStatus.AVAILABLE },
+        { id: 'driver-b', userId: 'user-b', status: DriverStatus.AVAILABLE },
+      ];
+      const claimed = new Set<string>();
+      let reads = 0;
+      let release!: () => void;
+      const bothRead = new Promise<void>(resolve => { release = resolve; });
+      driverClient.findAvailableDriver.mockImplementation(async () => {
+        const first = queue.find(driver => !claimed.has(driver.id)) ?? null;
+        if (++reads <= 2) {
+          if (reads === 2) release();
+          await bothRead;
+        }
+        return first;
+      });
+      driverClient.updateDriverStatus.mockImplementation(async id => {
+        if (claimed.has(id)) throw new DriverStatusRejectedError(id, DriverStatus.BUSY);
+        claimed.add(id);
+      });
+      deliveries.findById.mockImplementation(async id => ({ ...baseDelivery, id }));
+      deliveries.transition.mockImplementation(async (id, _from, data) => ({ ...baseDelivery, id, ...data }) as Delivery);
+
+      const assigned = await Promise.all([
+        service.assignDriver('delivery-a', actor(UserRole.ADMIN)),
+        service.assignDriver('delivery-b', actor(UserRole.ADMIN)),
+      ]);
+
+      expect(assigned.map(delivery => delivery.driverId).sort()).toEqual(['driver-a', 'driver-b']);
+      expect(driverClient.findAvailableDriver).toHaveBeenCalledTimes(3);
+      expect(driverClient.releaseDriver).not.toHaveBeenCalled();
+    });
+
     describe('when another assignment claims the same driver first', () => {
       const driverA = { id: 'driver-a', userId: 'user-a', status: DriverStatus.AVAILABLE };
       const driverB = { id: 'driver-b', userId: 'user-b', status: DriverStatus.AVAILABLE };

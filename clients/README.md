@@ -1,6 +1,6 @@
 # Client apps
 
-The three client apps live in their own (private) repositories:
+The three client apps live in their own public repositories:
 
 | App | Repository |
 | --- | --- |

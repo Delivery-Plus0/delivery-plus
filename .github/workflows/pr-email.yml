@@ -1,0 +1,101 @@
+name: Pull request email
+
+# Emails the Delivery Plus team when a pull request is opened (or reopened, or marked ready for review)
+# and when one is merged, in any Delivery Plus repository. The app repositories call this workflow
+# (see docs/runbooks/pr-email-notifications.md), so every email has the same branded template.
+#
+# Security: it runs on pull_request_target so that pull requests from forks can be announced too, which
+# means it runs with this repository's secrets. It therefore never checks out or runs the pull
+# request's code: it only reads the event payload, renders it with the template from `dev` (which
+# escapes every field a contributor controls), and sends it. Permissions are read-only.
+#
+# Mail settings come from secrets (organisation-level, so all repositories share them). Without them
+# the email is rendered and the job ends with a notice instead of failing.
+
+on:
+  pull_request_target:
+    types: [opened, reopened, ready_for_review, closed]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: 'Pull request number to (re)send the email for'
+        required: true
+  workflow_call:
+    inputs:
+      pr:
+        description: 'Pull request number, for a manual resend; empty for the triggering event'
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: pr-email-${{ github.repository }}-${{ github.event.pull_request.number || inputs.pr }}-${{ github.event.action || 'dispatch' }}
+  cancel-in-progress: false
+
+jobs:
+  email:
+    name: Email the team
+    # Merged pull requests, and new ones that are ready for review. Never drafts or bot pull requests.
+    if: >-
+      inputs.pr ||
+      (github.event.pull_request.user.type != 'Bot' &&
+       (github.event.action == 'closed' && github.event.pull_request.merged ||
+        github.event.action != 'closed' && !github.event.pull_request.draft))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # The template only, from the backend's dev branch. Never the pull request's head.
+      - name: Check out the email template
+        uses: actions/checkout@v4
+        with:
+          repository: Delivery-Plus0/delivery-plus
+          ref: dev
+          path: .pr-email
+          sparse-checkout: .github/scripts/pr-email
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Render the email
+        id: render
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr }}
+        run: node .pr-email/.github/scripts/pr-email/render.mjs --out "$RUNNER_TEMP/pr-email"
+
+      - name: Check the mail settings
+        id: settings
+        if: steps.render.outputs.skip != 'true'
+        env:
+          HOST: ${{ secrets.NOTIFY_SMTP_HOST }}
+          FROM: ${{ secrets.NOTIFY_EMAIL_FROM }}
+          TO: ${{ secrets.NOTIFY_EMAIL_TO }}
+        run: |
+          if [ -n "$HOST" ] && [ -n "$FROM" ] && [ -n "$TO" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice title=Pull request email not sent::Set the NOTIFY_SMTP_* and NOTIFY_EMAIL_* secrets (docs/runbooks/pr-email-notifications.md)."
+          fi
+
+      # Recipients are blind-copied, so nobody's address is shown to the rest of the list.
+      - name: Send
+        if: steps.settings.outputs.ready == 'true'
+        uses: dawidd6/action-send-mail@67ce3558d613188179559c61d3565140cf389968 # v22
+        with:
+          server_address: ${{ secrets.NOTIFY_SMTP_HOST }}
+          server_port: ${{ secrets.NOTIFY_SMTP_PORT || '465' }}
+          username: ${{ secrets.NOTIFY_SMTP_USERNAME }}
+          password: ${{ secrets.NOTIFY_SMTP_PASSWORD }}
+          subject: ${{ steps.render.outputs.subject }}
+          from: ${{ secrets.NOTIFY_EMAIL_FROM }}
+          to: ${{ secrets.NOTIFY_EMAIL_FROM }}
+          bcc: ${{ secrets.NOTIFY_EMAIL_TO }}
+          reply_to: ${{ secrets.NOTIFY_EMAIL_REPLY_TO }}
+          html_body: file://${{ steps.render.outputs.html }}
+          body: file://${{ steps.render.outputs.text }}

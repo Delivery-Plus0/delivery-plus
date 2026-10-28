@@ -15,6 +15,7 @@ Operational notes and incident-response guides live here.
 - [Local stack troubleshooting](./local-stack-troubleshooting.md) - Compose validation, healthcheck limitations, migrations, Kafka, and Redis checks
 - [Create the first super admin](./bootstrap-admin.md) - one-time staff bootstrap per environment (#202)
 - [Verification emails through Amazon SES](./email-ses.md) - domain DKIM/SPF/DMARC, leaving the sandbox, a send-only IAM policy (#203)
+- [Pull request emails](./pr-email-notifications.md) - the branded team email on every opened and merged pull request, in every repository: secrets, adding it to a repo, changing the template
 
 ## Suggested format
 

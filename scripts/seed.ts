@@ -64,12 +64,23 @@ async function seed() {
       restaurant = (
         await axios.post(
           `${API_URL}/api/restaurants`,
-          { name: 'Burger Palace', description: 'Best burgers in town', address: '123 Main St' },
+          {
+            name: 'Burger Palace',
+            description: 'Best burgers in town',
+            address: '123 Main St',
+            latitude: 30.0444,
+            longitude: 31.2357,
+          },
           ownerAuth,
         )
       ).data;
     }
     const restaurantId = restaurant.id;
+    await axios.patch(
+      `${API_URL}/api/restaurants/${restaurantId}`,
+      { latitude: 30.0444, longitude: 31.2357 },
+      ownerAuth,
+    );
 
     if (restaurant.status !== 'OPEN') {
       console.log('Opening restaurant...');

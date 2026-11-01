@@ -24,6 +24,8 @@ import {
   OrderPayload,
   PhoneNotVerifiedError,
   MAX_CART_ITEM_QUANTITY,
+  OutOfDeliveryAreaError,
+  haversineKm,
 } from '@food-delivery/shared';
 import { DeliveryAddress, OrdersRepository } from '../repositories/orders.repository';
 import { OrderPaymentStatus, outcomeFor } from '../common/order-outcome';
@@ -225,6 +227,25 @@ export class OrdersService implements OnModuleInit {
     }
 
     const delivery = await this.resolveDeliveryAddress(checkout, authHeader);
+    if (
+      restaurant.latitude !== null &&
+      restaurant.latitude !== undefined &&
+      restaurant.longitude !== null &&
+      restaurant.longitude !== undefined &&
+      delivery.latitude !== null &&
+      delivery.longitude !== null
+    ) {
+      const distanceKm = haversineKm(
+        restaurant.latitude,
+        restaurant.longitude,
+        delivery.latitude,
+        delivery.longitude,
+      );
+      if (distanceKm > restaurant.deliveryRadiusKm) {
+        throw new OutOfDeliveryAreaError(distanceKm, restaurant.deliveryRadiusKm);
+      }
+    }
+    // Older clients and profile-only addresses have no coordinates; checkout remains compatible until they send them.
     const customerFirstName = await this.customerFirstName(authHeader);
 
     try {

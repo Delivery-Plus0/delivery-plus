@@ -17,6 +17,7 @@ The shared package is structured around common concerns, including:
 - enums and domain state transitions
 - event topic constants
 - reusable errors and utilities
+- `haversineKm` for straight-line distance in kilometers and `OutOfDeliveryAreaError` for checkout-area conflicts
 - logging helpers
 - NestJS wrappers (JWT and role guards, correlation-id middleware, HTTP exception filter: unexpected errors return a generic 500 and are logged in full, #204)
 - `RateLimiterService`: one atomic Lua script per hit (count + window TTL, #204)

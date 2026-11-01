@@ -5,6 +5,11 @@ import { RestaurantStatus } from '@food-delivery/shared';
 import { Restaurant } from '../entities/restaurant.entity';
 import { ListRestaurantsQueryDto } from '../dto/list-restaurants-query.dto';
 
+export interface RestaurantListItem {
+  restaurant: Restaurant;
+  distanceKm?: number;
+}
+
 @Injectable()
 export class RestaurantsRepository {
   constructor(
@@ -20,7 +25,9 @@ export class RestaurantsRepository {
     return this.repo.find({ where: { ownerId }, order: { createdAt: 'DESC' } });
   }
 
-  create(data: Pick<Restaurant, 'ownerId' | 'name' | 'description' | 'address'>): Promise<Restaurant> {
+  create(
+    data: Pick<Restaurant, 'ownerId' | 'name' | 'description' | 'address' | 'latitude' | 'longitude'>,
+  ): Promise<Restaurant> {
     return this.repo.save(this.repo.create(data));
   }
 
@@ -39,7 +46,7 @@ export class RestaurantsRepository {
     return result.affected ? this.findById(id) : null;
   }
 
-  async list(query: ListRestaurantsQueryDto): Promise<[Restaurant[], number]> {
+  async list(query: ListRestaurantsQueryDto, defaultRadiusKm: number): Promise<[RestaurantListItem[], number]> {
     const qb = this.repo.createQueryBuilder('r');
 
     if (query.status) {
@@ -49,11 +56,46 @@ export class RestaurantsRepository {
       qb.andWhere('r.name ILIKE :search', { search: `%${query.search}%` });
     }
 
+    if (query.lat !== undefined && query.lng !== undefined) {
+      const distanceExpression = `
+        6371 * 2 * ASIN(SQRT(LEAST(1,
+          POWER(SIN(RADIANS(r.latitude - :lat) / 2), 2)
+          + COS(RADIANS(:lat)) * COS(RADIANS(r.latitude))
+          * POWER(SIN(RADIANS(r.longitude - :lng) / 2), 2)
+        )))
+      `;
+      const params = { lat: query.lat, lng: query.lng, defaultRadiusKm };
+
+      qb.andWhere('r.latitude IS NOT NULL AND r.longitude IS NOT NULL')
+        .addSelect(distanceExpression, 'distanceKm')
+        .andWhere(
+          `${distanceExpression} <= COALESCE(r.deliveryRadiusKm::double precision, :defaultRadiusKm)`,
+          params,
+        );
+
+      const total = await qb.clone().getCount();
+      const { entities, raw } = await qb
+        .orderBy('"distanceKm"', 'ASC')
+        .addOrderBy('r.id', 'ASC')
+        .skip((query.page - 1) * query.limit)
+        .take(query.limit)
+        .getRawAndEntities();
+
+      return [
+        entities.map((restaurant, index) => ({
+          restaurant,
+          distanceKm: Number(raw[index].distanceKm),
+        })),
+        total,
+      ];
+    }
+
     qb.orderBy(`r.${query.sortBy}`, query.sortOrder)
       .skip((query.page - 1) * query.limit)
       .take(query.limit);
 
-    return qb.getManyAndCount();
+    const [restaurants, total] = await qb.getManyAndCount();
+    return [restaurants.map((restaurant) => ({ restaurant })), total];
   }
 
   findOpenById(id: string): Promise<Restaurant | null> {

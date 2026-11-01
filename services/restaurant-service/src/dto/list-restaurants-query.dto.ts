@@ -1,7 +1,7 @@
 import { RestaurantStatus } from '@food-delivery/shared';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsEnum, IsIn, IsOptional, IsPositive, IsString } from 'class-validator';
+import { IsEnum, IsIn, IsLatitude, IsLongitude, IsOptional, IsPositive, IsString, ValidateIf } from 'class-validator';
 
 export class ListRestaurantsQueryDto {
   @ApiPropertyOptional({
@@ -42,6 +42,18 @@ export class ListRestaurantsQueryDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  @ApiPropertyOptional({ description: 'Latitude of the delivery point; requires lng.', example: 30.0444 })
+  @Type(() => Number)
+  @ValidateIf((query: ListRestaurantsQueryDto) => query.lat !== undefined || query.lng !== undefined)
+  @IsLatitude({ message: 'lat must be a latitude and is required together with lng' })
+  lat?: number;
+
+  @ApiPropertyOptional({ description: 'Longitude of the delivery point; requires lat.', example: 31.2357 })
+  @Type(() => Number)
+  @ValidateIf((query: ListRestaurantsQueryDto) => query.lat !== undefined || query.lng !== undefined)
+  @IsLongitude({ message: 'lng must be a longitude and is required together with lat' })
+  lng?: number;
 
   @ApiPropertyOptional({
     description: 'Field to sort by.',

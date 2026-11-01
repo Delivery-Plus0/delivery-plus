@@ -21,6 +21,8 @@ export type RestaurantSeed = {
   description: string;
   address: string;
   status: RestaurantStatus;
+  latitude?: number;
+  longitude?: number;
   /** File name under scripts/seed-assets. */
   coverImage?: string;
   categories: { name: string; items: MenuItemSeed[] }[];
@@ -172,10 +174,22 @@ export async function seedRestaurant(
   if (!restaurant) {
     restaurant = await post<Restaurant>(
       '/api/restaurants',
-      { name: seed.name, description: seed.description, address: seed.address },
+      {
+        name: seed.name,
+        description: seed.description,
+        address: seed.address,
+        ...(seed.latitude === undefined ? {} : { latitude: seed.latitude }),
+        ...(seed.longitude === undefined ? {} : { longitude: seed.longitude }),
+      },
       owner,
     );
     log('  created');
+  } else if (seed.latitude !== undefined && seed.longitude !== undefined) {
+    await patch(
+      `/api/restaurants/${restaurant.id}`,
+      { latitude: seed.latitude, longitude: seed.longitude },
+      owner,
+    );
   }
 
   if (seed.coverImage && !restaurant.coverImageUrl) {

@@ -48,6 +48,8 @@ const RESTAURANTS: RestaurantSeed[] = [
     name: 'Burger Palace',
     description: 'Best burgers in town — smashed to order.',
     address: '123 Main St',
+    latitude: 30.0444,
+    longitude: 31.2357,
     status: 'OPEN',
     categories: [
       {
@@ -104,6 +106,8 @@ const RESTAURANTS: RestaurantSeed[] = [
     name: 'Pizza Napoli',
     description: 'Wood-fired Neapolitan pizza and fresh pasta.',
     address: '48 Via Roma Ave',
+    latitude: 30.0626,
+    longitude: 31.2197,
     status: 'OPEN',
     coverImage: 'restaurant-cover.jpg',
     categories: [
@@ -150,6 +154,8 @@ const RESTAURANTS: RestaurantSeed[] = [
     name: 'Cairo Kitchen',
     description: 'Home-style Egyptian classics.',
     address: '9 Nile Corniche',
+    latitude: 29.9792,
+    longitude: 31.1342,
     status: 'OPEN',
     categories: [
       {
@@ -189,6 +195,8 @@ const RESTAURANTS: RestaurantSeed[] = [
     name: 'Taco Fiesta',
     description: 'Street tacos, burritos, and fresh salsas.',
     address: '77 Sunset Blvd',
+    latitude: 30.0131,
+    longitude: 31.2089,
     status: 'OPEN',
     categories: [
       {
@@ -226,6 +234,8 @@ const RESTAURANTS: RestaurantSeed[] = [
     name: 'Sakura Sushi',
     description: 'Nigiri, rolls, and ramen. Busy at peak hours.',
     address: '5 Cherry Blossom Lane',
+    latitude: 30.05,
+    longitude: 31.233,
     status: 'BUSY',
     categories: [
       {
@@ -247,6 +257,8 @@ const RESTAURANTS: RestaurantSeed[] = [
     name: 'Green Bowl',
     description: 'Salads and grain bowls. Currently closed.',
     address: '300 Garden St',
+    latitude: 29.995,
+    longitude: 31.161,
     status: 'CLOSED',
     categories: [
       {

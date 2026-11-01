@@ -8,6 +8,7 @@ import {
   ForbiddenError,
   NotFoundError,
 } from '@food-delivery/shared';
+import { AppConfig } from '../config/app-config';
 
 describe('RestaurantsService', () => {
   let service: RestaurantsService;
@@ -21,6 +22,9 @@ describe('RestaurantsService', () => {
     name: 'Pizza Place',
     description: undefined,
     address: '123 Main St',
+    latitude: null,
+    longitude: null,
+    deliveryRadiusKm: null,
     status: RestaurantStatus.CLOSED,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -44,7 +48,7 @@ describe('RestaurantsService', () => {
     } as unknown as jest.Mocked<S3StorageService>;
     cache = { getOrSet: jest.fn((_key, callback) => callback()), del: jest.fn() };
 
-    service = new RestaurantsService(repo, cache as any, storage);
+    service = new RestaurantsService(repo, cache as any, storage, { defaultDeliveryRadiusKm: 5 } as AppConfig);
   });
 
   it('getById throws NotFoundError when missing', async () => {
@@ -60,6 +64,34 @@ describe('RestaurantsService', () => {
     expect(result).toMatchObject({ id: 'r1', name: 'Pizza Place', address: '123 Main St' });
     expect(result).not.toHaveProperty('ownerId');
     expect(result).not.toHaveProperty('createdAt');
+    expect(result).toMatchObject({
+      latitude: null,
+      longitude: null,
+      deliveryRadiusKm: 5,
+    });
+  });
+
+  it('creates a restaurant with both supplied coordinates', async () => {
+    repo.create.mockResolvedValue({
+      ...baseRestaurant,
+      latitude: 30.0444,
+      longitude: 31.2357,
+    });
+
+    await service.create('owner-1', {
+      name: 'Cairo Kitchen',
+      address: '9 Nile Corniche',
+      latitude: 30.0444,
+      longitude: 31.2357,
+    });
+
+    expect(repo.create).toHaveBeenCalledWith({
+      ownerId: 'owner-1',
+      name: 'Cairo Kitchen',
+      address: '9 Nile Corniche',
+      latitude: 30.0444,
+      longitude: 31.2357,
+    });
   });
 
   it('update throws ForbiddenError when requester is not the owner', async () => {
@@ -71,10 +103,16 @@ describe('RestaurantsService', () => {
 
   it('update succeeds for the owner', async () => {
     repo.findById.mockResolvedValue(baseRestaurant);
-    repo.update.mockResolvedValue({ ...baseRestaurant, name: 'New Name' });
+    repo.update.mockResolvedValue({ ...baseRestaurant, name: 'New Name', latitude: 30.0444, longitude: 31.2357 });
 
-    const result = await service.update('r1', 'owner-1', { name: 'New Name' });
+    const result = await service.update('r1', 'owner-1', { name: 'New Name', latitude: 30.0444, longitude: 31.2357 });
     expect(result.name).toBe('New Name');
+    expect(repo.update).toHaveBeenCalledWith('r1', {
+      name: 'New Name',
+      latitude: 30.0444,
+      longitude: 31.2357,
+    });
+    expect(cache.del).toHaveBeenCalledWith('restaurant:r1');
   });
 
   it('updateStatus allows the owner to change status (compare-and-set against SUSPENDED)', async () => {
@@ -152,12 +190,43 @@ describe('RestaurantsService', () => {
   });
 
   it('list returns a paginated result', async () => {
-    repo.list.mockResolvedValue([[baseRestaurant], 1]);
+    repo.list.mockResolvedValue([[{ restaurant: baseRestaurant }], 1]);
     const result = await service.list({ page: 1, limit: 20, sortBy: 'createdAt', sortOrder: 'DESC' });
     expect(result.total).toBe(1);
     expect(result.items).toHaveLength(1);
     expect(result.totalPages).toBe(1);
     expect(result.items[0]).not.toHaveProperty('ownerId');
+    expect(result.items[0]).not.toHaveProperty('distanceKm');
+    expect(repo.list).toHaveBeenCalledWith(
+      { page: 1, limit: 20, sortBy: 'createdAt', sortOrder: 'DESC' },
+      5,
+    );
+  });
+
+  it('includes distance only for coordinate-filtered results', async () => {
+    repo.list.mockResolvedValue([[{ restaurant: baseRestaurant, distanceKm: 2.4 }], 1]);
+
+    const result = await service.list({
+      page: 1,
+      limit: 20,
+      sortBy: 'createdAt',
+      sortOrder: 'DESC',
+      lat: 30.0444,
+      lng: 31.2357,
+    });
+
+    expect(result.items[0]).toMatchObject({ distanceKm: 2.4, deliveryRadiusKm: 5 });
+  });
+
+  it('persists an admin radius override and invalidates the restaurant cache', async () => {
+    repo.findById.mockResolvedValue(baseRestaurant);
+    repo.update.mockResolvedValue({ ...baseRestaurant, deliveryRadiusKm: '8.25' });
+
+    const result = await service.setDeliveryRadius('r1', 8.25);
+
+    expect(repo.update).toHaveBeenCalledWith('r1', { deliveryRadiusKm: '8.25' });
+    expect(cache.del).toHaveBeenCalledWith('restaurant:r1');
+    expect(result.deliveryRadiusKm).toBe(8.25);
   });
 
   it('selects owned restaurants using the authenticated owner id', async () => {

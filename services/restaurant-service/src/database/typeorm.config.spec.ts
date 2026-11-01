@@ -3,6 +3,7 @@ import { QueryRunner } from 'typeorm';
 import { Restaurant } from '../entities/restaurant.entity';
 import defaultDataSource from './data-source';
 import { InitialSchema1700000000000 } from './migrations/001-initial-schema';
+import { RestaurantLocationDeliveryRadius1700000000003 } from './migrations/004-restaurant-location-delivery-radius';
 import { buildTypeOrmConfig } from './typeorm.config';
 
 const AppDataSource = defaultDataSource;
@@ -76,5 +77,23 @@ describe('InitialSchema1700000000000', () => {
     expect(query.mock.calls.length).toBeGreaterThan(1);
     expect(query.mock.calls.some(([sql]) => String(sql).includes('CREATE TABLE'))).toBe(true);
     expect(query.mock.calls.some(([sql]) => String(sql).includes('DROP TABLE IF EXISTS'))).toBe(true);
+  });
+});
+
+describe('RestaurantLocationDeliveryRadius1700000000003', () => {
+  it('adds nullable coordinates and radius with database constraints, and drops them on rollback', async () => {
+    const query = jest.fn().mockResolvedValue(undefined);
+    const queryRunner = { query } as unknown as QueryRunner;
+    const migration = new RestaurantLocationDeliveryRadius1700000000003();
+
+    await migration.up(queryRunner);
+    await migration.down(queryRunner);
+
+    expect(migration.name).toBe('RestaurantLocationDeliveryRadius1700000000003');
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(query.mock.calls[0][0]).toContain('"latitude" double precision');
+    expect(query.mock.calls[0][0]).toContain('"deliveryRadiusKm" numeric(5, 2)');
+    expect(query.mock.calls[0][0]).toContain('"CHK_restaurants_coordinates_pair"');
+    expect(query.mock.calls[1][0]).toContain('DROP COLUMN IF EXISTS "deliveryRadiusKm"');
   });
 });

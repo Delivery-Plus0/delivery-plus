@@ -32,6 +32,15 @@ export class Restaurant {
   @Column()
   address!: string;
 
+  @Column({ type: 'double precision', nullable: true })
+  latitude!: number | null;
+
+  @Column({ type: 'double precision', nullable: true })
+  longitude!: number | null;
+
+  @Column({ type: 'numeric', precision: 5, scale: 2, nullable: true })
+  deliveryRadiusKm!: string | null;
+
   @Column({ type: 'enum', enum: RestaurantStatus, default: RestaurantStatus.CLOSED })
   status!: RestaurantStatus;
 

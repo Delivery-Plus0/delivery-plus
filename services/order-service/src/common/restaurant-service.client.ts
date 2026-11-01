@@ -15,6 +15,9 @@ export interface RestaurantDto {
   id: string;
   name: string;
   status: RestaurantStatus;
+  latitude: number | null;
+  longitude: number | null;
+  deliveryRadiusKm: number;
 }
 
 @Injectable()

@@ -110,11 +110,42 @@ describe('gateway internal route exposure', () => {
     expect(document.paths['/api/restaurants/{id}/ownership/{userId}']).toBeUndefined();
   });
 
+  it('documents restaurant location filtering, admin radius updates, and out-of-area checkout errors', () => {
+    const document = generatePublicOpenApiDocument();
+
+    expect(document.paths['/api/restaurants'].get.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'lat', in: 'query' }),
+        expect.objectContaining({ name: 'lng', in: 'query' }),
+      ]),
+    );
+    expect(document.paths['/api/restaurants/{id}/delivery-radius'].patch.security).toEqual([
+      { bearerAuth: [] },
+    ]);
+    expect(document.paths['/api/restaurants/{id}/delivery-radius'].patch.requestBody.content[
+      'application/json'
+    ].schema.$ref).toBe('#/components/schemas/UpdateDeliveryRadiusRequest');
+    expect(
+      document.paths['/api/orders'].post.responses['409'].content['application/json'].schema.oneOf,
+    ).toEqual(
+      expect.arrayContaining([
+        { $ref: '#/components/schemas/CartChangedError' },
+        { $ref: '#/components/schemas/OutOfDeliveryAreaError' },
+      ]),
+    );
+  });
+
   it('rewrites public auth routes to the downstream service route', () => {
     expect(rewriteProxyPath('/api/auth', '/register')).toBe('/auth/register');
     expect(rewriteProxyPath('/api/auth', '/login')).toBe('/auth/login');
     expect(rewriteProxyPath('/api/auth', '/verify-email')).toBe('/auth/verify-email');
     expect(rewriteProxyPath('/api/auth', '/me')).toBe('/auth/me');
+  });
+
+  it('preserves restaurant list query parameters while restoring the downstream route prefix', () => {
+    expect(rewriteProxyPath('/api/restaurants', '/?lat=30.0444&lng=31.2357')).toBe(
+      '/restaurants/?lat=30.0444&lng=31.2357',
+    );
   });
 
   it('rewrites user routes without double-prefixing', () => {

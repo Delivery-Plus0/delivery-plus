@@ -210,6 +210,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:-local-development-only}
       INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:-local-internal-auth-development-only}
       INTERNAL_AUTH_ALLOWED_SERVICES: ${INTERNAL_AUTH_ALLOWED_SERVICES:-menu-service,order-service}
+      DEFAULT_DELIVERY_RADIUS_KM: ${DEFAULT_DELIVERY_RADIUS_KM:-5}
       AWS_REGION: ${AWS_REGION:-us-east-1}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-minioadmin}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-minioadmin}

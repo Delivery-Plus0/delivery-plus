@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, MinLength } from 'class-validator';
+import { IsLatitude, IsLongitude, IsOptional, IsString, MinLength, ValidateIf } from 'class-validator';
 
 export class CreateRestaurantDto {
   @ApiProperty({
@@ -25,4 +25,20 @@ export class CreateRestaurantDto {
   })
   @IsString()
   address!: string;
+
+  @ApiPropertyOptional({
+    description: 'Restaurant latitude. Requires longitude.',
+    example: 30.0444,
+  })
+  @ValidateIf((dto: CreateRestaurantDto) => dto.latitude !== undefined || dto.longitude !== undefined)
+  @IsLatitude({ message: 'latitude must be a latitude and is required together with longitude' })
+  latitude?: number;
+
+  @ApiPropertyOptional({
+    description: 'Restaurant longitude. Requires latitude.',
+    example: 31.2357,
+  })
+  @ValidateIf((dto: CreateRestaurantDto) => dto.latitude !== undefined || dto.longitude !== undefined)
+  @IsLongitude({ message: 'longitude must be a longitude and is required together with latitude' })
+  longitude?: number;
 }

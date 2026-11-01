@@ -208,6 +208,9 @@ describe('OrdersService', () => {
         id: 'rest-1',
         name: 'X',
         status: RestaurantStatus.CLOSED,
+        latitude: null,
+        longitude: null,
+        deliveryRadiusKm: 5,
       });
 
       await expect(service.createFromCart('customer-1', 'Bearer x')).rejects.toThrow(BadRequestError);
@@ -224,6 +227,9 @@ describe('OrdersService', () => {
         id: 'rest-1',
         name: 'X',
         status: RestaurantStatus.OPEN,
+        latitude: null,
+        longitude: null,
+        deliveryRadiusKm: 5,
       });
       orders.create.mockResolvedValue(baseOrder);
 
@@ -231,6 +237,95 @@ describe('OrdersService', () => {
 
       expect(result.id).toBe('order-1');
       expect(cartClient.clearCart).toHaveBeenCalledWith('Bearer x');
+    });
+
+    it('accepts a drop-off 1 km inside the restaurant delivery radius', async () => {
+      cartClient.getCart.mockResolvedValue({
+        userId: 'c1',
+        restaurantId: 'rest-1',
+        items: [{ menuItemId: 'i1', name: 'Burger', price: 9.99, quantity: 1 }],
+        total: 9.99,
+      });
+      restaurantClient.getRestaurant.mockResolvedValue({
+        id: 'rest-1',
+        name: 'X',
+        status: RestaurantStatus.OPEN,
+        latitude: 30,
+        longitude: 31,
+        deliveryRadiusKm: 5,
+      });
+      orders.create.mockResolvedValue(baseOrder);
+      const insideLatitude = 30 + ((4 / 6371) * 180) / Math.PI;
+
+      await service.createFromCart('customer-1', 'test-auth', undefined, {
+        deliveryAddress: '4 km away',
+        deliveryLatitude: insideLatitude,
+        deliveryLongitude: 31,
+      });
+
+      expect(orders.create).toHaveBeenCalled();
+      expect(cartClient.clearCart).toHaveBeenCalledWith('test-auth');
+    });
+
+    it('rejects a drop-off 1 km outside the radius without creating an order or clearing the cart', async () => {
+      cartClient.getCart.mockResolvedValue({
+        userId: 'c1',
+        restaurantId: 'rest-1',
+        items: [{ menuItemId: 'i1', name: 'Burger', price: 9.99, quantity: 1 }],
+        total: 9.99,
+      });
+      restaurantClient.getRestaurant.mockResolvedValue({
+        id: 'rest-1',
+        name: 'X',
+        status: RestaurantStatus.OPEN,
+        latitude: 30,
+        longitude: 31,
+        deliveryRadiusKm: 5,
+      });
+      const outsideLatitude = 30 + ((6 / 6371) * 180) / Math.PI;
+
+      await expect(
+        service.createFromCart('customer-1', 'test-auth', undefined, {
+          deliveryAddress: '6 km away',
+          deliveryLatitude: outsideLatitude,
+          deliveryLongitude: 31,
+        }),
+      ).rejects.toMatchObject({
+        statusCode: 409,
+        error: 'OutOfDeliveryArea',
+        details: { distanceKm: 6, maxRadiusKm: 5 },
+      });
+
+      expect(orders.create).not.toHaveBeenCalled();
+      expect(cartClient.clearCart).not.toHaveBeenCalled();
+      expect(outbox.kick).not.toHaveBeenCalled();
+      expect(await staged()).toHaveLength(0);
+    });
+
+    it.each([
+      ['restaurant coordinates', null, { deliveryAddress: '1 St', deliveryLatitude: 30.1, deliveryLongitude: 31.1 }],
+      ['drop-off coordinates', 30, { deliveryAddress: '1 St' }],
+    ])('skips the radius check when %s are absent', async (_missing, restaurantLatitude, checkout) => {
+      cartClient.getCart.mockResolvedValue({
+        userId: 'c1',
+        restaurantId: 'rest-1',
+        items: [{ menuItemId: 'i1', name: 'Burger', price: 9.99, quantity: 1 }],
+        total: 9.99,
+      });
+      restaurantClient.getRestaurant.mockResolvedValue({
+        id: 'rest-1',
+        name: 'X',
+        status: RestaurantStatus.OPEN,
+        latitude: restaurantLatitude,
+        longitude: restaurantLatitude === null ? null : 31,
+        deliveryRadiusKm: 5,
+      } as any);
+      orders.create.mockResolvedValue(baseOrder);
+
+      await service.createFromCart('customer-1', 'test-auth', undefined, checkout as any);
+
+      expect(orders.create).toHaveBeenCalled();
+      expect(cartClient.clearCart).toHaveBeenCalledWith('test-auth');
     });
 
     it('returns the original order when the same idempotency key is retried', async () => {
@@ -256,6 +351,9 @@ describe('OrdersService', () => {
         id: 'rest-1',
         name: 'X',
         status: RestaurantStatus.OPEN,
+        latitude: null,
+        longitude: null,
+        deliveryRadiusKm: 5,
       });
       orders.create.mockRejectedValueOnce(new Error('duplicate key'));
       orders.findByCustomerAndIdempotencyKey.mockResolvedValue(existing);
@@ -274,7 +372,14 @@ describe('OrdersService', () => {
           items: [{ menuItemId: 'i1', name: 'Burger', price: 9.99, quantity: 1 }],
           total: 9.99,
         });
-        restaurantClient.getRestaurant.mockResolvedValue({ id: 'rest-1', name: 'X', status: RestaurantStatus.OPEN });
+        restaurantClient.getRestaurant.mockResolvedValue({
+          id: 'rest-1',
+          name: 'X',
+          status: RestaurantStatus.OPEN,
+          latitude: null,
+          longitude: null,
+          deliveryRadiusKm: 5,
+        });
         orders.create.mockResolvedValue(baseOrder);
       });
 

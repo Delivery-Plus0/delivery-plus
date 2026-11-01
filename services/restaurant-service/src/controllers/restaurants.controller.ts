@@ -18,6 +18,7 @@ import { UpdateRestaurantStatusDto } from '../dto/update-restaurant-status.dto';
 import { ListRestaurantsQueryDto } from '../dto/list-restaurants-query.dto';
 import { CreateRestaurantImageUploadUrlDto } from '../dto/create-restaurant-image-upload-url.dto';
 import { ConfirmRestaurantImageUploadDto } from '../dto/confirm-restaurant-image-upload.dto';
+import { UpdateDeliveryRadiusDto } from '../dto/update-delivery-radius.dto';
 import { PublicRestaurantDto, PublicRestaurantListResponseDto } from '../dto/public-restaurant.dto';
 
 @ApiTags('restaurants')
@@ -82,6 +83,16 @@ export class RestaurantsController {
     @Body() dto: UpdateRestaurantStatusDto,
   ) {
     return this.restaurantsService.updateStatus(id, user.sub, user.role, dto);
+  }
+
+  @Patch(':id/delivery-radius')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Set a restaurant delivery radius (admin only)' })
+  @ApiOkResponse({ type: PublicRestaurantDto })
+  setDeliveryRadius(@Param('id') id: string, @Body() dto: UpdateDeliveryRadiusDto) {
+    return this.restaurantsService.setDeliveryRadius(id, dto.deliveryRadiusKm);
   }
 
   @Post(':id/image-upload-url')

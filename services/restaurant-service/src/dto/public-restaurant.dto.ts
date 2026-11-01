@@ -20,6 +20,18 @@ export class PublicRestaurantDto {
   @ApiProperty()
   address!: string;
 
+  @ApiProperty({ type: 'number', nullable: true, example: 30.0444 })
+  latitude!: number | null;
+
+  @ApiProperty({ type: 'number', nullable: true, example: 31.2357 })
+  longitude!: number | null;
+
+  @ApiProperty({ description: 'Effective delivery radius in kilometers.', example: 5 })
+  deliveryRadiusKm!: number;
+
+  @ApiPropertyOptional({ description: 'Distance from the query point, in kilometers.', example: 2.4 })
+  distanceKm?: number;
+
   @ApiProperty({ enum: RestaurantStatus, enumName: 'RestaurantStatus' })
   status!: RestaurantStatus;
 }

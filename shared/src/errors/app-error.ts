@@ -148,6 +148,20 @@ export class DriverNotVerifiedError extends AppError {
   }
 }
 
+export class OutOfDeliveryAreaError extends AppError {
+  constructor(distanceKm: number, maxRadiusKm: number) {
+    super(
+      409,
+      'OutOfDeliveryArea',
+      'The delivery address is outside the restaurant delivery area.',
+      {
+        distanceKm: Math.round(distanceKm * 100) / 100,
+        maxRadiusKm: Math.round(maxRadiusKm * 100) / 100,
+      },
+    );
+  }
+}
+
 /**
  * #153: whether ordering and going online need a verified phone. Off unless PHONE_VERIFICATION_REQUIRED=true;
  * turn it on only together with a real SMS provider, or nobody could verify.

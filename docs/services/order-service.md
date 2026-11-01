@@ -33,6 +33,12 @@ Every new order carries a drop-off address, **copied at checkout and never updat
 - Editing the profile later does not change placed orders. An idempotent retry returns the original order and its original address.
 - Orders created before migration `003-order-delivery-address` have `null` address columns.
 
+## Restaurant delivery area (#209)
+
+At checkout, order-service fetches the restaurant's current public record from restaurant-service. After checking that it is OPEN and resolving the checkout address, it compares the restaurant and drop-off coordinates with the shared haversine distance helper. If both coordinate pairs exist and the distance exceeds the restaurant's effective `deliveryRadiusKm`, checkout returns `409 OutOfDeliveryArea` with `distanceKm` and `maxRadiusKm` rounded to two decimals. The restaurant coordinates are never accepted from the customer as a source of restaurant location.
+
+For compatibility, the check is skipped if either the restaurant or drop-off has no coordinates; this closes when customer-app #54 sends coordinates and restaurant/order flow #208 makes location mandatory at submit. A rejected request creates no order/outbox event and does not clear the cart. Delivery fees remain flat and are not distance-based.
+
 ## Order outcomes and payment status (#143)
 
 Every order that ends unsuccessfully says who ended it and why, recorded **with** the status change (same compare-and-set), never worked out by clients:

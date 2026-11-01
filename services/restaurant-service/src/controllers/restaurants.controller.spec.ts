@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { JwtModule, JwtService } from '@nestjs/jwt';
 import {
@@ -27,10 +27,12 @@ const config = {
 const redis = { set: jest.fn() };
 const restaurantsService = {
   assertOwnership: jest.fn(),
+  create: jest.fn(),
   listMine: jest.fn(),
   list: jest.fn(),
   getById: jest.fn(),
   update: jest.fn(),
+  setDeliveryRadius: jest.fn(),
 };
 const silentLogger = { log: jest.fn() };
 
@@ -56,6 +58,9 @@ describe('RestaurantsController HTTP boundaries', () => {
       logger: false,
       abortOnError: false,
     });
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
+    );
     app.useGlobalFilters(new AllExceptionsFilter(silentLogger as any));
     await app.listen(0, '127.0.0.1');
     baseUrl = await app.getUrl();
@@ -65,6 +70,7 @@ describe('RestaurantsController HTTP boundaries', () => {
   beforeEach(() => {
     redis.set.mockReset().mockResolvedValue('OK');
     restaurantsService.assertOwnership.mockReset().mockResolvedValue(undefined);
+    restaurantsService.create.mockReset().mockResolvedValue({ id: restaurantId });
     restaurantsService.listMine.mockReset().mockResolvedValue([
       { id: restaurantId, name: 'Own Place', address: '1 Main', status: 'OPEN' },
     ]);
@@ -86,6 +92,10 @@ describe('RestaurantsController HTTP boundaries', () => {
         throw new ForbiddenError('You do not own this restaurant');
       }
       return { id: restaurantId, name: 'Updated' };
+    });
+    restaurantsService.setDeliveryRadius.mockReset().mockResolvedValue({
+      id: restaurantId,
+      deliveryRadiusKm: 8,
     });
   });
 
@@ -247,11 +257,22 @@ describe('RestaurantsController HTTP boundaries', () => {
     expect(restaurant).not.toHaveProperty('ownerId');
   });
 
+  it('passes validated coordinates to the public restaurant list', async () => {
+    const response = await fetch(`${baseUrl}/restaurants?lat=30.0444&lng=31.2357`);
+    const partial = await fetch(`${baseUrl}/restaurants?lat=30.0444`);
+
+    expect(response.status).toBe(200);
+    expect(restaurantsService.list).toHaveBeenCalledWith(
+      expect.objectContaining({ lat: 30.0444, lng: 31.2357 }),
+    );
+    expect(partial.status).toBe(400);
+  });
+
   it('rejects owner B updating owner A restaurant', async () => {
     const response = await fetch(`${baseUrl}/restaurants/${restaurantId}`, {
       method: 'PATCH',
       headers: {
-        Authorization: `Bearer ${ownerToken(ownerB, UserRole.RESTAURANT_OWNER)}`,
+        Authorization: 'Bearer ' + ownerToken(ownerB, UserRole.RESTAURANT_OWNER),
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ name: 'Stolen' }),
@@ -259,5 +280,119 @@ describe('RestaurantsController HTTP boundaries', () => {
 
     expect(response.status).toBe(403);
     expect(restaurantsService.update).toHaveBeenCalledWith(restaurantId, ownerB, { name: 'Stolen' });
+  });
+
+  it('creates a restaurant with its coordinate pair', async () => {
+    const response = await fetch(`${baseUrl}/restaurants`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + ownerToken(ownerA, UserRole.RESTAURANT_OWNER),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: 'Cairo Kitchen',
+        address: '9 Nile Corniche',
+        latitude: 30.0444,
+        longitude: 31.2357,
+      }),
+    });
+
+    expect(response.status).toBe(201);
+    expect(restaurantsService.create).toHaveBeenCalledWith(ownerA, {
+      name: 'Cairo Kitchen',
+      address: '9 Nile Corniche',
+      latitude: 30.0444,
+      longitude: 31.2357,
+    });
+  });
+
+  it('rejects a partial coordinate pair on create and update', async () => {
+    const headers = {
+      Authorization: 'Bearer ' + ownerToken(ownerA, UserRole.RESTAURANT_OWNER),
+      'Content-Type': 'application/json',
+    };
+    const create = await fetch(`${baseUrl}/restaurants`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        name: 'Cairo Kitchen',
+        address: '9 Nile Corniche',
+        latitude: 30.0444,
+      }),
+    });
+    const update = await fetch(`${baseUrl}/restaurants/${restaurantId}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ latitude: 30.0444 }),
+    });
+
+    expect(create.status).toBe(400);
+    expect(update.status).toBe(400);
+    expect(restaurantsService.create).not.toHaveBeenCalled();
+    expect(restaurantsService.update).not.toHaveBeenCalled();
+  });
+
+  it('does not allow owners to set deliveryRadiusKm during restaurant creation', async () => {
+    const response = await fetch(`${baseUrl}/restaurants`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + ownerToken(ownerA, UserRole.RESTAURANT_OWNER),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: 'Cairo Kitchen',
+        address: '9 Nile Corniche',
+        deliveryRadiusKm: 9,
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(restaurantsService.create).not.toHaveBeenCalled();
+  });
+
+  it('allows only admins to change a restaurant delivery radius', async () => {
+    const owner = await fetch(`${baseUrl}/restaurants/${restaurantId}/delivery-radius`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: 'Bearer ' + ownerToken(ownerA, UserRole.RESTAURANT_OWNER),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ deliveryRadiusKm: 8 }),
+    });
+    const customer = await fetch(`${baseUrl}/restaurants/${restaurantId}/delivery-radius`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: 'Bearer ' + ownerToken(ownerA, UserRole.CUSTOMER),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ deliveryRadiusKm: 8 }),
+    });
+    const admin = await fetch(`${baseUrl}/restaurants/${restaurantId}/delivery-radius`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: 'Bearer ' + ownerToken(ownerA, UserRole.ADMIN),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ deliveryRadiusKm: 8 }),
+    });
+
+    expect(owner.status).toBe(403);
+    expect(customer.status).toBe(403);
+    expect(admin.status).toBe(200);
+    expect(restaurantsService.setDeliveryRadius).toHaveBeenCalledWith(restaurantId, 8);
+  });
+
+  it('validates delivery radius bounds before the admin update', async () => {
+    const response = await fetch(`${baseUrl}/restaurants/${restaurantId}/delivery-radius`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: 'Bearer ' + ownerToken(ownerA, UserRole.ADMIN),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ deliveryRadiusKm: 0 }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(restaurantsService.setDeliveryRadius).not.toHaveBeenCalled();
   });
 });

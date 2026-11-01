@@ -12,6 +12,7 @@ From `services/restaurant-service/src/controllers/restaurants.controller.ts`:
 - `GET /restaurants/:id` – fetch a restaurant by ID
 - `PATCH /restaurants/:id` – update restaurant details (owner only)
 - `PATCH /restaurants/:id/status` – update status (owner or admin)
+- `PATCH /restaurants/:id/delivery-radius` – set the delivery radius in kilometers (admin only; staff permission support arrives with #212)
 - `GET /restaurants/:id/ownership/:userId` – internal ownership verification used by menu-service and order-service; requires the shared HMAC internal-auth guard and Redis nonce replay protection
 - `POST /restaurants/:id/image-upload-url` – create a presigned cover/logo POST policy (owner only)
 - `POST /restaurants/:id/image-confirm` – verify the uploaded cover/logo and save its public URL (owner only)
@@ -34,6 +35,7 @@ From `services/restaurant-service/src/config/app-config.ts`:
 - `NODE_ENV` (default: `development`)
 - `INTERNAL_AUTH_SECRET` (required in production; local Compose provides a default)
 - `INTERNAL_AUTH_ALLOWED_SERVICES` or legacy `INTERNAL_AUTH_ALLOWED_SERVICE` (comma-delimited trusted internal callers; default: `menu-service,order-service`)
+- `DEFAULT_DELIVERY_RADIUS_KM` (default: `5`; must be greater than 0 and no more than 50)
 - `AWS_REGION`, `AWS_S3_BUCKET`, and `AWS_PUBLIC_BASE_URL`; S3 endpoint and credentials are configurable for the local media-storage service (SeaweedFS's S3 gateway) or a cloud provider
 
 ## Notes
@@ -42,3 +44,7 @@ The service enforces restaurant ownership rules and is a central dependency for 
 Only the restaurant owner can request or confirm an image upload. The five-minute presigned POST policy enforces a 10 MiB limit and exact content type. Confirmation validates the staging key under `pending/restaurants/{restaurantId}/{cover|logo}/`, checks the image bytes, and copies it to a separate permanent key before persisting `coverImageUrl` or `logoUrl`; both nullable columns are added by a forward TypeORM migration. Staging objects expire after one day.
 
 Public restaurant reads are intentionally DTO-stripped to prevent leaking `ownerId` or other management metadata. `GET /restaurants/me` returns only the currently authenticated owner’s restaurants. The `GET /restaurants/:id/ownership/:userId` route is internal-only: the API Gateway blocks public probes, and restaurant-service still rejects unauthenticated, untrusted, expired, or replayed HMAC-signed requests before asserting ownership.
+
+Restaurants may have a latitude/longitude pair; both values must be supplied together and fall within valid coordinate ranges. Restaurant owners can set or update the pair, but only admins can override `deliveryRadiusKm` (0.01–50 km). A null stored radius uses `DEFAULT_DELIVERY_RADIUS_KM`; public restaurant DTOs expose the effective radius. The database migration keeps existing restaurant coordinates and overrides null.
+
+`GET /restaurants?lat=<latitude>&lng=<longitude>` filters to located restaurants whose configured (or default) radius covers the requested point, orders by straight-line distance and stable restaurant id, and returns `distanceKm` for each result. Without both query parameters, the existing list filters, sort and pagination behavior is unchanged. Delivery fee remains flat; list distance does not price delivery. Optional polygons and city service areas are out of scope.

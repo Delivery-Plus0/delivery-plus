@@ -8,6 +8,7 @@ export interface AppConfig {
   jwtSecret: string;
   internalAuthSecret: string;
   internalAuthAllowedServices: string[];
+  defaultDeliveryRadiusKm: number;
 }
 
 export function loadConfig(): AppConfig {
@@ -27,7 +28,16 @@ export function loadConfig(): AppConfig {
     internalAuthAllowedServices: parseAllowedServices(
       process.env.INTERNAL_AUTH_ALLOWED_SERVICES || process.env.INTERNAL_AUTH_ALLOWED_SERVICE || 'menu-service,order-service',
     ),
+    defaultDeliveryRadiusKm: parseDefaultDeliveryRadius(process.env.DEFAULT_DELIVERY_RADIUS_KM),
   };
+}
+
+function parseDefaultDeliveryRadius(raw: string | undefined): number {
+  const radiusKm = raw === undefined ? 5 : Number(raw);
+  if (!Number.isFinite(radiusKm) || radiusKm < 0.01 || radiusKm > 50) {
+    throw new Error('DEFAULT_DELIVERY_RADIUS_KM must be a number greater than 0 and at most 50');
+  }
+  return radiusKm;
 }
 
 function parseAllowedServices(raw: string): string[] {

@@ -57,6 +57,8 @@ const RESTAURANTS: RestaurantSeed[] = [
     name: 'QA Kitchen',
     description: 'Deterministic restaurant for UI tests',
     address: '100 QA Avenue',
+    latitude: 30.0444,
+    longitude: 31.2357,
     status: 'OPEN',
     categories: [
       {
@@ -80,6 +82,8 @@ const RESTAURANTS: RestaurantSeed[] = [
     name: 'QA Night Cafe',
     description: 'Closed restaurant for filter tests',
     address: '200 QA Avenue',
+    latitude: 29.9792,
+    longitude: 31.1342,
     status: 'CLOSED',
     categories: [
       { name: 'Mains', items: [{ name: 'QA Night Toast', description: 'Always $6.00', price: 6 }] },

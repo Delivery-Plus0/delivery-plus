@@ -56,6 +56,7 @@ export const SERVICE_DEFINITIONS = [
       { method: 'get', path: '/:id', summary: 'Get a restaurant by id', auth: false, statusCode: 200 },
       { method: 'patch', path: '/:id', summary: 'Update restaurant details', auth: true, statusCode: 200 },
       { method: 'patch', path: '/:id/status', summary: 'Update restaurant status', auth: true, statusCode: 200 },
+      { method: 'patch', path: '/:id/delivery-radius', summary: 'Set a restaurant delivery radius (admin only)', auth: true, statusCode: 200 },
       { method: 'post', path: '/:id/image-upload-url', summary: 'Create a presigned restaurant image upload URL', auth: true, statusCode: 201 },
       { method: 'post', path: '/:id/image-confirm', summary: 'Confirm and save a restaurant image', auth: true, statusCode: 201 },
     ],
@@ -255,6 +256,23 @@ const baseSchemas = {
         required: ['verificationStatus'],
         properties: {
           verificationStatus: { type: 'string', enum: ['PENDING', 'REJECTED'] },
+        },
+      },
+    },
+  },
+  OutOfDeliveryAreaError: {
+    type: 'object',
+    required: ['statusCode', 'error', 'message', 'details'],
+    properties: {
+      statusCode: { type: 'integer', example: 409 },
+      error: { type: 'string', example: 'OutOfDeliveryArea' },
+      message: { type: 'string' },
+      details: {
+        type: 'object',
+        required: ['distanceKm', 'maxRadiusKm'],
+        properties: {
+          distanceKm: { type: 'number', description: 'Straight-line distance rounded to two decimals.' },
+          maxRadiusKm: { type: 'number', description: 'Effective restaurant radius rounded to two decimals.' },
         },
       },
     },
@@ -513,6 +531,62 @@ const baseSchemas = {
       contentType: { type: 'string', enum: ['image/jpeg', 'image/png', 'image/webp'] },
     },
   },
+  RestaurantCreateRequest: {
+    type: 'object',
+    required: ['name', 'address'],
+    properties: {
+      name: { type: 'string', minLength: 2 },
+      description: { type: 'string' },
+      address: { type: 'string' },
+      latitude: { type: 'number', minimum: -90, maximum: 90, description: 'Requires longitude.' },
+      longitude: { type: 'number', minimum: -180, maximum: 180, description: 'Requires latitude.' },
+    },
+  },
+  RestaurantUpdateRequest: {
+    type: 'object',
+    properties: {
+      name: { type: 'string' },
+      description: { type: 'string' },
+      address: { type: 'string' },
+      latitude: { type: 'number', minimum: -90, maximum: 90, description: 'Requires longitude.' },
+      longitude: { type: 'number', minimum: -180, maximum: 180, description: 'Requires latitude.' },
+    },
+  },
+  UpdateDeliveryRadiusRequest: {
+    type: 'object',
+    required: ['deliveryRadiusKm'],
+    properties: {
+      deliveryRadiusKm: { type: 'number', exclusiveMinimum: 0, maximum: 50, example: 5 },
+    },
+  },
+  PublicRestaurant: {
+    type: 'object',
+    required: ['id', 'name', 'address', 'latitude', 'longitude', 'deliveryRadiusKm', 'status'],
+    properties: {
+      id: { type: 'string', format: 'uuid' },
+      name: { type: 'string' },
+      description: { type: 'string', nullable: true },
+      coverImageUrl: { type: 'string', nullable: true },
+      logoUrl: { type: 'string', nullable: true },
+      address: { type: 'string' },
+      latitude: { type: 'number', nullable: true },
+      longitude: { type: 'number', nullable: true },
+      deliveryRadiusKm: { type: 'number', description: 'Effective radius, including the configured default.' },
+      distanceKm: { type: 'number', description: 'Present only when lat and lng are supplied to the list endpoint.' },
+      status: { type: 'string', enum: ['OPEN', 'CLOSED', 'BUSY', 'SUSPENDED'] },
+    },
+  },
+  PublicRestaurantList: {
+    type: 'object',
+    required: ['items', 'page', 'limit', 'total', 'totalPages'],
+    properties: {
+      items: { type: 'array', items: { $ref: '#/components/schemas/PublicRestaurant' } },
+      page: { type: 'integer', minimum: 1 },
+      limit: { type: 'integer', minimum: 1 },
+      total: { type: 'integer', minimum: 0 },
+      totalPages: { type: 'integer', minimum: 1 },
+    },
+  },
   ImageConfirmRequest: {
     type: 'object',
     required: ['objectKey'],
@@ -600,6 +674,61 @@ export function generatePublicOpenApiDocument() {
         operation.responses['401'] = { description: 'Missing or invalid JWT' };
       } else {
         operation.security = [];
+      }
+
+      if (service.service === 'restaurants' && route.method === 'get' && route.path === '') {
+        operation.parameters = [
+          ...(operation.parameters ?? []),
+          { name: 'page', in: 'query', required: false, schema: { type: 'integer', minimum: 1, default: 1 } },
+          { name: 'limit', in: 'query', required: false, schema: { type: 'integer', minimum: 1, default: 20 } },
+          { name: 'status', in: 'query', required: false, schema: { type: 'string', enum: ['OPEN', 'CLOSED', 'BUSY', 'SUSPENDED'] } },
+          { name: 'search', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'sortBy', in: 'query', required: false, schema: { type: 'string', enum: ['name', 'createdAt'], default: 'createdAt' } },
+          { name: 'sortOrder', in: 'query', required: false, schema: { type: 'string', enum: ['ASC', 'DESC'], default: 'DESC' } },
+          { name: 'lat', in: 'query', required: false, schema: { type: 'number', minimum: -90, maximum: 90, description: 'Requires lng; filters to restaurants covering this point.' } },
+          { name: 'lng', in: 'query', required: false, schema: { type: 'number', minimum: -180, maximum: 180, description: 'Requires lat; returns distanceKm and sorts by distance.' } },
+        ];
+        operation.responses['200'] = {
+          description: 'Restaurants, optionally filtered by delivery location.',
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/PublicRestaurantList' } } },
+        };
+      }
+
+      if (service.service === 'restaurants' && route.method === 'post' && route.path === '') {
+        operation.requestBody = {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/RestaurantCreateRequest' } } },
+        };
+        operation.responses['201'].content = {
+          'application/json': { schema: { $ref: '#/components/schemas/PublicRestaurant' } },
+        };
+      }
+
+      if (service.service === 'restaurants' && route.method === 'patch' && route.path === '/:id') {
+        operation.requestBody = {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/RestaurantUpdateRequest' } } },
+        };
+        operation.responses['200'].content = {
+          'application/json': { schema: { $ref: '#/components/schemas/PublicRestaurant' } },
+        };
+      }
+
+      if (service.service === 'restaurants' && route.method === 'get' && route.path === '/:id') {
+        operation.responses['200'].content = {
+          'application/json': { schema: { $ref: '#/components/schemas/PublicRestaurant' } },
+        };
+      }
+
+      if (service.service === 'restaurants' && route.method === 'patch' && route.path === '/:id/delivery-radius') {
+        operation.requestBody = {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/UpdateDeliveryRadiusRequest' } } },
+        };
+        operation.responses['200'].content = {
+          'application/json': { schema: { $ref: '#/components/schemas/PublicRestaurant' } },
+        };
+        operation.responses['403'] = { description: 'Admin role required' };
       }
 
       if (route.method === 'post' && route.path.endsWith('/image-upload-url')) {
@@ -757,8 +886,16 @@ export function generatePublicOpenApiDocument() {
       // #42: checkout re-checks the cart; what changed comes back in details.changes.
       if (route.method === 'post' && ((service.service === 'orders' && route.path === '') || (service.service === 'cart' && route.path === '/validate'))) {
         operation.responses['409'] = {
-          description: 'CartChanged: the cart was out of date with the menu and has been updated; review it and try again',
-          content: { 'application/json': { schema: { $ref: '#/components/schemas/CartChangedError' } } },
+          description: service.service === 'orders'
+            ? 'CartChanged: the cart was out of date with the menu; OutOfDeliveryArea: the drop-off exceeds the restaurant radius.'
+            : 'CartChanged: the cart was out of date with the menu and has been updated; review it and try again',
+          content: {
+            'application/json': {
+              schema: service.service === 'orders'
+                ? { oneOf: [{ $ref: '#/components/schemas/CartChangedError' }, { $ref: '#/components/schemas/OutOfDeliveryAreaError' }] }
+                : { $ref: '#/components/schemas/CartChangedError' },
+            },
+          },
         };
       }
 

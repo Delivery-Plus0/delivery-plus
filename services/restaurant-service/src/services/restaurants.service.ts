@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import {
   ForbiddenError,
   NotFoundError,
@@ -8,6 +8,7 @@ import {
   UserRole,
   CacheService,
 } from '@food-delivery/shared';
+import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { RestaurantsRepository } from '../repositories/restaurants.repository';
 import { CreateRestaurantDto } from '../dto/create-restaurant.dto';
 import { UpdateRestaurantDto } from '../dto/update-restaurant.dto';
@@ -24,10 +25,16 @@ export class RestaurantsService {
     private readonly restaurants: RestaurantsRepository,
     private readonly cache: CacheService,
     private readonly storage: S3StorageService,
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
   create(ownerId: string, dto: CreateRestaurantDto): Promise<Restaurant> {
-    return this.restaurants.create({ ownerId, ...dto });
+    return this.restaurants.create({
+      ownerId,
+      ...dto,
+      latitude: dto.latitude ?? null,
+      longitude: dto.longitude ?? null,
+    });
   }
 
   async getById(id: string): Promise<PublicRestaurantDto> {
@@ -51,14 +58,24 @@ export class RestaurantsService {
   }
 
   async list(query: ListRestaurantsQueryDto): Promise<PaginatedResult<PublicRestaurantDto>> {
-    const [items, total] = await this.restaurants.list(query);
+    const [items, total] = await this.restaurants.list(query, this.config.defaultDeliveryRadiusKm);
     return {
-      items: items.map((restaurant) => this.toPublicRestaurant(restaurant)),
+      items: items.map(({ restaurant, distanceKm }) => this.toPublicRestaurant(restaurant, distanceKm)),
       page: query.page,
       limit: query.limit,
       total,
       totalPages: Math.ceil(total / query.limit) || 1,
     };
+  }
+
+  async setDeliveryRadius(id: string, deliveryRadiusKm: number): Promise<PublicRestaurantDto> {
+    await this.getEntityById(id);
+    const updated = await this.restaurants.update(id, { deliveryRadiusKm: String(deliveryRadiusKm) });
+    if (!updated) {
+      throw new NotFoundError(`Restaurant ${id} not found`);
+    }
+    await this.cache.del(`restaurant:${id}`);
+    return this.toPublicRestaurant(updated);
   }
 
   async update(id: string, requesterId: string, dto: UpdateRestaurantDto): Promise<Restaurant> {
@@ -141,7 +158,7 @@ export class RestaurantsService {
     return restaurant;
   }
 
-  private toPublicRestaurant(restaurant: Restaurant): PublicRestaurantDto {
+  private toPublicRestaurant(restaurant: Restaurant, distanceKm?: number): PublicRestaurantDto {
     return {
       id: restaurant.id,
       name: restaurant.name,
@@ -150,6 +167,12 @@ export class RestaurantsService {
       logoUrl: restaurant.logoUrl,
       address: restaurant.address,
       status: restaurant.status,
+      latitude: restaurant.latitude ?? null,
+      longitude: restaurant.longitude ?? null,
+      deliveryRadiusKm: restaurant.deliveryRadiusKm === null || restaurant.deliveryRadiusKm === undefined
+        ? this.config.defaultDeliveryRadiusKm
+        : Number(restaurant.deliveryRadiusKm),
+      ...(distanceKm === undefined ? {} : { distanceKm }),
     };
   }
 }

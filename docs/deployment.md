@@ -18,8 +18,12 @@ npm run seed
 npm run e2e
 
 # start the full stack. It runs with NODE_ENV=production, so it needs its own SYSTEM_JWT_SECRET (#202):
-# at least 32 characters and different from JWT_SECRET.
-SYSTEM_JWT_SECRET=$(openssl rand -hex 32) docker compose up -d --build
+# at least 32 characters and different from JWT_SECRET. driver-service also needs the private documents
+# bucket name and the national ID HMAC key (#207, at least 32 characters, different from the JWT secrets).
+SYSTEM_JWT_SECRET=$(openssl rand -hex 32) \
+DRIVER_DOCUMENTS_BUCKET=delivery-plus-private-local \
+NATIONAL_ID_HMAC_SECRET=$(openssl rand -hex 32) \
+  docker compose up -d --build
 
 # validate the committed development graph in Linux/WSL
 docker compose -f docker-compose.base.yml -f docker-compose.dev.yml config --quiet
@@ -29,13 +33,25 @@ docker compose -f docker-compose.base.yml -f docker-compose.dev.yml ps --all
 ```powershell
 # PowerShell (WSL-hosted validation is also supported)
 $env:SYSTEM_JWT_SECRET = -join ((1..64) | ForEach-Object { '{0:x}' -f (Get-Random -Maximum 16) })
+$env:DRIVER_DOCUMENTS_BUCKET = 'delivery-plus-private-local'
+$env:NATIONAL_ID_HMAC_SECRET = -join ((1..64) | ForEach-Object { '{0:x}' -f (Get-Random -Maximum 16) })
 docker compose config --quiet
 docker compose up -d --build
 ```
 
 The root multi-stage `Dockerfile` accepts `SERVICE_NAME` and builds the shared package followed by the selected service.
 
-For local media uploads, start the dev overlay (`docker compose -f docker-compose.base.yml -f docker-compose.dev.yml up`) so the `media-storage` service (SeaweedFS's S3 gateway) and its bucket initializer are included. The production overlay requires `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_S3_BUCKET`, `AWS_PUBLIC_BASE_URL`, and `CORS_ORIGINS`; use deployment secrets, not committed credentials. Configure the bucket to expire objects with the `pending/` prefix after one day so unconfirmed uploads are cleaned up. `AWS_REGION` defaults to `us-east-1`; endpoint variables are only needed for S3-compatible providers or private/CDN URL layouts.
+For local media uploads, start the dev overlay (`docker compose -f docker-compose.base.yml -f docker-compose.dev.yml up`) so the `media-storage` service (SeaweedFS's S3 gateway) and its bucket initializer are included. The production overlay requires `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_S3_BUCKET`, `AWS_PUBLIC_BASE_URL`, and `CORS_ORIGINS`; use deployment secrets, not committed credentials. Configure the bucket to expire objects with the `pending/` prefix after one day so unconfirmed uploads are cleaned up.
+
+Driver documents (#207) need a **second, private bucket**, named by `DRIVER_DOCUMENTS_BUCKET` (driver-service refuses to start in production without it, and refuses the public media bucket's name). Use separate buckets for staging and production. Set it up with:
+
+- Block Public Access on, and no bucket policy that grants any principal access;
+- default encryption SSE-S3 (S3's default for new buckets);
+- a lifecycle rule expiring objects with the `pending/` prefix after one day (unconfirmed uploads);
+- CORS allowing `POST` from the driver app origins only (the presigned upload goes straight from the app to the bucket);
+- an IAM policy for driver-service allowing `s3:PutObject` and `s3:GetObject` on `pending/drivers/*` and `drivers/*` only. S3 can't scope `PutObject` to one driver, so the presigned POST conditions, which fix the exact key, are the control; `GetObject` can't be limited to presigned URLs either, so the `onboarding.review` permission check before a URL is issued is the control. driver-service needs no `ListBucket`, and `DeleteObject` waits for account deletion (#233) and the retention job.
+
+driver-service also needs `NATIONAL_ID_HMAC_SECRET`: the key of the HMAC that detects one national ID on two accounts. It has no default outside development and test, must be at least 32 characters, and must differ from the JWT secrets. Changing it later makes existing hashes stop matching, so keep it as stable as the database. `AWS_REGION` defaults to `us-east-1`; endpoint variables are only needed for S3-compatible providers or private/CDN URL layouts.
 
 Behind a load balancer or reverse proxy, set `TRUSTED_PROXY_HOPS` on the gateway to the number of proxies in front of it, for example `1` for one load balancer that appends to `X-Forwarded-For` (#251). Left at `0`, every client shares the balancer's address, so the per-client login and registration limits become one limit for everyone. Set too high, a client can choose the address it is counted as. See [services/api-gateway.md](services/api-gateway.md#client-ip-and-rate-limits).
 

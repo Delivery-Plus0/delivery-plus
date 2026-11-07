@@ -15,6 +15,12 @@ export interface AppConfig {
   phoneVerificationRequired: boolean;
   /** #206 test hook: new driver profiles start VERIFIED. Never in production. */
   autoVerifyDrivers: boolean;
+  /** #207: rate limits on document uploads and staff reads. */
+  redisUrl: string;
+  /** #207: the private bucket for driver documents. Never the public media bucket. */
+  documentsBucket: string;
+  /** #207: keys the HMAC that detects a national ID registered twice without storing the number. */
+  nationalIdHmacSecret: string;
 }
 
 export function loadConfig(): AppConfig {
@@ -35,7 +41,58 @@ export function loadConfig(): AppConfig {
     userServiceUrl: process.env.USER_SERVICE_URL || 'http://localhost:3002',
     phoneVerificationRequired: phoneVerificationRequired(),
     ...loadVerificationConfig(nodeEnv),
+    redisUrl: process.env.REDIS_URL || 'redis://localhost:6379',
+    ...loadDocumentConfig(nodeEnv),
   };
+}
+
+/** Local development and the test suites only; a production-like environment must set its own. */
+export const LOCAL_NATIONAL_ID_HMAC_SECRET = 'local-national-id-hmac-development-only';
+export const LOCAL_DOCUMENTS_BUCKET = 'delivery-plus-private';
+const MIN_PRODUCTION_SECRET_LENGTH = 32;
+const BUCKET_NAME = /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/;
+
+/**
+ * #207: driver documents live in their own private bucket, never the public media one, and the service
+ * refuses to start in production without it. The national ID HMAC secret has no default outside
+ * development and test: a guessable key would let anyone with the database test candidate numbers
+ * against the stored hashes.
+ */
+export function loadDocumentConfig(
+  nodeEnv: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Pick<AppConfig, 'documentsBucket' | 'nationalIdHmacSecret'> {
+  const localDefaults = nodeEnv === 'development' || nodeEnv === 'test';
+
+  const bucket = (env.DRIVER_DOCUMENTS_BUCKET ?? '').trim();
+  if (!bucket && nodeEnv === 'production') {
+    throw new Error('Missing required environment variables: DRIVER_DOCUMENTS_BUCKET');
+  }
+  const documentsBucket = bucket || LOCAL_DOCUMENTS_BUCKET;
+  if (!BUCKET_NAME.test(documentsBucket)) {
+    throw new Error('DRIVER_DOCUMENTS_BUCKET is not a valid bucket name');
+  }
+  if (env.AWS_S3_BUCKET && documentsBucket === env.AWS_S3_BUCKET.trim()) {
+    throw new Error('DRIVER_DOCUMENTS_BUCKET must not be the public media bucket (AWS_S3_BUCKET)');
+  }
+
+  const secret = env.NATIONAL_ID_HMAC_SECRET;
+  if (!secret) {
+    if (!localDefaults) throw new Error('Missing required environment variables: NATIONAL_ID_HMAC_SECRET');
+    return { documentsBucket, nationalIdHmacSecret: LOCAL_NATIONAL_ID_HMAC_SECRET };
+  }
+  if (!localDefaults) {
+    if (secret === LOCAL_NATIONAL_ID_HMAC_SECRET) {
+      throw new Error('NATIONAL_ID_HMAC_SECRET is the local development default; set a real secret');
+    }
+    if (secret.length < MIN_PRODUCTION_SECRET_LENGTH) {
+      throw new Error(`NATIONAL_ID_HMAC_SECRET must be at least ${MIN_PRODUCTION_SECRET_LENGTH} characters`);
+    }
+    if (secret === env.JWT_SECRET || secret === env.SYSTEM_JWT_SECRET) {
+      throw new Error('NATIONAL_ID_HMAC_SECRET must differ from the JWT secrets');
+    }
+  }
+  return { documentsBucket, nationalIdHmacSecret: secret };
 }
 
 /**

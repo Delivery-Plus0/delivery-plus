@@ -49,6 +49,18 @@ If the S3 copy to the content-addressed verified key succeeds but the owning ser
 
 The initializer creates the configured bucket, applies a bucket policy granting anonymous `GetObject` on every key except `pending/*`, and applies a lifecycle rule expiring `pending/` objects after one day. `media-storage` data persists in a named volume (`media_storage_data` in dev, `media_storage_test_data` in test). Production Compose intentionally does not start `media-storage`.
 
+## Private driver documents (#207)
+
+Driver identity documents use the same presign-then-confirm flow, through `PrivateDocumentStorage` (`shared/src/storage/private-document-storage.ts`), with these differences from the public media above:
+
+- **A separate private bucket**, `DRIVER_DOCUMENTS_BUCKET`: no bucket policy at all, so nothing is public. driver-service refuses to start in production without it and refuses the public media bucket's name.
+- **Types:** JPEG, PNG and PDF (`detectFileFormat` in `file-signatures.ts` recognises PDFs by their `%PDF-` header and `%%EOF` marker), up to 10 MB.
+- **Keys:** uploads go to `pending/drivers/{driverId}/{type}/{uuid}.{ext}` (the same one-day lifecycle rule on `pending/` cleans up unconfirmed ones), and confirmed documents to `drivers/{driverId}/documents/{type}/{uuid}.{ext}`, keyed by upload id rather than content hash so every version is its own object. Copies carry `Cache-Control: no-store`.
+- **Reads:** never public and never to the driver. Staff with `onboarding.review` get a presigned GET of at most five minutes with `response-cache-control=no-store`; each read is recorded first in `driver_document_access`.
+- Only object keys are stored, and no document URL is ever logged.
+
+The public `S3StorageService` and the private storage share the client setup (`createS3Clients`) and the format detection; the public service still accepts only images.
+
 ## Source of truth
 
 - Shared implementation: [shared/src/storage/s3-storage.service.ts](../shared/src/storage/s3-storage.service.ts)

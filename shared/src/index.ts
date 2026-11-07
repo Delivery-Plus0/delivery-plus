@@ -21,3 +21,6 @@ export * from './kafka/index';
 export * from './outbox/index';
 export * from './redis/index';
 export * from './storage/s3-storage.service';
+export * from './storage/s3-clients';
+export * from './storage/file-signatures';
+export * from './storage/private-document-storage';

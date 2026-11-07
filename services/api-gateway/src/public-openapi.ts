@@ -146,6 +146,13 @@ export const SERVICE_DEFINITIONS = [
       { method: 'post', path: '/me/online', summary: 'Go online (VERIFIED drivers only)', auth: true, statusCode: 201 },
       { method: 'post', path: '/me/offline', summary: 'Go offline', auth: true, statusCode: 201 },
       { method: 'post', path: '/me/status', summary: 'Set driver status explicitly', auth: true, statusCode: 201 },
+      { method: 'get', path: '/me/application', summary: 'Your driver application: status, fields, documents (no URLs) and what is missing', auth: true, statusCode: 200 },
+      { method: 'put', path: '/me/application', summary: 'Save your national ID and licence expiry dates (draft only)', auth: true, statusCode: 200 },
+      { method: 'post', path: '/me/documents/:type/upload-url', summary: 'Get a presigned POST to upload one application document (JPEG, PNG or PDF, up to 10 MB; draft only)', auth: true, statusCode: 201 },
+      { method: 'post', path: '/me/documents/:type/confirm', summary: 'Confirm an uploaded document: it is checked and becomes the current version (draft only)', auth: true, statusCode: 200 },
+      { method: 'post', path: '/me/application/submit', summary: 'Send a complete application for review', auth: true, statusCode: 200 },
+      { method: 'get', path: '/:id/application', summary: "A driver's application (staff with onboarding.review)", auth: true, statusCode: 200 },
+      { method: 'post', path: '/:id/documents/:type/read-url', summary: "A 5-minute URL to view a driver's document (staff with onboarding.review; every read is recorded)", auth: true, statusCode: 200 },
       { method: 'get', path: '/available', summary: 'List available, verified drivers longest-idle first (availableSince ASC, id ASC; services only, SYSTEM token; not callable through the gateway)', auth: true, statusCode: 200 },
       { method: 'get', path: '/:id', summary: 'Get a driver by id (self or admin)', auth: true, statusCode: 200 },
       { method: 'patch', path: '/:id/status', summary: 'Claim or release a driver (services only, SYSTEM token; not callable through the gateway)', auth: true, statusCode: 200 },
@@ -602,6 +609,98 @@ const baseSchemas = {
       objectKey: { type: 'string' },
     },
   },
+  DriverDocumentType: {
+    type: 'string',
+    description: '#207: the documents a driver application needs; all five are required.',
+    enum: ['national-id-front', 'national-id-back', 'driving-licence', 'vehicle-licence', 'selfie'],
+  },
+  SaveDriverApplicationRequest: {
+    type: 'object',
+    required: ['nationalIdNumber', 'drivingLicenceExpiresOn', 'vehicleLicenceExpiresOn'],
+    properties: {
+      nationalIdNumber: {
+        type: 'string',
+        pattern: '^[23]\\d{13}$',
+        writeOnly: true,
+        description: 'The 14-digit Egyptian national ID. Only its last 4 digits and a keyed hash are stored; it is never returned.',
+      },
+      drivingLicenceExpiresOn: { type: 'string', format: 'date', description: 'Cairo date; not in the past, at most 15 years ahead.' },
+      vehicleLicenceExpiresOn: { type: 'string', format: 'date', description: 'Cairo date; not in the past, at most 15 years ahead.' },
+    },
+  },
+  DriverDocumentUploadUrlRequest: {
+    type: 'object',
+    required: ['contentType'],
+    properties: { contentType: { type: 'string', enum: ['image/jpeg', 'image/png', 'application/pdf'] } },
+  },
+  DriverDocumentConfirmRequest: {
+    type: 'object',
+    required: ['objectKey'],
+    properties: { objectKey: { type: 'string', maxLength: 255, description: 'The objectKey the upload URL returned.' } },
+  },
+  DriverApplication: {
+    type: 'object',
+    description: '#207: a driver application. Never contains a document URL or object key.',
+    required: ['driverId', 'status', 'documents', 'missingDocuments', 'canSubmit'],
+    properties: {
+      driverId: { type: 'string', format: 'uuid' },
+      status: {
+        type: 'string',
+        enum: ['DRAFT', 'SUBMITTED', 'VERIFIED', 'REJECTED'],
+        description: 'DRAFT: the driver can edit and submit. SUBMITTED: in the review queue. VERIFIED or REJECTED: decided.',
+      },
+      submittedAt: { type: 'string', format: 'date-time', nullable: true },
+      verificationNote: { type: 'string', nullable: true, description: "The reviewer's note, e.g. why the application was rejected." },
+      nationalIdLast4: { type: 'string', nullable: true, example: '4567' },
+      drivingLicenceExpiresOn: { type: 'string', format: 'date', nullable: true },
+      vehicleLicenceExpiresOn: { type: 'string', format: 'date', nullable: true },
+      documents: {
+        type: 'array',
+        description: 'The current version of each uploaded document.',
+        items: {
+          type: 'object',
+          required: ['type', 'version', 'contentType', 'sizeBytes', 'uploadedAt'],
+          properties: {
+            type: { $ref: '#/components/schemas/DriverDocumentType' },
+            version: { type: 'integer', minimum: 1, maximum: 5 },
+            contentType: { type: 'string', enum: ['image/jpeg', 'image/png', 'application/pdf'] },
+            sizeBytes: { type: 'integer' },
+            uploadedAt: { type: 'string', format: 'date-time' },
+          },
+        },
+      },
+      missingDocuments: { type: 'array', items: { $ref: '#/components/schemas/DriverDocumentType' } },
+      canSubmit: { type: 'boolean' },
+    },
+  },
+  ApplicationIncompleteError: {
+    type: 'object',
+    description: '#207: 422 when submit is called before every field and document is in place.',
+    properties: {
+      statusCode: { type: 'integer', example: 422 },
+      error: { type: 'string', example: 'ApplicationIncomplete' },
+      message: { type: 'string' },
+      details: {
+        type: 'object',
+        properties: {
+          missingFields: { type: 'array', items: { type: 'string', enum: ['nationalIdNumber', 'drivingLicenceExpiresOn', 'vehicleLicenceExpiresOn'] } },
+          missingDocuments: { type: 'array', items: { $ref: '#/components/schemas/DriverDocumentType' } },
+          expiredLicences: { type: 'array', items: { type: 'string', enum: ['drivingLicenceExpiresOn', 'vehicleLicenceExpiresOn'] } },
+        },
+      },
+    },
+  },
+  DriverDocumentReadUrl: {
+    type: 'object',
+    required: ['type', 'version', 'contentType', 'url', 'expiresIn'],
+    properties: {
+      type: { $ref: '#/components/schemas/DriverDocumentType' },
+      version: { type: 'integer' },
+      contentType: { type: 'string', enum: ['image/jpeg', 'image/png', 'application/pdf'] },
+      url: { type: 'string', format: 'uri', description: 'A presigned GET. A bearer credential: never log or store it.' },
+      expiresIn: { type: 'integer', maximum: 300, example: 300 },
+    },
+  },
   PresignedImageUpload: {
     type: 'object',
     required: ['uploadUrl', 'objectKey', 'expiresIn', 'method', 'fields'],
@@ -897,6 +996,74 @@ export function generatePublicOpenApiDocument() {
             },
           },
         };
+      }
+
+      // #207: the driver application.
+      if (service.service === 'drivers' && /\/(application|documents)/.test(route.path)) {
+        const typeParameter = operation.parameters?.find((parameter: { name: string }) => parameter.name === 'type');
+        if (typeParameter) typeParameter.schema = { $ref: '#/components/schemas/DriverDocumentType' };
+        const success = String(route.statusCode || 200);
+        const notEditable = {
+          description: 'ApplicationNotEditable: the application is submitted or decided (details.applicationStatus)',
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } },
+        };
+
+        if (route.path.endsWith('/read-url')) {
+          operation.responses[success] = {
+            description: 'A 5-minute presigned URL (Cache-Control: no-store). The read is recorded first.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/DriverDocumentReadUrl' } } },
+          };
+          operation.responses['403'] = { description: 'Requires an ADMIN token with onboarding.review' };
+          operation.responses['404'] = { description: 'No such driver, or no document of this type' };
+          operation.responses['429'] = { description: 'Too many document reads (60 a minute)' };
+        } else if (route.path.endsWith('/upload-url')) {
+          operation.requestBody = {
+            required: true,
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/DriverDocumentUploadUrlRequest' } } },
+          };
+          operation.responses[success] = {
+            description: 'POST the file with every field to uploadUrl, then confirm objectKey',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/PresignedImageUpload' } } },
+          };
+          operation.responses['409'] = notEditable;
+          operation.responses['429'] = { description: 'Too many upload URLs (20 an hour)' };
+        } else {
+          operation.responses[success] = {
+            description: 'The application',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/DriverApplication' } } },
+          };
+          if (route.path === '/:id/application') {
+            operation.responses['403'] = { description: 'Requires an ADMIN token with onboarding.review' };
+          }
+          if (route.method === 'put') {
+            operation.requestBody = {
+              required: true,
+              content: { 'application/json': { schema: { $ref: '#/components/schemas/SaveDriverApplicationRequest' } } },
+            };
+            operation.responses['409'] = {
+              description: 'NationalIdAlreadyRegistered: the national ID is on another driver account; ApplicationNotEditable: not a draft',
+              content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } },
+            };
+          }
+          if (route.path.endsWith('/confirm')) {
+            operation.requestBody = {
+              required: true,
+              content: { 'application/json': { schema: { $ref: '#/components/schemas/DriverDocumentConfirmRequest' } } },
+            };
+            operation.responses['409'] = {
+              description: 'DocumentVersionLimitReached: 5 uploads of this type already; ApplicationNotEditable: not a draft',
+              content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } },
+            };
+            operation.responses['429'] = { description: 'Too many confirms (30 an hour)' };
+          }
+          if (route.path.endsWith('/submit')) {
+            operation.responses['409'] = notEditable;
+            operation.responses['422'] = {
+              description: 'ApplicationIncomplete: what is missing or expired is in details',
+              content: { 'application/json': { schema: { $ref: '#/components/schemas/ApplicationIncompleteError' } } },
+            };
+          }
+        }
       }
 
       // #206 and #153: going online needs a VERIFIED driver, then a verified phone when that gate is on.

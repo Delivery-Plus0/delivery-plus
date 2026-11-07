@@ -366,6 +366,10 @@ services:
       - SYSTEM_JWT_SECRET=${SYSTEM_JWT_SECRET:?SYSTEM_JWT_SECRET must be set, this stack runs with NODE_ENV=production}
       - USER_SERVICE_URL=http://user-service:3002
       - KAFKA_BROKER=kafka:29092
+      # #207: production mode needs the private documents bucket and the national ID HMAC key.
+      - REDIS_URL=redis://redis:6379
+      - DRIVER_DOCUMENTS_BUCKET=${DRIVER_DOCUMENTS_BUCKET:?DRIVER_DOCUMENTS_BUCKET must be set, this stack runs with NODE_ENV=production}
+      - NATIONAL_ID_HMAC_SECRET=${NATIONAL_ID_HMAC_SECRET:?NATIONAL_ID_HMAC_SECRET must be set, this stack runs with NODE_ENV=production}
     healthcheck:
       test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3009/health/ready']
       interval: 5s
@@ -375,6 +379,8 @@ services:
       postgres:
         condition: service_healthy
       kafka:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   tracking-service:

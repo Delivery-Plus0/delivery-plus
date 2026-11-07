@@ -56,12 +56,17 @@ services:
         {"Rules":[{"ID":"expire-pending","Status":"Enabled","Filter":{"Prefix":"pending/"},"Expiration":{"Days":1}}]}
         EOF
         aws --endpoint-url "http://media-storage:9000" s3api put-bucket-lifecycle-configuration --bucket "$$AWS_S3_BUCKET" --lifecycle-configuration file:///tmp/lifecycle.json
+        # #207: driver documents get their own bucket with no bucket policy at all, so nothing in it is
+        # public; staff read through 5-minute presigned URLs. Unconfirmed uploads expire after a day.
+        aws --endpoint-url "http://media-storage:9000" s3 mb "s3://$$DRIVER_DOCUMENTS_BUCKET" --region "$$AWS_REGION" || true
+        aws --endpoint-url "http://media-storage:9000" s3api put-bucket-lifecycle-configuration --bucket "$$DRIVER_DOCUMENTS_BUCKET" --lifecycle-configuration file:///tmp/lifecycle.json
     environment:
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-minioadmin}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-minioadmin}
       AWS_DEFAULT_REGION: ${AWS_REGION:-us-east-1}
       AWS_REGION: ${AWS_REGION:-us-east-1}
       AWS_S3_BUCKET: ${AWS_S3_BUCKET:-delivery-plus-media}
+      DRIVER_DOCUMENTS_BUCKET: ${DRIVER_DOCUMENTS_BUCKET:-delivery-plus-private}
 
   kafka:
     ports:
@@ -393,6 +398,15 @@ services:
       # #206: new drivers start VERIFIED locally, so `npm run seed` works without an admin (refused in production).
       DRIVER_AUTO_VERIFY: ${DRIVER_AUTO_VERIFY:-true}
       KAFKA_BROKER: kafka:29092
+      # #207: rate limits on document uploads and staff reads, and the private documents bucket.
+      REDIS_URL: redis://redis:6379
+      DRIVER_DOCUMENTS_BUCKET: ${DRIVER_DOCUMENTS_BUCKET:-delivery-plus-private}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-minioadmin}
+      AWS_S3_ENDPOINT: http://media-storage:9000
+      AWS_S3_PUBLIC_ENDPOINT: ${AWS_S3_PUBLIC_ENDPOINT:-http://localhost:9000}
+      AWS_S3_FORCE_PATH_STYLE: 'true'
     healthcheck:
       test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3009/health/ready']
       interval: 5s
@@ -403,6 +417,10 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+      media-storage-init:
+        condition: service_completed_successfully
 
   tracking-service:
     build:

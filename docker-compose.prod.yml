@@ -327,6 +327,16 @@ services:
       # Phone verification gate (#153): on only together with a real SMS provider.
       PHONE_VERIFICATION_REQUIRED: ${PHONE_VERIFICATION_REQUIRED:-false}
       KAFKA_BROKER: kafka:29092
+      # #207: the private documents bucket (never the public media bucket) and the national ID HMAC key.
+      REDIS_URL: redis://redis:6379
+      DRIVER_DOCUMENTS_BUCKET: ${DRIVER_DOCUMENTS_BUCKET:?DRIVER_DOCUMENTS_BUCKET must be set (the private driver documents bucket)}
+      NATIONAL_ID_HMAC_SECRET: ${NATIONAL_ID_HMAC_SECRET:?NATIONAL_ID_HMAC_SECRET must be set (a long random value, different from the JWT secrets)}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:?AWS_ACCESS_KEY_ID must be set}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:?AWS_SECRET_ACCESS_KEY must be set}
+      AWS_S3_ENDPOINT: ${AWS_S3_ENDPOINT:-}
+      AWS_S3_PUBLIC_ENDPOINT: ${AWS_S3_PUBLIC_ENDPOINT:-}
+      AWS_S3_FORCE_PATH_STYLE: ${AWS_S3_FORCE_PATH_STYLE:-false}
     healthcheck:
       test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3009/health/ready']
       interval: 5s
@@ -336,6 +346,8 @@ services:
       postgres:
         condition: service_healthy
       kafka:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   tracking-service:

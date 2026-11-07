@@ -168,6 +168,10 @@ jobs:
 
           check driver_service       "select count(*) from information_schema.tables where table_name='drivers'" "table drivers"
           check driver_service       "select count(*) from pg_indexes where indexname='UQ_drivers_userId'" "index UQ_drivers_userId"
+          check driver_service       "select count(*) from pg_indexes where indexname='UQ_drivers_national_id_hash'" "index UQ_drivers_national_id_hash"
+          check driver_service       "select count(*) from information_schema.tables where table_name='driver_documents'" "table driver_documents"
+          check driver_service       "select count(*) from pg_indexes where indexname='UQ_driver_documents_current'" "index UQ_driver_documents_current"
+          check driver_service       "select count(*) from information_schema.tables where table_name='driver_document_access'" "table driver_document_access"
 
           check notification_service "select count(*) from information_schema.tables where table_name='notifications'" "table notifications"
 
@@ -175,13 +179,15 @@ jobs:
       # compare-and-set), so drivers.repository.integration.spec.ts builds the schema with the
       # real migrations (including 004, which verifies existing drivers) and runs the repository
       # against this Postgres. Like the payment test below, it only runs when its env var is set.
+      # #207: driver-application.repository.integration.spec.ts (the draft lock, document versions,
+      # national ID uniqueness, CHECKs) uses the same database, so the specs run one at a time.
       - name: Run driver-service Postgres repository test
         env:
           PGPASSWORD: postgres
           DRIVER_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/driver_service_repository_test
         run: |
           psql -h localhost -U postgres -c "CREATE DATABASE driver_service_repository_test"
-          npm test --workspace=services/driver-service
+          npm test --workspace=services/driver-service -- --runInBand
 
       # #34: refresh-token rotation and family revocation are conditional UPDATEs, and #202:
       # the first-admin bootstrap is a locked transaction, so sessions.repository.integration.spec.ts

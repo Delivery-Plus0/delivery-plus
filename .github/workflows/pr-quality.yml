@@ -75,10 +75,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The full local stack runs with NODE_ENV=production and requires SYSTEM_JWT_SECRET (#202).
+      # The full local stack runs with NODE_ENV=production and requires SYSTEM_JWT_SECRET (#202),
+      # the private driver documents bucket and the national ID HMAC key (#207).
       - name: Validate full local stack (docker-compose.yml)
         env:
           SYSTEM_JWT_SECRET: compose_validation_only_system_jwt_4b7e1c
+          DRIVER_DOCUMENTS_BUCKET: compose-validation-only-private-bucket
+          NATIONAL_ID_HMAC_SECRET: compose_validation_only_national_id_8d2f6a
         run: docker compose -f docker-compose.yml config --quiet
 
       - name: Validate base + dev overlay
@@ -104,4 +107,6 @@ jobs:
           AWS_SECRET_ACCESS_KEY: compose_validation_only_secret_key
           AWS_S3_BUCKET: compose-validation-only-bucket
           AWS_PUBLIC_BASE_URL: https://compose-validation.example.com/compose-validation-only-bucket
+          DRIVER_DOCUMENTS_BUCKET: compose-validation-only-private-bucket
+          NATIONAL_ID_HMAC_SECRET: compose_validation_only_national_id_8d2f6a
         run: docker compose -f docker-compose.base.yml -f docker-compose.prod.yml config --quiet

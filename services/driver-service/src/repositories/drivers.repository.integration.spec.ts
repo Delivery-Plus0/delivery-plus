@@ -25,13 +25,19 @@ import { VerifyExistingDrivers1700000000003 } from '../database/migrations/004-v
 
 import { DriverAvailableSince1700000000004 } from '../database/migrations/005-driver-available-since';
 import { DriverEffectiveIdleIndex1700000000005 } from '../database/migrations/006-driver-effective-idle-index';
+import { DriverApplicationDocuments1700000000006 } from '../database/migrations/007-driver-application-documents';
 
 const DATABASE_URL = process.env.DRIVER_TEST_DATABASE_URL;
 const describeDb = DATABASE_URL ? describe : describe.skip;
 
 const BEFORE_206 = [InitialSchema1700000000000, UuidPrimaryKeyDefaults1700000000001, DriverVerification1700000000002];
 const BEFORE_210 = [...BEFORE_206, VerifyExistingDrivers1700000000003];
-const ALL_MIGRATIONS = [...BEFORE_210, DriverAvailableSince1700000000004, DriverEffectiveIdleIndex1700000000005];
+const ALL_MIGRATIONS = [
+  ...BEFORE_210,
+  DriverAvailableSince1700000000004,
+  DriverEffectiveIdleIndex1700000000005,
+  DriverApplicationDocuments1700000000006,
+];
 
 /** The service's own DataSource options, with an explicit migration list. */
 function dataSource(migrations: Array<new () => MigrationInterface>): DataSource {
@@ -84,7 +90,7 @@ describeDb('DriversRepository (PostgreSQL integration, #206, #210)', () => {
       await before.destroy();
 
       await open();
-      expect(await ds.runMigrations()).toHaveLength(3);
+      expect(await ds.runMigrations()).toHaveLength(4);
 
       expect(await repo.findById(pending)).toMatchObject({ verificationStatus: 'VERIFIED', verifiedAt: expect.any(Date) });
       expect(await repo.findById(rejected)).toMatchObject({ verificationStatus: 'REJECTED', verifiedAt: null });
@@ -97,6 +103,8 @@ describeDb('DriversRepository (PostgreSQL integration, #206, #210)', () => {
 
       const created = await repo.create({ userId: randomUUID(), vehicleType: 'Car', licensePlate: 'NEW-1' });
       expect(created.verificationStatus).toBe('PENDING');
+      // #207: the national ID columns are never part of a profile, not even an empty one.
+      expect(Object.keys(created).filter((key) => key.startsWith('nationalId'))).toEqual([]);
     });
   });
 
@@ -110,12 +118,13 @@ describeDb('DriversRepository (PostgreSQL integration, #206, #210)', () => {
       await before.query(`UPDATE drivers SET "updatedAt" = '2026-01-01T00:00:00Z' WHERE id = $1`, [online]);
       await before.destroy();
       await open();
-      expect(await ds.runMigrations()).toHaveLength(2);
+      expect(await ds.runMigrations()).toHaveLength(3);
       expect((await repo.findById(online))?.availableSince).toEqual(new Date('2026-01-01T00:00:00Z'));
       expect((await repo.findById(offline))?.availableSince).toBeNull();
-      await ds.undoLastMigration(); // Undo the expression index first.
-      await ds.undoLastMigration(); // Then undo the idle column.
-      expect(await ds.runMigrations()).toHaveLength(2);
+      await ds.undoLastMigration(); // Undo the application tables (#207) first.
+      await ds.undoLastMigration(); // Then the expression index.
+      await ds.undoLastMigration(); // Then the idle column.
+      expect(await ds.runMigrations()).toHaveLength(3);
       expect((await repo.findById(online))?.availableSince).toEqual(new Date('2026-01-01T00:00:00Z'));
     });
   });

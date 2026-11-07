@@ -22,10 +22,13 @@ export class DriversRepository {
     return this.repo.findOne({ where: { userId } });
   }
 
-  create(
+  async create(
     data: Pick<Driver, 'userId' | 'vehicleType' | 'licensePlate'> & Partial<Pick<Driver, 'verificationStatus' | 'verifiedAt'>>,
   ): Promise<Driver> {
-    return this.repo.save(this.repo.create(data));
+    const saved = await this.repo.save(this.repo.create(data));
+    // Re-read: `save` returns every column, including the application columns that are never
+    // selected by default (#207), so the profile response would otherwise carry them.
+    return (await this.findById(saved.id)) as Driver;
   }
 
   /**

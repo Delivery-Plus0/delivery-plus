@@ -16,6 +16,16 @@ From `services/driver-service/src/controllers/drivers.controller.ts`:
 - `GET /drivers/:id` – fetch a driver by ID
 - `PATCH /drivers/:id/status` – claim or release a driver (SYSTEM token only: delivery-service, #202)
 
+Driver application (#207, see below):
+
+- `GET /drivers/me/application` – your application: status, fields, documents (never a URL) and what is missing (DRIVER)
+- `PUT /drivers/me/application` – save the national ID and the two licence expiry dates (DRIVER, draft only)
+- `POST /drivers/me/documents/:type/upload-url` – a presigned POST for one document (DRIVER, draft only, 20 an hour)
+- `POST /drivers/me/documents/:type/confirm` – check the upload and make it the document's current version (DRIVER, draft only, 30 an hour)
+- `POST /drivers/me/application/submit` – send a complete draft to the review queue (DRIVER)
+- `GET /drivers/:id/application` – a driver's application (staff with `onboarding.review`)
+- `POST /drivers/:id/documents/:type/read-url` – a 5-minute URL to view a document; every read is recorded (staff with `onboarding.review`, 60 a minute)
+
 ## Dispatch fairness (#210)
 
 Available, VERIFIED drivers are listed by `COALESCE(availableSince, updatedAt) ASC, id ASC`: the longest-idle driver is offered work first, with a deterministic tie-breaker. Going online or being released from a delivery records database time in the same compare-and-set update as the status. Leaving AVAILABLE clears the timestamp. Repeated online/release requests are no-ops and retain the current queue position; unrelated profile or verification edits do not change it.
@@ -28,6 +38,7 @@ The delivery-service claim/retry loop and VERIFIED gate are unchanged. Its inter
 
 ## Dependencies
 - Persists driver data in PostgreSQL
+- Stores driver documents in a private S3-compatible bucket (#207) and uses Redis for rate limits
 - Used by `delivery-service` to assign drivers and by `tracking-service` to resolve current driver information
 - Reads the driver's own user-service profile when the phone verification gate is on
 
@@ -42,6 +53,10 @@ From `services/driver-service/src/config/app-config.ts`:
 - `USER_SERVICE_URL` (default: `http://localhost:3002`)
 - `PHONE_VERIFICATION_REQUIRED` (default `false`), see the phone verification gate
 - `DRIVER_AUTO_VERIFY` (default `false`; test hook, **refused in production**): new driver profiles start `VERIFIED`. See the verification gate.
+- `DRIVER_DOCUMENTS_BUCKET` (#207; **required in production**, local default `delivery-plus-private`): the private documents bucket, never the public media bucket.
+- `NATIONAL_ID_HMAC_SECRET` (#207; no default outside development and test; at least 32 characters and different from the JWT secrets in production).
+- `REDIS_URL` (default `redis://localhost:6379`): the upload and staff read rate limits.
+- `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_S3_ENDPOINT`, `AWS_S3_PUBLIC_ENDPOINT`, `AWS_S3_FORCE_PATH_STYLE`: the object storage connection, shared with the media services.
 - `PORT` (default: `3009`)
 - `NODE_ENV` (default: `development`)
 
@@ -56,10 +71,64 @@ With `PHONE_VERIFICATION_REQUIRED=true`, going online (`POST /drivers/me/online`
   - Since #206 it is binding: see the verification gate below.
 - **Vehicle:** `PATCH /drivers/me/vehicle` (DRIVER) changes the vehicle type and plate (trimmed; the plate is upper-cased), **only while OFFLINE**, checked with a compare-and-set (409 otherwise). A change mid-shift would make the customer's driver card wrong for a job already on its way.
 - **Name, phone and photo** belong to user-service (`PATCH /users/me` with the Egyptian phone rules of #152, and the avatar upload). driver-service doesn't copy them.
-- **No identity documents.** The business does not require national-ID details today, so none are collected or stored, in line with the data-minimisation rule.
-  - If that changes, they belong here only, restricted to the driver and admins.
-  - They are never returned to customers and never copied into other services.
+- **Identity documents** are part of the driver application (#207, below). They live here only, in a private bucket, readable by staff with `onboarding.review`; they are never returned to customers and never copied into other services.
 - Customers only ever see the delivery-service driver card (first name, photo, vehicle, plate); the verification fields are not part of it.
+
+## Driver application (#207)
+
+An admin can't approve a driver they know nothing about, so a driver now applies with their national ID, licence dates and five documents before review. This is the first part of #207: application data, private documents and submit. Reviews with history and resubmission after a rejection, and the nightly expiry check, follow in the next pull requests.
+
+### Status
+
+There is no new status column. The application status is derived from the verification status and `submittedAt`, and the API returns it as `status`:
+
+| `verificationStatus` | `submittedAt` | Application `status` | The driver can |
+| --- | --- | --- | --- |
+| `PENDING` | null | `DRAFT` | edit fields, upload documents, submit |
+| `PENDING` | set | `SUBMITTED` (in the review queue) | wait |
+| `VERIFIED` | any | `VERIFIED` | drive |
+| `REJECTED` | any | `REJECTED` | read the note (resubmission comes with the reviews PR) |
+
+Only a draft can change: every write is a compare-and-set or runs under a row lock on the driver that checks it is still a draft (`409 ApplicationNotEditable` with `details.applicationStatus` otherwise). A document confirmed while the driver submits either lands before the submit or is refused. Migration 007 adds only nullable columns, so existing drivers keep their status: verified drivers stay on the road, and pending ones become drafts.
+
+### Application fields
+
+`PUT /drivers/me/application` takes `nationalIdNumber` (14 digits, Egyptian), `drivingLicenceExpiresOn` and `vehicleLicenceExpiresOn` (`YYYY-MM-DD`, real dates, not past in Cairo time, at most 15 years ahead).
+
+- **The national ID number is never stored.** The service keeps its last four digits and an HMAC-SHA256 of it under `NATIONAL_ID_HMAC_SECRET` (no default outside development and test). The hash is unique, so one ID can back only one driver account (`409 NationalIdAlreadyRegistered`). Neither column is selected by default; the hash is never returned, and the last four digits appear only in the application view.
+- The dates are calendar dates in Cairo.
+
+### Documents
+
+Five types, each required: `national-id-front`, `national-id-back`, `driving-licence`, `vehicle-licence`, `selfie`. JPEG, PNG or PDF, up to 10 MB.
+
+1. `POST /drivers/me/documents/:type/upload-url` with `{ "contentType": … }` returns a presigned POST (`uploadUrl`, `fields`, `objectKey`, five minutes). The key is `pending/drivers/{driverId}/{type}/{uuid}.{ext}`, fixed by the policy together with the exact content type and a 1 byte to 10 MB size range. The client never chooses a key.
+2. The app posts the file straight to the bucket.
+3. `POST /drivers/me/documents/:type/confirm` with `{ "objectKey": … }`: the key must be under the caller's own prefix for that type; the object's size and the metadata the policy issued are checked; its bytes must really be a JPEG, PNG or PDF matching the declared type (magic bytes). It is then copied to `drivers/{driverId}/documents/{type}/{uuid}.{ext}` with `Cache-Control: no-store`, and recorded as the type's new current version. A retried confirm of the same upload returns the same version.
+
+Replacing a document adds a version and keeps the previous one, for the review that used it. Each type keeps at most 5 versions (`409 DocumentVersionLimitReached`, enforced in the database too). The tables:
+
+- `driver_documents`: driver, type, version, `isCurrent` (one current version per type), object key, content type, size, SHA-256, upload time. Deleted with the driver (foreign key, `ON DELETE CASCADE`).
+- `driver_document_access`: every staff read (staff user id, driver, document id, type, version, time). Append-only, no foreign keys, so it outlives the document. It stands in until audit-service exists (#213).
+
+Only the object key is stored. **No URL is ever stored, logged or returned to the driver.**
+
+### Submit
+
+`POST /drivers/me/application/submit` sets `submittedAt` once every field and all five documents are present and neither licence has expired. Otherwise `422 ApplicationIncomplete` with `details.missingFields`, `details.missingDocuments` and `details.expiredLicences`. The application view's `canSubmit` says the same in advance.
+
+### Staff access
+
+`GET /drivers/:id/application` and `POST /drivers/:id/documents/:type/read-url` need an ADMIN token holding `onboarding.review` (#202); every other caller, including the driver, gets `403`.
+
+The read URL is a presigned GET that lives 5 minutes, with `response-cache-control=no-store`, and the response itself carries `Cache-Control: no-store`. The read is recorded in `driver_document_access` **before** the URL is signed: if the record can't be written, no URL is issued.
+
+### Storage and privacy
+
+- Documents live in their own private bucket, `DRIVER_DOCUMENTS_BUCKET`: no bucket policy, Block Public Access on, SSE-S3. The service refuses to start in production without it, and refuses the public media bucket's name. Local and test stacks create `delivery-plus-private` with no policy.
+- Unconfirmed uploads expire with the bucket's one-day lifecycle rule on `pending/`. The issue sketched the quarantine as `drivers/{id}/pending/…`; S3 lifecycle rules filter on a key prefix, so the quarantine is one top-level `pending/` prefix instead, which one rule covers.
+- Retention (working default, to confirm before launch): documents of a driver finally rejected are kept 90 days; an approved driver's documents live as long as the account and are deleted with it (#233). Replaced versions are kept with the review that used them for the same period. The deletion jobs come with #233 and the retention follow-up.
+- IAM and bucket setup: [deployment.md](../deployment.md).
 
 ## Verification gate (#206)
 

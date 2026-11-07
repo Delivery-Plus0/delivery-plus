@@ -22,6 +22,9 @@ describe('DriversService', () => {
     availableSince: null as Date | null,
     verificationNote: null,
     verifiedAt: new Date('2026-10-01T00:00:00Z') as Date | null,
+    submittedAt: null as Date | null,
+    drivingLicenceExpiresOn: null as string | null,
+    vehicleLicenceExpiresOn: null as string | null,
     createdAt: new Date(),
     updatedAt: new Date(),
   };

@@ -87,8 +87,10 @@ const RESTAURANTS: (RestaurantSeed & { owner: keyof typeof QA })[] = [
     owner: 'nightCafeOwner',
     description: 'Closed restaurant for filter tests',
     address: '200 QA Avenue',
-    latitude: 29.9792,
-    longitude: 31.1342,
+    // Inside QA Kitchen's delivery area (about 1 km away), so a customer at QA Kitchen's point sees both:
+    // the customer app lists restaurants by delivery location (customer-app#54).
+    latitude: 30.05,
+    longitude: 31.24,
     status: 'CLOSED',
     categories: [
       { name: 'Mains', items: [{ name: 'QA Night Toast', description: 'Always $6.00', price: 6 }] },

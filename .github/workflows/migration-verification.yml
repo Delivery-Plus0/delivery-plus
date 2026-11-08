@@ -22,6 +22,10 @@ on:
       - '**/*.entity.ts'
       - '**/database/data-source.ts'
       - '**/database/typeorm.config.ts'
+      # The Postgres integration specs run only in this workflow, so SQL-backed code and the specs
+      # themselves must trigger it too (#207).
+      - '**/repositories/**'
+      - '**/*.integration.spec.ts'
       - 'scripts/typeorm-migration-runner.js'
       - 'docker/postgres/init.sql'
       - 'package.json'
@@ -33,6 +37,10 @@ on:
       - '**/*.entity.ts'
       - '**/database/data-source.ts'
       - '**/database/typeorm.config.ts'
+      # The Postgres integration specs run only in this workflow, so SQL-backed code and the specs
+      # themselves must trigger it too (#207).
+      - '**/repositories/**'
+      - '**/*.integration.spec.ts'
       - 'scripts/typeorm-migration-runner.js'
       - 'docker/postgres/init.sql'
       - 'package.json'
@@ -182,7 +190,8 @@ jobs:
       # real migrations (including 004, which verifies existing drivers) and runs the repository
       # against this Postgres. Like the payment test below, it only runs when its env var is set.
       # #207: driver-application.repository.integration.spec.ts (the draft lock, document versions,
-      # national ID uniqueness, CHECKs) uses the same database, so the specs run one at a time.
+      # national ID uniqueness, CHECKs, reviews) and licence-expiry.repository.integration.spec.ts (the
+      # expiry compare-and-set and its advisory lock) use the same database, so the specs run one at a time.
       - name: Run driver-service Postgres repository test
         env:
           PGPASSWORD: postgres

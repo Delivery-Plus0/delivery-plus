@@ -31,7 +31,7 @@ Common runtime values include:
 - `POSTGRES_PASSWORD`
 - `JWT_SECRET`
 - `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_S3_BUCKET`, `AWS_S3_ENDPOINT`, `AWS_S3_PUBLIC_ENDPOINT`, `AWS_PUBLIC_BASE_URL`, and `AWS_S3_FORCE_PATH_STYLE` for media storage
-- driver-service (#207): `DRIVER_DOCUMENTS_BUCKET` (the private documents bucket; required in production, local default `delivery-plus-private`), `NATIONAL_ID_HMAC_SECRET` (no default outside development and test) and `REDIS_URL` (upload and staff read rate limits), plus the `AWS_*` connection settings above
+- driver-service (#207): `DRIVER_DOCUMENTS_BUCKET` (the private documents bucket; required in production, local default `delivery-plus-private`), `NATIONAL_ID_HMAC_SECRET` (no default outside development and test) and `REDIS_URL` (upload and staff read rate limits), plus the `AWS_*` connection settings above. Optional: `DRIVER_LICENCE_EXPIRY_CHECK_MS` (licence expiry check, hourly by default, `0` off)
 - service-specific URLs such as `AUTH_SERVICE_URL`, `ORDER_SERVICE_URL`, and `KAFKA_BROKER`
 
 The compose file sets practical local defaults, including a development JWT secret and default Postgres credentials.

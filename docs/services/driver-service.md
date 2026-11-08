@@ -56,6 +56,7 @@ From `services/driver-service/src/config/app-config.ts`:
 - `DRIVER_AUTO_VERIFY` (default `false`; test hook, **refused in production**): new driver profiles start `VERIFIED`. See the verification gate.
 - `DRIVER_DOCUMENTS_BUCKET` (#207; **required in production**, local default `delivery-plus-private`): the private documents bucket, never the public media bucket.
 - `NATIONAL_ID_HMAC_SECRET` (#207; no default outside development and test; at least 32 characters and different from the JWT secrets in production).
+- `DRIVER_LICENCE_EXPIRY_CHECK_MS` (#207; default `3600000`, hourly; `0` turns it off; otherwise at least `60000`): how often the licence expiry check runs.
 - `REDIS_URL` (default `redis://localhost:6379`): the upload and staff read rate limits.
 - `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_S3_ENDPOINT`, `AWS_S3_PUBLIC_ENDPOINT`, `AWS_S3_FORCE_PATH_STYLE`: the object storage connection, shared with the media services.
 - `PORT` (default: `3009`)
@@ -77,7 +78,7 @@ With `PHONE_VERIFICATION_REQUIRED=true`, going online (`POST /drivers/me/online`
 
 ## Driver application (#207)
 
-An admin can't approve a driver they know nothing about, so a driver now applies with their national ID, licence dates and five documents before review. Staff approve or reject the submission, every decision is kept with the documents it looked at, and a rejected driver can correct the application and submit it again. The nightly licence expiry check follows in the next pull request.
+An admin can't approve a driver they know nothing about, so a driver now applies with their national ID, licence dates and five documents before review. Staff approve or reject the submission, every decision is kept with the documents it looked at, and a rejected driver can correct the application and submit it again. A licence that expires sends a verified driver back to re-review.
 
 ### Status
 
@@ -133,6 +134,20 @@ Submitting a rejected application is a **resubmission**: the driver goes back to
 `driver_reviews` holds one row per decision: driver, reviewer user id, decision (`VERIFIED` or `REJECTED`, a CHECK), note, the submission decided, the ids of the current documents, time. It is **append-only**: a trigger refuses every `UPDATE`. Rows are deleted only with the driver (foreign key, `ON DELETE CASCADE`, for account deletion, #233). Decisions made with `PATCH /drivers/:id/verification` are written there too, in the same transaction (their `applicationSubmittedAt` is null for a driver who never applied); moving a driver back to `PENDING` is not a decision and writes nothing.
 
 Not here yet: a review queue listing (admin read APIs, #214), notifying the driver of the decision (#215), and the audit event (#213).
+
+### Licence expiry
+
+Licence dates are Cairo calendar dates, and a licence is valid through its expiry date.
+
+- **Warning:** the application view's `expiringLicences` lists the licences valid today that expire within 14 days, soonest first, so the driver app can ask for the renewal in time.
+- **Expiry:** a check runs every `DRIVER_LICENCE_EXPIRY_CHECK_MS` (hourly by default; the first run after midnight in Cairo acts on the licences that expired the day before). A `VERIFIED` driver with an expired driving or vehicle licence goes back to a **draft for re-review**: `PENDING`, no `submittedAt` (so they can upload the renewed licence, save its date and submit), no `verifiedAt`, a `verificationNote` saying why, and `OFFLINE` if they were `AVAILABLE`. #206 then keeps them off the road until staff approve the new submission.
+  - It is one compare-and-set `UPDATE` on `VERIFIED` and not `BUSY`: a dispatch claim racing it either lands first (the driver is then `BUSY` and skipped) or finds the driver no longer `VERIFIED`.
+  - **A driver on a delivery is skipped** so the delivery keeps its driver, and expired on the first run after it ends (hourly, so within the hour).
+  - **A missing date is never expired:** drivers verified before the application have none, and stay verified until they apply.
+  - Only `VERIFIED` drivers are touched: a draft or submission with an expired licence can't be submitted or approved anyway (`422 ApplicationIncomplete`).
+  - A Postgres advisory lock (`pg_try_advisory_xact_lock`) lets one instance do each run; the others skip it. The job logs counts only, and the clock is a parameter, so the tests pin the date.
+  - The move back to re-review is not a staff decision and writes nothing to `driver_reviews`. Telling the driver by notification comes with #215 and push (#229).
+- Each renewal adds a licence document version; the 5-versions-per-type cap therefore also bounds renewals per account (support can help past it).
 
 ### Staff access
 

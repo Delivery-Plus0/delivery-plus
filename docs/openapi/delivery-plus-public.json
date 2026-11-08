@@ -6081,7 +6081,8 @@
           "status",
           "documents",
           "missingDocuments",
-          "canSubmit"
+          "canSubmit",
+          "expiringLicences"
         ],
         "properties": {
           "driverId": {
@@ -6197,6 +6198,30 @@
           },
           "canSubmit": {
             "type": "boolean"
+          },
+          "expiringLicences": {
+            "type": "array",
+            "description": "Licences valid today that expire within 14 days (Cairo), soonest first. Once one has expired, a VERIFIED driver goes back to DRAFT for re-review and offline.",
+            "items": {
+              "type": "object",
+              "required": [
+                "field",
+                "expiresOn"
+              ],
+              "properties": {
+                "field": {
+                  "type": "string",
+                  "enum": [
+                    "drivingLicenceExpiresOn",
+                    "vehicleLicenceExpiresOn"
+                  ]
+                },
+                "expiresOn": {
+                  "type": "string",
+                  "format": "date"
+                }
+              }
+            }
           }
         }
       },

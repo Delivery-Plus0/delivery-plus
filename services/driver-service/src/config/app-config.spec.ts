@@ -1,4 +1,4 @@
-import { LOCAL_NATIONAL_ID_HMAC_SECRET, loadDocumentConfig, loadVerificationConfig } from './app-config';
+import { LOCAL_NATIONAL_ID_HMAC_SECRET, loadDocumentConfig, loadLicenceExpiryInterval, loadVerificationConfig } from './app-config';
 
 describe('loadVerificationConfig (#206)', () => {
   it('leaves new drivers PENDING by default', () => {
@@ -56,5 +56,17 @@ describe('loadDocumentConfig (#207)', () => {
   it('never uses the public media bucket for documents', () => {
     expect(() => loadDocumentConfig('test', { DRIVER_DOCUMENTS_BUCKET: 'media', AWS_S3_BUCKET: 'media' })).toThrow('public media bucket');
     expect(() => loadDocumentConfig('test', { DRIVER_DOCUMENTS_BUCKET: 'Not A Bucket' })).toThrow('valid bucket');
+  });
+});
+
+describe('loadLicenceExpiryInterval (#207)', () => {
+  it('runs hourly by default and can be turned off with 0', () => {
+    expect(loadLicenceExpiryInterval({})).toBe(3_600_000);
+    expect(loadLicenceExpiryInterval({ DRIVER_LICENCE_EXPIRY_CHECK_MS: '0' })).toBe(0);
+    expect(loadLicenceExpiryInterval({ DRIVER_LICENCE_EXPIRY_CHECK_MS: '600000' })).toBe(600_000);
+  });
+
+  it.each(['abc', '-1', '1.5', '1000'])('refuses %s', (value) => {
+    expect(() => loadLicenceExpiryInterval({ DRIVER_LICENCE_EXPIRY_CHECK_MS: value })).toThrow(/DRIVER_LICENCE_EXPIRY_CHECK_MS/);
   });
 });

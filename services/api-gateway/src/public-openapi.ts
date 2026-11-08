@@ -658,7 +658,7 @@ const baseSchemas = {
   DriverApplication: {
     type: 'object',
     description: '#207: a driver application. Never contains a document URL or object key.',
-    required: ['driverId', 'status', 'documents', 'missingDocuments', 'canSubmit'],
+    required: ['driverId', 'status', 'documents', 'missingDocuments', 'canSubmit', 'expiringLicences'],
     properties: {
       driverId: { type: 'string', format: 'uuid' },
       status: {
@@ -700,6 +700,19 @@ const baseSchemas = {
       },
       missingDocuments: { type: 'array', items: { $ref: '#/components/schemas/DriverDocumentType' } },
       canSubmit: { type: 'boolean' },
+      expiringLicences: {
+        type: 'array',
+        description:
+          'Licences valid today that expire within 14 days (Cairo), soonest first. Once one has expired, a VERIFIED driver goes back to DRAFT for re-review and offline.',
+        items: {
+          type: 'object',
+          required: ['field', 'expiresOn'],
+          properties: {
+            field: { type: 'string', enum: ['drivingLicenceExpiresOn', 'vehicleLicenceExpiresOn'] },
+            expiresOn: { type: 'string', format: 'date' },
+          },
+        },
+      },
     },
   },
   StaffDriverApplication: {

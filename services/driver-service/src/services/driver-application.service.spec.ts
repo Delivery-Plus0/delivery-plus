@@ -378,4 +378,14 @@ describe('DriverApplicationService (#207)', () => {
       expect(view.lastReview).toEqual({ decision: 'VERIFIED', note: null, reviewedAt: NOW });
     });
   });
+  describe('licence renewal warning', () => {
+    it('lists licences expiring within 14 days in Cairo, soonest first', async () => {
+      repository.findApplication.mockResolvedValue(driver({ verificationStatus: 'VERIFIED', drivingLicenceExpiresOn: '2026-11-20', vehicleLicenceExpiresOn: '2027-06-01' }));
+      expect((await service.getApplication(DRIVER_ID, NOW)).expiringLicences).toEqual([{ field: 'drivingLicenceExpiresOn', expiresOn: '2026-11-20' }]);
+    });
+
+    it('is empty when nothing expires soon', async () => {
+      expect((await service.getApplication(DRIVER_ID, NOW)).expiringLicences).toEqual([]);
+    });
+  });
 });

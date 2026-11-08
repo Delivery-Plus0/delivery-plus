@@ -21,6 +21,8 @@ export interface AppConfig {
   documentsBucket: string;
   /** #207: keys the HMAC that detects a national ID registered twice without storing the number. */
   nationalIdHmacSecret: string;
+  /** #207: how often the licence expiry check runs (ms); 0 turns it off. */
+  licenceExpiryCheckIntervalMs: number;
 }
 
 export function loadConfig(): AppConfig {
@@ -43,7 +45,21 @@ export function loadConfig(): AppConfig {
     ...loadVerificationConfig(nodeEnv),
     redisUrl: process.env.REDIS_URL || 'redis://localhost:6379',
     ...loadDocumentConfig(nodeEnv),
+    licenceExpiryCheckIntervalMs: loadLicenceExpiryInterval(),
   };
+}
+
+const HOUR_MS = 60 * 60 * 1000;
+
+/** #207: DRIVER_LICENCE_EXPIRY_CHECK_MS, hourly by default; 0 turns the check off, anything else invalid is refused. */
+export function loadLicenceExpiryInterval(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = (env.DRIVER_LICENCE_EXPIRY_CHECK_MS ?? '').trim();
+  if (!raw) return HOUR_MS;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || (value !== 0 && value < 60_000)) {
+    throw new Error('DRIVER_LICENCE_EXPIRY_CHECK_MS must be 0 (off) or a whole number of milliseconds of at least 60000');
+  }
+  return value;
 }
 
 /** Local development and the test suites only; a production-like environment must set its own. */

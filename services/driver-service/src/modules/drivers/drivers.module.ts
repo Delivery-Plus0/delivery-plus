@@ -14,6 +14,8 @@ import { DriversController } from '../../controllers/drivers.controller';
 import { DriverApplicationController } from '../../controllers/driver-application.controller';
 import { APP_CONFIG, AppConfig } from '../../config/app-config';
 import { UserServiceClient } from '../../common/user-service.client';
+import { LicenceExpiryRepository } from '../../repositories/licence-expiry.repository';
+import { LicenceExpiryService } from '../../jobs/licence-expiry.service';
 
 @Module({
   imports: [
@@ -31,6 +33,8 @@ import { UserServiceClient } from '../../common/user-service.client';
     UserServiceClient,
     DriverApplicationService,
     DriverApplicationRepository,
+    LicenceExpiryRepository,
+    LicenceExpiryService,
     {
       provide: DRIVER_DOCUMENT_STORAGE,
       useFactory: (config: AppConfig) => new PrivateDocumentStorage({ bucket: config.documentsBucket }),

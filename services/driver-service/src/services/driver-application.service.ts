@@ -37,6 +37,9 @@ import {
   NationalIdAlreadyRegisteredError,
 } from '../common/application-errors';
 import { ReviewDriverApplicationDto, SaveDriverApplicationDto } from '../dto/driver-application.dto';
+import { LicenceField, cairoDate, expiringLicences } from '../common/licence-dates';
+
+export { cairoDate };
 
 export const DRIVER_DOCUMENT_STORAGE = Symbol('DRIVER_DOCUMENT_STORAGE');
 
@@ -78,6 +81,8 @@ export interface DriverApplicationView {
   documents: ApplicationDocumentView[];
   missingDocuments: DriverDocumentType[];
   canSubmit: boolean;
+  /** Licences valid today that expire within 14 days (Cairo), soonest first: time to renew. */
+  expiringLicences: { field: LicenceField; expiresOn: string }[];
 }
 
 /** The staff view also carries the whole review history, newest first. */
@@ -303,6 +308,7 @@ export class DriverApplicationService {
       documents: documents.map(({ type, version, contentType, sizeBytes, uploadedAt }) => ({ type, version, contentType, sizeBytes, uploadedAt })),
       missingDocuments: DRIVER_DOCUMENT_TYPES.filter((type) => !present.has(type)),
       canSubmit: isEditable(driver) && !applicationProblems(driver, documents, cairoDate(now)),
+      expiringLicences: expiringLicences(driver, cairoDate(now)),
     };
   }
 }
@@ -355,7 +361,3 @@ function assertExpiryDate(field: string, value: string, today: string): void {
   if (value > latest) throw new BadRequestError(`${field} is more than ${MAX_EXPIRY_YEARS_AHEAD} years away`);
 }
 
-/** The calendar date in Cairo, YYYY-MM-DD: licence expiry dates are Cairo dates. */
-export function cairoDate(now: Date): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
-}

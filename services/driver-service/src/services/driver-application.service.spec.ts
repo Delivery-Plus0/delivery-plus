@@ -3,6 +3,7 @@ import { BadRequestError, NotFoundError, PrivateDocumentStorage } from '@food-de
 import { AppConfig, LOCAL_NATIONAL_ID_HMAC_SECRET } from '../config/app-config';
 import {
   ApplicationLockedError,
+  NotInReviewError,
   DocumentVersionLimitError,
   DriverApplicationRepository,
   DriverApplicationRow,
@@ -59,9 +60,12 @@ describe('DriverApplicationService (#207)', () => {
       findApplication: jest.fn().mockResolvedValue(driver()),
       currentDocuments: jest.fn().mockResolvedValue([]),
       findCurrentDocumentWithKey: jest.fn(),
-      saveFieldsIfDraft: jest.fn().mockResolvedValue(undefined),
+      saveFieldsIfEditable: jest.fn().mockResolvedValue(undefined),
       addDocumentVersion: jest.fn().mockImplementation(async (_id, type) => document(type)),
-      submitIfDraft: jest.fn(),
+      submitIfEditable: jest.fn(),
+      decideIfSubmitted: jest.fn().mockResolvedValue('decided'),
+      reviews: jest.fn().mockResolvedValue([]),
+      documentVersions: jest.fn().mockResolvedValue([]),
       recordAccess: jest.fn().mockResolvedValue({}),
     } as unknown as jest.Mocked<DriverApplicationRepository>;
     storage = {
@@ -85,7 +89,7 @@ describe('DriverApplicationService (#207)', () => {
     it('stores only the last 4 digits and a keyed HMAC of the national ID', async () => {
       await service.saveApplication(DRIVER_ID, VALID, NOW);
 
-      const saved = repository.saveFieldsIfDraft.mock.calls[0][1];
+      const saved = repository.saveFieldsIfEditable.mock.calls[0][1];
       expect(saved.nationalIdLast4).toBe('4567');
       expect(saved.nationalIdHash).toBe(
         createHmac('sha256', LOCAL_NATIONAL_ID_HMAC_SECRET).update('national-id:v1:29001011234567').digest('hex'),
@@ -97,12 +101,12 @@ describe('DriverApplicationService (#207)', () => {
       const other = new DriverApplicationService(repository, storage, { nationalIdHmacSecret: 'another-secret-another-secret-xx' } as AppConfig);
       await service.saveApplication(DRIVER_ID, VALID, NOW);
       await other.saveApplication(DRIVER_ID, VALID, NOW);
-      const [first, second] = repository.saveFieldsIfDraft.mock.calls.map((call) => call[1].nationalIdHash);
+      const [first, second] = repository.saveFieldsIfEditable.mock.calls.map((call) => call[1].nationalIdHash);
       expect(first).not.toBe(second);
     });
 
     it('answers 409 NationalIdAlreadyRegistered for an ID on another account', async () => {
-      repository.saveFieldsIfDraft.mockRejectedValue(new DuplicateNationalIdError());
+      repository.saveFieldsIfEditable.mockRejectedValue(new DuplicateNationalIdError());
       await expect(service.saveApplication(DRIVER_ID, VALID, NOW)).rejects.toMatchObject({ statusCode: 409, error: 'NationalIdAlreadyRegistered' });
     });
 
@@ -112,7 +116,7 @@ describe('DriverApplicationService (#207)', () => {
       ['a typo far in the future', { vehicleLicenceExpiresOn: '2099-01-01' }, 'years away'],
     ])('refuses %s', async (_label, change, message) => {
       await expect(service.saveApplication(DRIVER_ID, { ...VALID, ...change }, NOW)).rejects.toThrow(message);
-      expect(repository.saveFieldsIfDraft).not.toHaveBeenCalled();
+      expect(repository.saveFieldsIfEditable).not.toHaveBeenCalled();
     });
 
     it('accepts a licence that expires today in Cairo', async () => {
@@ -125,7 +129,6 @@ describe('DriverApplicationService (#207)', () => {
     it.each([
       ['SUBMITTED', { submittedAt: NOW }],
       ['VERIFIED', { verificationStatus: 'VERIFIED' as const }],
-      ['REJECTED', { verificationStatus: 'REJECTED' as const }],
     ])('refuses changes once the application is %s', async (status, overrides) => {
       repository.findApplication.mockResolvedValue(driver(overrides));
       await expect(service.saveApplication(DRIVER_ID, VALID, NOW)).rejects.toMatchObject({
@@ -137,7 +140,7 @@ describe('DriverApplicationService (#207)', () => {
 
     it('reports the new status when the draft was submitted between the read and the write', async () => {
       repository.findApplication.mockResolvedValueOnce(driver()).mockResolvedValueOnce(driver({ submittedAt: NOW }));
-      repository.saveFieldsIfDraft.mockRejectedValue(new ApplicationLockedError());
+      repository.saveFieldsIfEditable.mockRejectedValue(new ApplicationLockedError());
       await expect(service.saveApplication(DRIVER_ID, VALID, NOW)).rejects.toMatchObject({
         error: 'ApplicationNotEditable',
         details: { applicationStatus: 'SUBMITTED' },
@@ -215,7 +218,7 @@ describe('DriverApplicationService (#207)', () => {
 
   describe('submit', () => {
     function runCheck(row: DriverApplicationRow, documents: DriverDocument[]) {
-      repository.submitIfDraft.mockImplementation(async (_id, check) => check(row, documents));
+      repository.submitIfEditable.mockImplementation(async (_id, check) => check(row, documents));
     }
 
     it('submits a complete draft', async () => {
@@ -245,7 +248,7 @@ describe('DriverApplicationService (#207)', () => {
     });
 
     it('answers 409 when the application is already submitted', async () => {
-      repository.submitIfDraft.mockRejectedValue(new ApplicationLockedError());
+      repository.submitIfEditable.mockRejectedValue(new ApplicationLockedError());
       repository.findApplication.mockResolvedValueOnce(driver()).mockResolvedValueOnce(driver({ submittedAt: NOW }));
       await expect(service.submit(DRIVER_ID, NOW)).rejects.toMatchObject({ statusCode: 409, details: { applicationStatus: 'SUBMITTED' } });
     });
@@ -281,6 +284,98 @@ describe('DriverApplicationService (#207)', () => {
       repository.findCurrentDocumentWithKey.mockResolvedValue(null);
       await expect(service.createReadUrl('staff-1', DRIVER_ID, 'selfie')).rejects.toMatchObject({ statusCode: 404 });
       expect(repository.recordAccess).not.toHaveBeenCalled();
+    });
+  });
+  describe('reviews and resubmission', () => {
+    const SUBMITTED_AT = new Date('2026-11-07T09:00:00Z');
+    const reviewer = 'staff-1';
+    const review = (overrides: Record<string, unknown> = {}) =>
+      ({ decision: 'VERIFIED', submittedAt: SUBMITTED_AT.toISOString(), ...overrides }) as never;
+
+    it('lets a rejected driver correct the application, and says it can be resubmitted', async () => {
+      const rejected = { ...complete(), verificationStatus: 'REJECTED' as const, verificationNote: 'Selfie is blurry', submittedAt: SUBMITTED_AT };
+      repository.findApplication.mockResolvedValue(rejected);
+      repository.currentDocuments.mockResolvedValue(allDocuments());
+      repository.reviews.mockResolvedValue([
+        { id: 'r1', driverId: DRIVER_ID, reviewerUserId: reviewer, decision: 'REJECTED', note: 'Selfie is blurry', applicationSubmittedAt: SUBMITTED_AT, documentIds: [], reviewedAt: NOW },
+      ]);
+
+      const view = await service.saveApplication(DRIVER_ID, VALID, NOW);
+
+      expect(repository.saveFieldsIfEditable).toHaveBeenCalled();
+      expect(view).toMatchObject({ status: 'REJECTED', canSubmit: true, lastReview: { decision: 'REJECTED', note: 'Selfie is blurry', reviewedAt: NOW } });
+      expect(view.lastReview).not.toHaveProperty('reviewerUserId');
+    });
+
+    it('passes the decision, note and exact submission to the compare-and-set', async () => {
+      repository.findApplication.mockResolvedValue({ ...complete(), submittedAt: SUBMITTED_AT });
+
+      await service.review(reviewer, DRIVER_ID, review({ decision: 'REJECTED', note: 'Licence cut off' }), NOW);
+
+      expect(repository.decideIfSubmitted).toHaveBeenCalledWith(
+        DRIVER_ID,
+        { decision: 'REJECTED', note: 'Licence cut off', reviewerUserId: reviewer, submittedAt: SUBMITTED_AT },
+        expect.any(Function),
+      );
+    });
+
+    it('refuses to approve an application with an expired licence or a missing document (422)', async () => {
+      const expired = { ...complete(), drivingLicenceExpiresOn: '2026-11-01', submittedAt: SUBMITTED_AT };
+      repository.findApplication.mockResolvedValue(expired);
+      repository.decideIfSubmitted.mockImplementation(async (_id, _review, check) => {
+        check(expired, allDocuments().slice(1));
+        return 'decided';
+      });
+
+      await expect(service.review(reviewer, DRIVER_ID, review(), NOW)).rejects.toMatchObject({
+        statusCode: 422,
+        error: 'ApplicationIncomplete',
+        details: { missingDocuments: ['national-id-front'], expiredLicences: ['drivingLicenceExpiresOn'] },
+      });
+    });
+
+    it('lets a reviewer reject an application whatever is wrong with it', async () => {
+      const expired = { ...complete(), drivingLicenceExpiresOn: '2026-11-01', submittedAt: SUBMITTED_AT };
+      repository.decideIfSubmitted.mockImplementation(async (_id, _review, check) => {
+        check(expired, []);
+        return 'decided';
+      });
+      await expect(service.review(reviewer, DRIVER_ID, review({ decision: 'REJECTED', note: 'Licence expired' }), NOW)).resolves.toBeDefined();
+    });
+
+    it.each([
+      ['DRAFT', {}],
+      ['SUBMITTED', { submittedAt: new Date('2026-11-08T08:00:00Z') }],
+      ['VERIFIED', { verificationStatus: 'VERIFIED' as const }],
+    ])('answers 409 ApplicationNotInReview when the application is %s', async (status, overrides) => {
+      repository.findApplication.mockResolvedValueOnce(driver()).mockResolvedValueOnce(driver(overrides));
+      repository.decideIfSubmitted.mockRejectedValue(new NotInReviewError());
+
+      await expect(service.review(reviewer, DRIVER_ID, review(), NOW)).rejects.toMatchObject({
+        statusCode: 409,
+        error: 'ApplicationNotInReview',
+        details: { applicationStatus: status },
+      });
+    });
+
+    it('shows staff the history with the document versions each review looked at', async () => {
+      repository.reviews.mockResolvedValue([
+        { id: 'r2', driverId: DRIVER_ID, reviewerUserId: 'staff-2', decision: 'VERIFIED', note: null, applicationSubmittedAt: NOW, documentIds: ['d2'], reviewedAt: NOW },
+        { id: 'r1', driverId: DRIVER_ID, reviewerUserId: reviewer, decision: 'REJECTED', note: 'Blurry', applicationSubmittedAt: SUBMITTED_AT, documentIds: ['d1', 'gone'], reviewedAt: SUBMITTED_AT },
+      ]);
+      repository.documentVersions.mockResolvedValue([
+        { id: 'd1', type: 'selfie', version: 1 },
+        { id: 'd2', type: 'selfie', version: 2 },
+      ]);
+
+      const view = await service.getApplicationForStaff(DRIVER_ID, NOW);
+
+      expect(repository.documentVersions).toHaveBeenCalledWith(['d2', 'd1', 'gone']);
+      expect(view.reviews).toEqual([
+        { id: 'r2', decision: 'VERIFIED', note: null, reviewedAt: NOW, reviewerUserId: 'staff-2', applicationSubmittedAt: NOW, documents: [{ type: 'selfie', version: 2 }] },
+        { id: 'r1', decision: 'REJECTED', note: 'Blurry', reviewedAt: SUBMITTED_AT, reviewerUserId: reviewer, applicationSubmittedAt: SUBMITTED_AT, documents: [{ type: 'selfie', version: 1 }] },
+      ]);
+      expect(view.lastReview).toEqual({ decision: 'VERIFIED', note: null, reviewedAt: NOW });
     });
   });
 });

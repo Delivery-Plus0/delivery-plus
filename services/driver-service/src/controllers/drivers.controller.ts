@@ -43,9 +43,9 @@ export class DriversController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   @ApiBearerAuth()
-  @ApiOperation({ summary: "Set a driver's verification status (ADMIN only, #147)" })
-  setVerification(@Param('id') id: string, @Body() dto: UpdateVerificationDto) {
-    return this.driversService.setVerification(id, dto);
+  @ApiOperation({ summary: "Set a driver's verification status (ADMIN only, #147; a decision is kept in the review history, #207)" })
+  setVerification(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() dto: UpdateVerificationDto) {
+    return this.driversService.setVerification(id, dto, new Date(), user.sub);
   }
 
   @Post('me/online')

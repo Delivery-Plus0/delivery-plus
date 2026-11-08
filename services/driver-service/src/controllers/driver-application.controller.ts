@@ -17,6 +17,7 @@ import { DriverApplicationService } from '../services/driver-application.service
 import {
   ConfirmDocumentUploadDto,
   RequestDocumentUploadDto,
+  ReviewDriverApplicationDto,
   SaveDriverApplicationDto,
 } from '../dto/driver-application.dto';
 
@@ -44,7 +45,7 @@ export class DriverApplicationController {
   @Put('me/application')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.DRIVER)
-  @ApiOperation({ summary: 'Save your national ID and licence expiry dates (draft only; 409 NationalIdAlreadyRegistered, 409 ApplicationNotEditable)' })
+  @ApiOperation({ summary: 'Save your national ID and licence expiry dates (draft or rejected only; 409 NationalIdAlreadyRegistered, 409 ApplicationNotEditable)' })
   async saveMine(@CurrentUser() user: JwtPayload, @Body() dto: SaveDriverApplicationDto) {
     return this.applications.saveApplication((await this.drivers.getByUserId(user.sub)).id, dto);
   }
@@ -54,7 +55,7 @@ export class DriverApplicationController {
   @Roles(UserRole.DRIVER)
   @RateLimit({ limit: 20, windowSeconds: 3600 })
   @Header('Cache-Control', 'no-store')
-  @ApiOperation({ summary: 'Get a presigned POST to upload one document (JPEG, PNG or PDF, up to 10 MB; draft only)' })
+  @ApiOperation({ summary: 'Get a presigned POST to upload one document (JPEG, PNG or PDF, up to 10 MB; draft or rejected only)' })
   async createUpload(@CurrentUser() user: JwtPayload, @Param('type') type: string, @Body() dto: RequestDocumentUploadDto) {
     return this.applications.createUpload((await this.drivers.getByUserId(user.sub)).id, type, dto.contentType);
   }
@@ -64,7 +65,7 @@ export class DriverApplicationController {
   @Roles(UserRole.DRIVER)
   @RateLimit({ limit: 30, windowSeconds: 3600 })
   @HttpCode(200)
-  @ApiOperation({ summary: 'Confirm an upload: the file is checked and becomes the current version of the document (draft only)' })
+  @ApiOperation({ summary: 'Confirm an upload: the file is checked and becomes the current version of the document (draft or rejected only)' })
   async confirmUpload(@CurrentUser() user: JwtPayload, @Param('type') type: string, @Body() dto: ConfirmDocumentUploadDto) {
     return this.applications.confirmUpload((await this.drivers.getByUserId(user.sub)).id, type, dto.objectKey);
   }
@@ -73,7 +74,7 @@ export class DriverApplicationController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.DRIVER)
   @HttpCode(200)
-  @ApiOperation({ summary: 'Send a complete application for review (422 ApplicationIncomplete with what is missing)' })
+  @ApiOperation({ summary: 'Send a complete application for review, or resubmit a corrected rejected one (422 ApplicationIncomplete with what is missing)' })
   async submitMine(@CurrentUser() user: JwtPayload) {
     return this.applications.submit((await this.drivers.getByUserId(user.sub)).id);
   }
@@ -82,9 +83,26 @@ export class DriverApplicationController {
   @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
   @Roles(UserRole.ADMIN)
   @RequirePermissions('onboarding.review')
-  @ApiOperation({ summary: "A driver's application (staff with onboarding.review)" })
+  @ApiOperation({ summary: "A driver's application with its review history (staff with onboarding.review)" })
   getForStaff(@Param('id', new ParseUUIDPipe()) id: string) {
-    return this.applications.getApplication(id);
+    return this.applications.getApplicationForStaff(id);
+  }
+
+  @Post(':id/application/review')
+  @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
+  @Roles(UserRole.ADMIN)
+  @RequirePermissions('onboarding.review')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Approve (VERIFIED) or reject (REJECTED, with a note) a submitted application (staff with onboarding.review; 409 ApplicationNotInReview, 422 ApplicationIncomplete)',
+  })
+  review(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: ReviewDriverApplicationDto,
+  ) {
+    return this.applications.review(user.sub, id, dto);
   }
 
   @Post(':id/documents/:type/read-url')

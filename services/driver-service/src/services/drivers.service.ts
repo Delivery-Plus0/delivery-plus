@@ -71,20 +71,25 @@ export class DriversService {
   }
 
   /**
-   * Admin review (#147): VERIFIED records when; PENDING and REJECTED clear it.
+   * Admin review (#147): VERIFIED records when; PENDING and REJECTED clear it. A VERIFIED or REJECTED
+   * decision is appended to the review history with the admin as reviewer (#207).
    *
    * #206: a driver who is no longer VERIFIED and is online goes OFFLINE. The verification is written
    * first, so from that moment no claim or go-online can succeed (their compare-and-set needs
    * VERIFIED); then an AVAILABLE driver is moved to OFFLINE (compare-and-set, a no-op otherwise).
    * A BUSY driver keeps the current job and is released to OFFLINE when it ends.
    */
-  async setVerification(id: string, dto: UpdateVerificationDto, now = new Date()): Promise<Driver> {
+  async setVerification(id: string, dto: UpdateVerificationDto, now = new Date(), reviewerUserId?: string): Promise<Driver> {
     await this.getById(id);
-    const updated = await this.drivers.updateVerification(id, {
+    const data = {
       verificationStatus: dto.status,
       verificationNote: dto.note ? dto.note : null,
       verifiedAt: dto.status === 'VERIFIED' ? now : null,
-    });
+    };
+    // #207: a decision through this route is kept in the review history too.
+    const updated = reviewerUserId
+      ? await this.drivers.updateVerification(id, data, reviewerUserId)
+      : await this.drivers.updateVerification(id, data);
     if (!updated) throw new NotFoundError(`Driver ${id} not found`);
     if (dto.status === 'VERIFIED') return updated;
 

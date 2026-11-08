@@ -23,7 +23,7 @@ The service-level database design matches the entity models in each service and 
 | order-service | PostgreSQL | orders, order_items | Central orchestration object with nested order items |
 | payment-service | PostgreSQL | payments | Payment record tied to order and customer |
 | delivery-service | PostgreSQL | deliveries | One delivery per order; driver assignment tracked here |
-| driver-service | PostgreSQL | drivers, driver_documents, driver_document_access | Driver profile, license plate, availability state, the application (national ID last 4 digits and HMAC, licence expiry dates, `submittedAt`), document versions (object keys only) and staff document reads (#207) |
+| driver-service | PostgreSQL | drivers, driver_documents, driver_document_access, driver_reviews | Driver profile, license plate, availability state, the application (national ID last 4 digits and HMAC, licence expiry dates, `submittedAt`), document versions (object keys only), staff document reads and the append-only review history (#207) |
 | tracking-service | Redis | location snapshots | Short-lived location/proximity state |
 | notification-service | PostgreSQL | notifications | Event-driven records for user inbox items |
 

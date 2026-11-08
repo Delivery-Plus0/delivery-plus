@@ -172,6 +172,8 @@ jobs:
           check driver_service       "select count(*) from information_schema.tables where table_name='driver_documents'" "table driver_documents"
           check driver_service       "select count(*) from pg_indexes where indexname='UQ_driver_documents_current'" "index UQ_driver_documents_current"
           check driver_service       "select count(*) from information_schema.tables where table_name='driver_document_access'" "table driver_document_access"
+          check driver_service       "select count(*) from information_schema.tables where table_name='driver_reviews'" "table driver_reviews"
+          check driver_service       "select count(*) from pg_trigger where tgname='TRG_driver_reviews_append_only'" "trigger TRG_driver_reviews_append_only"
 
           check notification_service "select count(*) from information_schema.tables where table_name='notifications'" "table notifications"
 

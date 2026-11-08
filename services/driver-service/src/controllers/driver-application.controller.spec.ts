@@ -33,7 +33,7 @@ describe('DriverApplicationController guards (#207)', () => {
   });
 
   it('gives staff routes to ADMIN tokens holding onboarding.review only', () => {
-    for (const name of ['getForStaff', 'createReadUrl'] as const) {
+    for (const name of ['getForStaff', 'createReadUrl', 'review'] as const) {
       expect(Reflect.getMetadata(GUARDS_METADATA, handler(name))).toEqual(expect.arrayContaining([JwtAuthGuard, RolesGuard, PermissionsGuard]));
       expect(Reflect.getMetadata(ROLES_KEY, handler(name))).toEqual([UserRole.ADMIN]);
       expect(Reflect.getMetadata(PERMISSIONS_KEY, handler(name))).toEqual(['onboarding.review']);
@@ -59,8 +59,11 @@ const drivers = { findByUserId: jest.fn() };
 const applications = {
   findApplication: jest.fn(),
   currentDocuments: jest.fn(),
+  reviews: jest.fn().mockResolvedValue([]),
+  documentVersions: jest.fn().mockResolvedValue([]),
   findCurrentDocumentWithKey: jest.fn(),
   recordAccess: jest.fn(),
+  decideIfSubmitted: jest.fn(),
 };
 const storage = { createReadUrl: jest.fn(), createUpload: jest.fn(), promote: jest.fn() };
 const limiter = { incrementAndCheck: jest.fn() };
@@ -133,6 +136,8 @@ describe('driver documents over HTTP (#207)', () => {
     drivers.findByUserId.mockResolvedValue(pendingDriver);
     applications.findApplication.mockResolvedValue({ ...pendingDriver, nationalIdLast4: null, drivingLicenceExpiresOn: null, vehicleLicenceExpiresOn: null });
     applications.currentDocuments.mockResolvedValue([selfie]);
+    applications.reviews.mockResolvedValue([]);
+    applications.documentVersions.mockResolvedValue([]);
     applications.findCurrentDocumentWithKey.mockResolvedValue(selfie);
     applications.recordAccess.mockResolvedValue({});
     storage.createReadUrl.mockResolvedValue({ url: 'https://signed.example/selfie?X-Amz-Signature=abc', expiresIn: 300 });
@@ -209,5 +214,50 @@ describe('driver documents over HTTP (#207)', () => {
     });
     expect(response.status).toBe(400);
     expect(storage.createUpload).not.toHaveBeenCalled();
+  });
+  describe('POST /drivers/:id/application/review', () => {
+    const submittedAt = '2026-11-08T09:00:00.000Z';
+    const review = (token: string | undefined, body: unknown) =>
+      fetch(`${baseUrl}/drivers/${driverId}/application/review`, {
+        method: 'POST',
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+    beforeEach(() => {
+      applications.decideIfSubmitted.mockResolvedValue('decided');
+    });
+
+    it('records a rejection with the reviewer from the token and returns the application with its history', async () => {
+      const response = await review(tokens.reviewer, { decision: 'REJECTED', note: '  Selfie is blurry ', submittedAt });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ driverId, reviews: [] });
+      expect(applications.decideIfSubmitted).toHaveBeenCalledWith(
+        driverId,
+        { decision: 'REJECTED', note: 'Selfie is blurry', reviewerUserId: staffUserId, submittedAt: new Date(submittedAt) },
+        expect.any(Function),
+      );
+    });
+
+    it.each([
+      ['a rejection without a note', { decision: 'REJECTED', submittedAt }],
+      ['an unknown decision', { decision: 'APPROVED', submittedAt }],
+      ['no submittedAt', { decision: 'VERIFIED' }],
+      ['a reviewer field in the body', { decision: 'VERIFIED', submittedAt, reviewerUserId: driverUserId }],
+    ])('refuses %s with 400', async (_label, body) => {
+      expect((await review(tokens.reviewer, body)).status).toBe(400);
+      expect(applications.decideIfSubmitted).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['no token', undefined, 401],
+      ['the driver themself', 'driver', 403],
+      ['a customer token claiming the permission', 'customer', 403],
+      ['staff without onboarding.review', 'otherStaff', 403],
+    ] as const)('refuses %s and decides nothing', async (_label, who, status) => {
+      expect((await review(who ? tokens[who] : undefined, { decision: 'VERIFIED', submittedAt })).status).toBe(status);
+      expect(applications.decideIfSubmitted).not.toHaveBeenCalled();
+    });
   });
 });

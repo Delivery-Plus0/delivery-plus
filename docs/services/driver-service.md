@@ -19,11 +19,12 @@ From `services/driver-service/src/controllers/drivers.controller.ts`:
 Driver application (#207, see below):
 
 - `GET /drivers/me/application` – your application: status, fields, documents (never a URL) and what is missing (DRIVER)
-- `PUT /drivers/me/application` – save the national ID and the two licence expiry dates (DRIVER, draft only)
-- `POST /drivers/me/documents/:type/upload-url` – a presigned POST for one document (DRIVER, draft only, 20 an hour)
-- `POST /drivers/me/documents/:type/confirm` – check the upload and make it the document's current version (DRIVER, draft only, 30 an hour)
-- `POST /drivers/me/application/submit` – send a complete draft to the review queue (DRIVER)
-- `GET /drivers/:id/application` – a driver's application (staff with `onboarding.review`)
+- `PUT /drivers/me/application` – save the national ID and the two licence expiry dates (DRIVER, draft or rejected only)
+- `POST /drivers/me/documents/:type/upload-url` – a presigned POST for one document (DRIVER, draft or rejected only, 20 an hour)
+- `POST /drivers/me/documents/:type/confirm` – check the upload and make it the document's current version (DRIVER, draft or rejected only, 30 an hour)
+- `POST /drivers/me/application/submit` – send a complete draft, or a corrected rejected application, to the review queue (DRIVER)
+- `GET /drivers/:id/application` – a driver's application with its review history (staff with `onboarding.review`)
+- `POST /drivers/:id/application/review` – approve or reject a submitted application (staff with `onboarding.review`)
 - `POST /drivers/:id/documents/:type/read-url` – a 5-minute URL to view a document; every read is recorded (staff with `onboarding.review`, 60 a minute)
 
 ## Dispatch fairness (#210)
@@ -67,7 +68,7 @@ With `PHONE_VERIFICATION_REQUIRED=true`, going online (`POST /drivers/me/online`
 ## Driver profile and verification (#147)
 
 - **Verification status:** `verificationStatus` is `PENDING` (default, also for drivers registered before #147), `VERIFIED` or `REJECTED`, plus an optional `verificationNote` for the driver and `verifiedAt`.
-  - Only an admin sets it: `PATCH /drivers/:id/verification`. Admin review tooling is out of scope.
+  - Staff decide a submitted application with `POST /drivers/:id/application/review` (#207, below). The older `PATCH /drivers/:id/verification` (ADMIN) still sets it directly, and since #207 its VERIFIED and REJECTED decisions are kept in the review history too; #215 replaces both with the admin routes.
   - Since #206 it is binding: see the verification gate below.
 - **Vehicle:** `PATCH /drivers/me/vehicle` (DRIVER) changes the vehicle type and plate (trimmed; the plate is upper-cased), **only while OFFLINE**, checked with a compare-and-set (409 otherwise). A change mid-shift would make the customer's driver card wrong for a job already on its way.
 - **Name, phone and photo** belong to user-service (`PATCH /users/me` with the Egyptian phone rules of #152, and the avatar upload). driver-service doesn't copy them.
@@ -76,7 +77,7 @@ With `PHONE_VERIFICATION_REQUIRED=true`, going online (`POST /drivers/me/online`
 
 ## Driver application (#207)
 
-An admin can't approve a driver they know nothing about, so a driver now applies with their national ID, licence dates and five documents before review. This is the first part of #207: application data, private documents and submit. Reviews with history and resubmission after a rejection, and the nightly expiry check, follow in the next pull requests.
+An admin can't approve a driver they know nothing about, so a driver now applies with their national ID, licence dates and five documents before review. Staff approve or reject the submission, every decision is kept with the documents it looked at, and a rejected driver can correct the application and submit it again. The nightly licence expiry check follows in the next pull request.
 
 ### Status
 
@@ -87,9 +88,9 @@ There is no new status column. The application status is derived from the verifi
 | `PENDING` | null | `DRAFT` | edit fields, upload documents, submit |
 | `PENDING` | set | `SUBMITTED` (in the review queue) | wait |
 | `VERIFIED` | any | `VERIFIED` | drive |
-| `REJECTED` | any | `REJECTED` | read the note (resubmission comes with the reviews PR) |
+| `REJECTED` | any | `REJECTED` | read the note, correct the fields and documents, submit again |
 
-Only a draft can change: every write is a compare-and-set or runs under a row lock on the driver that checks it is still a draft (`409 ApplicationNotEditable` with `details.applicationStatus` otherwise). A document confirmed while the driver submits either lands before the submit or is refused. Migration 007 adds only nullable columns, so existing drivers keep their status: verified drivers stay on the road, and pending ones become drafts.
+Only a draft or a rejected application can change: every write is a compare-and-set or runs under a row lock on the driver that checks it is still editable (`409 ApplicationNotEditable` with `details.applicationStatus` otherwise). A document confirmed while the driver submits either lands before the submit or is refused. Migration 007 adds only nullable columns, so existing drivers keep their status: verified drivers stay on the road, and pending ones become drafts.
 
 ### Application fields
 
@@ -117,9 +118,25 @@ Only the object key is stored. **No URL is ever stored, logged or returned to th
 
 `POST /drivers/me/application/submit` sets `submittedAt` once every field and all five documents are present and neither licence has expired. Otherwise `422 ApplicationIncomplete` with `details.missingFields`, `details.missingDocuments` and `details.expiredLicences`. The application view's `canSubmit` says the same in advance.
 
+Submitting a rejected application is a **resubmission**: the driver goes back to `PENDING` with a new `submittedAt`, and the rejection note is cleared from the driver row (the history keeps it, and the application view shows it as `lastReview`). Nothing forces a change first: the reviewer may have been wrong.
+
+### Reviews
+
+`POST /drivers/:id/application/review` with `{ "decision": "VERIFIED" | "REJECTED", "note"?, "submittedAt" }`, staff with `onboarding.review`:
+
+- **Compare-and-set on the submission.** `submittedAt` is the application's `submittedAt` as the reviewer saw it. The decision is written only while the driver is still `PENDING` with exactly that submission, under the driver row lock; a resubmission and a decision never interleave, and of two reviewers racing, one decides and the other gets `409`. Otherwise `409 ApplicationNotInReview` with `details.applicationStatus` (`DRAFT`, `VERIFIED`, `REJECTED`, or `SUBMITTED` when the driver resubmitted since).
+- **Idempotent.** Repeating the latest decision on the same submission, with the same note, is a no-op that returns the application unchanged; a different decision on a decided application is a `409`.
+- **A rejection needs a note** (3–300 characters, shown to the driver: what to fix). An approval needs a valid application at that moment: every document present and no licence expired since the submission, otherwise `422 ApplicationIncomplete`. A rejection is always allowed.
+- `VERIFIED` sets `verifiedAt`; `REJECTED` clears it (#206 then keeps the driver off the road).
+- The response is the staff view: the application plus `reviews`, newest first, each with the decision, note, reviewer, the submission it decided and the document versions that were current. The driver's own view has only `lastReview` (decision, note, time), never the reviewer.
+
+`driver_reviews` holds one row per decision: driver, reviewer user id, decision (`VERIFIED` or `REJECTED`, a CHECK), note, the submission decided, the ids of the current documents, time. It is **append-only**: a trigger refuses every `UPDATE`. Rows are deleted only with the driver (foreign key, `ON DELETE CASCADE`, for account deletion, #233). Decisions made with `PATCH /drivers/:id/verification` are written there too, in the same transaction (their `applicationSubmittedAt` is null for a driver who never applied); moving a driver back to `PENDING` is not a decision and writes nothing.
+
+Not here yet: a review queue listing (admin read APIs, #214), notifying the driver of the decision (#215), and the audit event (#213).
+
 ### Staff access
 
-`GET /drivers/:id/application` and `POST /drivers/:id/documents/:type/read-url` need an ADMIN token holding `onboarding.review` (#202); every other caller, including the driver, gets `403`.
+`GET /drivers/:id/application`, `POST /drivers/:id/application/review` and `POST /drivers/:id/documents/:type/read-url` need an ADMIN token holding `onboarding.review` (#202); every other caller, including the driver, gets `403`.
 
 The read URL is a presigned GET that lives 5 minutes, with `response-cache-control=no-store`, and the response itself carries `Cache-Control: no-store`. The read is recorded in `driver_document_access` **before** the URL is signed: if the record can't be written, no URL is issued.
 

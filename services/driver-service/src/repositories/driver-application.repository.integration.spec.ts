@@ -19,13 +19,17 @@ import { VerifyExistingDrivers1700000000003 } from '../database/migrations/004-v
 import { DriverAvailableSince1700000000004 } from '../database/migrations/005-driver-available-since';
 import { DriverEffectiveIdleIndex1700000000005 } from '../database/migrations/006-driver-effective-idle-index';
 import { DriverApplicationDocuments1700000000006 } from '../database/migrations/007-driver-application-documents';
+import { DriverReviews1700000000007 } from '../database/migrations/008-driver-reviews';
+import { DriverReview } from '../entities/driver-review.entity';
 import {
   ApplicationLockedError,
   DocumentVersionLimitError,
   DriverApplicationRepository,
   DuplicateNationalIdError,
   NewDocumentVersion,
+  NotInReviewError,
 } from './driver-application.repository';
+import { DriversRepository } from './drivers.repository';
 
 const DATABASE_URL = process.env.DRIVER_TEST_DATABASE_URL;
 const describeDb = DATABASE_URL ? describe : describe.skip;
@@ -38,8 +42,8 @@ const BEFORE_207 = [
   DriverAvailableSince1700000000004,
   DriverEffectiveIdleIndex1700000000005,
 ];
-const ALL_MIGRATIONS = [...BEFORE_207, DriverApplicationDocuments1700000000006];
-const ENTITIES = [Driver, DriverDocument, DriverDocumentAccess];
+const ALL_MIGRATIONS = [...BEFORE_207, DriverApplicationDocuments1700000000006, DriverReviews1700000000007];
+const ENTITIES = [Driver, DriverDocument, DriverDocumentAccess, DriverReview];
 
 const FIELDS = {
   nationalIdLast4: '4567',
@@ -101,13 +105,14 @@ describeDb('DriverApplicationRepository (PostgreSQL integration, #207)', () => {
       await before.destroy();
 
       await open();
-      expect(await ds.runMigrations()).toHaveLength(1);
+      expect(await ds.runMigrations()).toHaveLength(2);
 
       expect(await repo.findApplication(verified)).toMatchObject({ verificationStatus: 'VERIFIED', submittedAt: null, nationalIdLast4: null });
       expect(await repo.findApplication(pending)).toMatchObject({ verificationStatus: 'PENDING', submittedAt: null });
 
       await ds.undoLastMigration();
-      expect(await ds.runMigrations()).toHaveLength(1);
+      await ds.undoLastMigration();
+      expect(await ds.runMigrations()).toHaveLength(2);
     });
 
     it('enforces the value rules in the database too', async () => {
@@ -138,7 +143,7 @@ describeDb('DriverApplicationRepository (PostgreSQL integration, #207)', () => {
 
     it('saves the fields of a draft and never selects the hash', async () => {
       const driverId = await insertDriver();
-      await repo.saveFieldsIfDraft(driverId, FIELDS);
+      await repo.saveFieldsIfEditable(driverId, FIELDS);
 
       const row = await repo.findApplication(driverId);
       expect(row).toMatchObject({ nationalIdLast4: '4567', drivingLicenceExpiresOn: '2028-05-31', vehicleLicenceExpiresOn: '2027-01-15' });
@@ -149,21 +154,27 @@ describeDb('DriverApplicationRepository (PostgreSQL integration, #207)', () => {
     it('lets one national ID back only one driver account', async () => {
       const first = await insertDriver();
       const second = await insertDriver();
-      await repo.saveFieldsIfDraft(first, FIELDS);
-      await repo.saveFieldsIfDraft(first, FIELDS); // Saving your own ID again is fine.
+      await repo.saveFieldsIfEditable(first, FIELDS);
+      await repo.saveFieldsIfEditable(first, FIELDS); // Saving your own ID again is fine.
 
-      await expect(repo.saveFieldsIfDraft(second, FIELDS)).rejects.toBeInstanceOf(DuplicateNationalIdError);
+      await expect(repo.saveFieldsIfEditable(second, FIELDS)).rejects.toBeInstanceOf(DuplicateNationalIdError);
     });
 
-    it.each(['VERIFIED', 'REJECTED'] as const)('refuses to change a %s driver', async (status) => {
-      const driverId = await insertDriver(status);
-      await expect(repo.saveFieldsIfDraft(driverId, FIELDS)).rejects.toBeInstanceOf(ApplicationLockedError);
+    it('refuses to change a VERIFIED driver', async () => {
+      const driverId = await insertDriver('VERIFIED');
+      await expect(repo.saveFieldsIfEditable(driverId, FIELDS)).rejects.toBeInstanceOf(ApplicationLockedError);
+    });
+
+    it('lets a REJECTED driver correct the application to resubmit', async () => {
+      const driverId = await insertDriver('REJECTED');
+      await repo.saveFieldsIfEditable(driverId, FIELDS);
+      expect(await repo.findApplication(driverId)).toMatchObject({ verificationStatus: 'REJECTED', nationalIdLast4: '4567' });
     });
 
     it('refuses to change a submitted application', async () => {
       const driverId = await insertDriver();
       await ds.query(`UPDATE drivers SET "submittedAt" = now() WHERE id = $1`, [driverId]);
-      await expect(repo.saveFieldsIfDraft(driverId, FIELDS)).rejects.toBeInstanceOf(ApplicationLockedError);
+      await expect(repo.saveFieldsIfEditable(driverId, FIELDS)).rejects.toBeInstanceOf(ApplicationLockedError);
     });
   });
 
@@ -237,15 +248,15 @@ describeDb('DriverApplicationRepository (PostgreSQL integration, #207)', () => {
 
     it('sets submittedAt once, and a second submit is refused', async () => {
       const driverId = await insertDriver();
-      await repo.submitIfDraft(driverId, () => undefined);
+      await repo.submitIfEditable(driverId, () => undefined);
       expect((await repo.findApplication(driverId))?.submittedAt).toBeInstanceOf(Date);
-      await expect(repo.submitIfDraft(driverId, () => undefined)).rejects.toBeInstanceOf(ApplicationLockedError);
+      await expect(repo.submitIfEditable(driverId, () => undefined)).rejects.toBeInstanceOf(ApplicationLockedError);
     });
 
     it('writes nothing when the check refuses', async () => {
       const driverId = await insertDriver();
       await expect(
-        repo.submitIfDraft(driverId, () => {
+        repo.submitIfEditable(driverId, () => {
           throw new Error('incomplete');
         }),
       ).rejects.toThrow('incomplete');
@@ -254,12 +265,12 @@ describeDb('DriverApplicationRepository (PostgreSQL integration, #207)', () => {
 
     it('gives the check the locked driver and its current documents', async () => {
       const driverId = await insertDriver();
-      await repo.saveFieldsIfDraft(driverId, FIELDS);
+      await repo.saveFieldsIfEditable(driverId, FIELDS);
       await repo.addDocumentVersion(driverId, 'selfie', upload(), 5);
       await repo.addDocumentVersion(driverId, 'selfie', upload(), 5);
 
       const check = jest.fn();
-      await repo.submitIfDraft(driverId, check);
+      await repo.submitIfEditable(driverId, check);
       const [driver, documents] = check.mock.calls[0];
       expect(driver).toMatchObject({ id: driverId, nationalIdLast4: '4567' });
       expect(documents.map((document: DriverDocument) => document.version)).toEqual([2]);
@@ -268,7 +279,7 @@ describeDb('DriverApplicationRepository (PostgreSQL integration, #207)', () => {
     it('serializes a submit and a document confirm racing on the same draft', async () => {
       const driverId = await insertDriver();
       const outcomes = await Promise.allSettled([
-        repo.submitIfDraft(driverId, () => undefined),
+        repo.submitIfEditable(driverId, () => undefined),
         repo.addDocumentVersion(driverId, 'selfie', upload(), 5),
       ]);
       const submitted = (await repo.findApplication(driverId))?.submittedAt;
@@ -298,5 +309,135 @@ describeDb('DriverApplicationRepository (PostgreSQL integration, #207)', () => {
     });
     const [row] = await ds.query('SELECT * FROM driver_document_access WHERE id = $1', [record.id]);
     expect(Object.keys(row).sort()).toEqual(['accessedAt', 'documentId', 'documentType', 'documentVersion', 'driverId', 'id', 'staffUserId']);
+  });
+  describe('reviews and resubmission', () => {
+    beforeEach(async () => {
+      await freshSchema();
+      await open();
+    });
+
+    const reviewer = randomUUID();
+    const secondReviewer = randomUUID();
+
+    async function submittedDriver(): Promise<{ driverId: string; submittedAt: Date }> {
+      const driverId = await insertDriver();
+      await repo.saveFieldsIfEditable(driverId, { ...FIELDS, nationalIdHash: randomUUID().replace(/-/g, '').padEnd(64, '0') });
+      await repo.addDocumentVersion(driverId, 'selfie', upload(), 5);
+      await repo.submitIfEditable(driverId, () => undefined);
+      return { driverId, submittedAt: (await repo.findApplication(driverId))!.submittedAt as Date };
+    }
+
+    it('rejected, corrected, resubmitted and approved: the history keeps both reviews and their documents', async () => {
+      const { driverId, submittedAt } = await submittedDriver();
+      const firstSelfie = (await repo.currentDocuments(driverId))[0];
+
+      expect(
+        await repo.decideIfSubmitted(driverId, { decision: 'REJECTED', note: 'Selfie is blurry', reviewerUserId: reviewer, submittedAt }, () => undefined),
+      ).toBe('decided');
+      expect(await repo.findApplication(driverId)).toMatchObject({ verificationStatus: 'REJECTED', verificationNote: 'Selfie is blurry', verifiedAt: null });
+
+      // The rejected driver replaces the document and resubmits.
+      await repo.addDocumentVersion(driverId, 'selfie', upload(), 5);
+      await repo.submitIfEditable(driverId, () => undefined);
+      const resubmitted = (await repo.findApplication(driverId))!;
+      expect(resubmitted).toMatchObject({ verificationStatus: 'PENDING', verificationNote: null });
+      expect(resubmitted.submittedAt!.getTime()).toBeGreaterThan(submittedAt.getTime());
+      const secondSelfie = (await repo.currentDocuments(driverId))[0];
+
+      expect(
+        await repo.decideIfSubmitted(
+          driverId,
+          { decision: 'VERIFIED', note: null, reviewerUserId: secondReviewer, submittedAt: resubmitted.submittedAt! },
+          () => undefined,
+        ),
+      ).toBe('decided');
+      const approved = (await repo.findApplication(driverId))!;
+      expect(approved.verificationStatus).toBe('VERIFIED');
+      expect(approved.verifiedAt).toBeInstanceOf(Date);
+
+      const history = await repo.reviews(driverId);
+      expect(history.map(({ decision, note, reviewerUserId }) => ({ decision, note, reviewerUserId }))).toEqual([
+        { decision: 'VERIFIED', note: null, reviewerUserId: secondReviewer },
+        { decision: 'REJECTED', note: 'Selfie is blurry', reviewerUserId: reviewer },
+      ]);
+      expect(history[0].documentIds).toEqual([secondSelfie.id]);
+      expect(history[1].documentIds).toEqual([firstSelfie.id]);
+      expect(history[1].applicationSubmittedAt!.getTime()).toBe(submittedAt.getTime());
+      // The replaced version is still there for the review that used it.
+      expect((await repo.documentVersions([firstSelfie.id])).map(({ version }) => version)).toEqual([1]);
+    });
+
+    it('refuses a decision on a draft, or on a submission the driver has replaced', async () => {
+      const draft = await insertDriver();
+      await expect(
+        repo.decideIfSubmitted(draft, { decision: 'VERIFIED', note: null, reviewerUserId: reviewer, submittedAt: new Date() }, () => undefined),
+      ).rejects.toBeInstanceOf(NotInReviewError);
+
+      const { driverId, submittedAt } = await submittedDriver();
+      await expect(
+        repo.decideIfSubmitted(driverId, { decision: 'VERIFIED', note: null, reviewerUserId: reviewer, submittedAt: new Date(submittedAt.getTime() - 1000) }, () => undefined),
+      ).rejects.toBeInstanceOf(NotInReviewError);
+      expect(await repo.reviews(driverId)).toHaveLength(0);
+      expect((await repo.findApplication(driverId))!.verificationStatus).toBe('PENDING');
+    });
+
+    it('treats the same decision repeated as a no-op, and refuses to flip a decided application', async () => {
+      const { driverId, submittedAt } = await submittedDriver();
+      const reject = { decision: 'REJECTED' as const, note: 'Licence photo cut off', reviewerUserId: reviewer, submittedAt };
+      expect(await repo.decideIfSubmitted(driverId, reject, () => undefined)).toBe('decided');
+      expect(await repo.decideIfSubmitted(driverId, reject, () => undefined)).toBe('repeat');
+      await expect(
+        repo.decideIfSubmitted(driverId, { ...reject, decision: 'VERIFIED', note: null }, () => undefined),
+      ).rejects.toBeInstanceOf(NotInReviewError);
+      expect(await repo.reviews(driverId)).toHaveLength(1);
+    });
+
+    it('lets only one of two racing reviewers decide', async () => {
+      const { driverId, submittedAt } = await submittedDriver();
+      const outcomes = await Promise.allSettled([
+        repo.decideIfSubmitted(driverId, { decision: 'VERIFIED', note: null, reviewerUserId: reviewer, submittedAt }, () => undefined),
+        repo.decideIfSubmitted(driverId, { decision: 'REJECTED', note: 'Not readable', reviewerUserId: secondReviewer, submittedAt }, () => undefined),
+      ]);
+      expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
+      const refused = outcomes.find((outcome) => outcome.status === 'rejected') as PromiseRejectedResult;
+      expect(refused.reason).toBeInstanceOf(NotInReviewError);
+      expect(await repo.reviews(driverId)).toHaveLength(1);
+    });
+
+    it('writes nothing when the check refuses the decision', async () => {
+      const { driverId, submittedAt } = await submittedDriver();
+      await expect(
+        repo.decideIfSubmitted(driverId, { decision: 'VERIFIED', note: null, reviewerUserId: reviewer, submittedAt }, () => {
+          throw new Error('incomplete');
+        }),
+      ).rejects.toThrow('incomplete');
+      expect(await repo.reviews(driverId)).toHaveLength(0);
+      expect((await repo.findApplication(driverId))!.verificationStatus).toBe('PENDING');
+    });
+
+    it('keeps the history append-only, and deletes it with the driver', async () => {
+      const { driverId, submittedAt } = await submittedDriver();
+      await repo.decideIfSubmitted(driverId, { decision: 'REJECTED', note: 'Blurry', reviewerUserId: reviewer, submittedAt }, () => undefined);
+      await expect(ds.query(`UPDATE driver_reviews SET "note" = 'rewritten' WHERE "driverId" = $1`, [driverId])).rejects.toThrow(/append-only/);
+      await expect(ds.query(`INSERT INTO driver_reviews ("driverId", "reviewerUserId", "decision") VALUES ($1, $2, 'APPROVED')`, [driverId, reviewer])).rejects.toThrow(
+        /CHK_driver_reviews_decision/,
+      );
+
+      await ds.query('DELETE FROM drivers WHERE id = $1', [driverId]);
+      expect(await ds.getRepository(DriverReview).countBy({ driverId })).toBe(0);
+    });
+
+    it('records decisions made through the #147 admin route too, but not a move back to PENDING', async () => {
+      const { driverId } = await submittedDriver();
+      const drivers = new DriversRepository(ds.getRepository(Driver));
+      await drivers.updateVerification(driverId, { verificationStatus: 'VERIFIED', verificationNote: 'Checked in person', verifiedAt: new Date() }, reviewer);
+      await drivers.updateVerification(driverId, { verificationStatus: 'PENDING', verificationNote: null, verifiedAt: null }, reviewer);
+      await drivers.updateVerification(driverId, { verificationStatus: 'REJECTED', verificationNote: null, verifiedAt: null });
+
+      const history = await repo.reviews(driverId);
+      expect(history).toHaveLength(1);
+      expect(history[0]).toMatchObject({ decision: 'VERIFIED', note: 'Checked in person', reviewerUserId: reviewer });
+      expect(history[0].documentIds).toHaveLength(1);
+    });
   });
 });

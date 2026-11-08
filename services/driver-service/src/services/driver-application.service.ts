@@ -9,8 +9,11 @@ import {
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { Driver } from '../entities/driver.entity';
 import { DriverDocument } from '../entities/driver-document.entity';
+import { DriverReview, DriverReviewDecision } from '../entities/driver-review.entity';
 import {
   ApplicationLockedError,
+  NotInReviewError,
+  isEditable,
   DocumentVersionLimitError as RepositoryVersionLimitError,
   DriverApplicationRepository,
   DriverApplicationRow,
@@ -28,11 +31,12 @@ import {
 import {
   ApplicationIncompleteError,
   ApplicationNotEditableError,
+  ApplicationNotInReviewError,
   DocumentNotFoundError,
   DocumentVersionLimitError,
   NationalIdAlreadyRegisteredError,
 } from '../common/application-errors';
-import { SaveDriverApplicationDto } from '../dto/driver-application.dto';
+import { ReviewDriverApplicationDto, SaveDriverApplicationDto } from '../dto/driver-application.dto';
 
 export const DRIVER_DOCUMENT_STORAGE = Symbol('DRIVER_DOCUMENT_STORAGE');
 
@@ -47,17 +51,38 @@ export interface ApplicationDocumentView {
   uploadedAt: Date;
 }
 
+/** The latest decision, as the driver sees it (no reviewer). */
+export interface ApplicationReviewSummary {
+  decision: DriverReviewDecision;
+  note: string | null;
+  reviewedAt: Date;
+}
+
+/** One entry of the review history, for staff. */
+export interface ApplicationReviewView extends ApplicationReviewSummary {
+  id: string;
+  reviewerUserId: string;
+  applicationSubmittedAt: Date | null;
+  documents: { type: DriverDocumentType; version: number }[];
+}
+
 export interface DriverApplicationView {
   driverId: string;
   status: ApplicationStatus;
   submittedAt: Date | null;
   verificationNote: string | null;
+  lastReview: ApplicationReviewSummary | null;
   nationalIdLast4: string | null;
   drivingLicenceExpiresOn: string | null;
   vehicleLicenceExpiresOn: string | null;
   documents: ApplicationDocumentView[];
   missingDocuments: DriverDocumentType[];
   canSubmit: boolean;
+}
+
+/** The staff view also carries the whole review history, newest first. */
+export interface StaffDriverApplicationView extends DriverApplicationView {
+  reviews: ApplicationReviewView[];
 }
 
 export interface DocumentReadUrl {
@@ -72,10 +97,13 @@ export interface DocumentReadUrl {
 const MAX_EXPIRY_YEARS_AHEAD = 15;
 
 /**
- * The driver application (#207, first part): application fields, documents in the private bucket and
- * submitting for review. Reviews and resubmission, and the expiry job, come next.
+ * The driver application (#207): application fields, documents in the private bucket, submitting for
+ * review, staff decisions with their history, and resubmission after a rejection.
  *
- * - A driver is a draft (`PENDING`, no `submittedAt`) until they submit; only a draft can be edited.
+ * - A driver is a draft (`PENDING`, no `submittedAt`) until they submit. A draft or a rejected
+ *   application can be edited; submitting a rejected one sends it back to the review queue.
+ * - Staff decide a submitted application with a compare-and-set on that exact submission; every
+ *   decision is kept in `driver_reviews` with the document versions it looked at.
  * - Documents are uploaded straight to object storage through a presigned POST, then confirmed: the
  *   bytes are checked and copied to a key under the driver's own prefix. Only the key is stored.
  * - Only staff with `onboarding.review` ever get a URL to a document, valid five minutes, and every
@@ -91,7 +119,61 @@ export class DriverApplicationService {
 
   async getApplication(driverId: string, now = new Date()): Promise<DriverApplicationView> {
     const driver = await this.requireApplication(driverId);
-    return this.view(driver, await this.applications.currentDocuments(driverId), now);
+    const [documents, reviews] = await Promise.all([this.applications.currentDocuments(driverId), this.applications.reviews(driverId)]);
+    return this.view(driver, documents, reviews, now);
+  }
+
+  /** The application with the full review history, for staff with `onboarding.review`. */
+  async getApplicationForStaff(driverId: string, now = new Date()): Promise<StaffDriverApplicationView> {
+    const driver = await this.requireApplication(driverId);
+    const [documents, reviews] = await Promise.all([this.applications.currentDocuments(driverId), this.applications.reviews(driverId)]);
+    const versions = new Map(
+      (await this.applications.documentVersions([...new Set(reviews.flatMap((review) => review.documentIds))])).map((document) => [document.id, document]),
+    );
+    return {
+      ...this.view(driver, documents, reviews, now),
+      reviews: reviews.map((review) => ({
+        id: review.id,
+        decision: review.decision,
+        note: review.note,
+        reviewedAt: review.reviewedAt,
+        reviewerUserId: review.reviewerUserId,
+        applicationSubmittedAt: review.applicationSubmittedAt,
+        documents: review.documentIds
+          .map((id) => versions.get(id))
+          .filter((document): document is NonNullable<typeof document> => !!document)
+          .map(({ type, version }) => ({ type, version }))
+          .sort((a, b) => a.type.localeCompare(b.type)),
+      })),
+    };
+  }
+
+  /**
+   * A staff decision on a submitted application (`onboarding.review`, checked by the route's guard).
+   * `submittedAt` must be the submission the reviewer looked at: if the driver resubmitted since, the
+   * decision is refused (409). An approval needs a complete application with no expired licence (422).
+   * Repeating the same decision on the same submission returns the application unchanged.
+   */
+  async review(reviewerUserId: string, driverId: string, dto: ReviewDriverApplicationDto, now = new Date()): Promise<StaffDriverApplicationView> {
+    await this.requireApplication(driverId);
+    try {
+      await this.applications.decideIfSubmitted(
+        driverId,
+        { decision: dto.decision, note: dto.note ? dto.note : null, reviewerUserId, submittedAt: new Date(dto.submittedAt) },
+        (driver, documents) => {
+          if (dto.decision !== 'VERIFIED') return;
+          const problems = applicationProblems(driver, documents, cairoDate(now));
+          if (problems) throw new ApplicationIncompleteError(problems.missingFields, problems.missingDocuments, problems.expiredLicences);
+        },
+      );
+    } catch (error) {
+      if (error instanceof NotInReviewError) {
+        const driver = await this.applications.findApplication(driverId);
+        throw new ApplicationNotInReviewError(driver ? applicationStatus(driver) : 'UNKNOWN');
+      }
+      throw error;
+    }
+    return this.getApplicationForStaff(driverId, now);
   }
 
   async saveApplication(driverId: string, dto: SaveDriverApplicationDto, now = new Date()): Promise<DriverApplicationView> {
@@ -100,9 +182,9 @@ export class DriverApplicationService {
     assertExpiryDate('vehicleLicenceExpiresOn', dto.vehicleLicenceExpiresOn, today);
 
     const driver = await this.requireApplication(driverId);
-    assertDraft(driver);
+    assertEditable(driver);
     try {
-      await this.applications.saveFieldsIfDraft(driverId, {
+      await this.applications.saveFieldsIfEditable(driverId, {
         nationalIdLast4: dto.nationalIdNumber.slice(-4),
         nationalIdHash: this.hashNationalId(dto.nationalIdNumber),
         drivingLicenceExpiresOn: dto.drivingLicenceExpiresOn,
@@ -116,13 +198,13 @@ export class DriverApplicationService {
 
   async createUpload(driverId: string, type: string, contentType: string): Promise<PresignedUpload> {
     const documentType = parseDocumentType(type);
-    assertDraft(await this.requireApplication(driverId));
+    assertEditable(await this.requireApplication(driverId));
     return this.storage.createUpload(pendingDocumentPrefix(driverId, documentType), contentType, DRIVER_DOCUMENT_MAX_BYTES);
   }
 
   async confirmUpload(driverId: string, type: string, objectKey: string, now = new Date()): Promise<DriverApplicationView> {
     const documentType = parseDocumentType(type);
-    assertDraft(await this.requireApplication(driverId));
+    assertEditable(await this.requireApplication(driverId));
     const promoted = await this.storage.promote(
       objectKey,
       pendingDocumentPrefix(driverId, documentType),
@@ -150,11 +232,11 @@ export class DriverApplicationService {
     return this.getApplication(driverId, now);
   }
 
-  /** Sends a complete draft to the review queue. */
+  /** Sends a complete draft, or a corrected rejected application, to the review queue. */
   async submit(driverId: string, now = new Date()): Promise<DriverApplicationView> {
     await this.requireApplication(driverId);
     try {
-      await this.applications.submitIfDraft(driverId, (driver, documents) => {
+      await this.applications.submitIfEditable(driverId, (driver, documents) => {
         const problems = applicationProblems(driver, documents, cairoDate(now));
         if (problems) throw new ApplicationIncompleteError(problems.missingFields, problems.missingDocuments, problems.expiredLicences);
       });
@@ -205,20 +287,22 @@ export class DriverApplicationService {
     return error;
   }
 
-  private view(driver: DriverApplicationRow, documents: DriverDocument[], now: Date): DriverApplicationView {
+  private view(driver: DriverApplicationRow, documents: DriverDocument[], reviews: DriverReview[], now: Date): DriverApplicationView {
     const status = applicationStatus(driver);
     const present = new Set(documents.map((document) => document.type));
+    const latest = reviews[0];
     return {
       driverId: driver.id,
       status,
       submittedAt: driver.submittedAt,
       verificationNote: driver.verificationNote,
+      lastReview: latest ? { decision: latest.decision, note: latest.note, reviewedAt: latest.reviewedAt } : null,
       nationalIdLast4: driver.nationalIdLast4,
       drivingLicenceExpiresOn: driver.drivingLicenceExpiresOn,
       vehicleLicenceExpiresOn: driver.vehicleLicenceExpiresOn,
       documents: documents.map(({ type, version, contentType, sizeBytes, uploadedAt }) => ({ type, version, contentType, sizeBytes, uploadedAt })),
       missingDocuments: DRIVER_DOCUMENT_TYPES.filter((type) => !present.has(type)),
-      canSubmit: status === 'DRAFT' && !applicationProblems(driver, documents, cairoDate(now)),
+      canSubmit: isEditable(driver) && !applicationProblems(driver, documents, cairoDate(now)),
     };
   }
 }
@@ -228,9 +312,9 @@ export function applicationStatus(driver: Pick<Driver, 'verificationStatus' | 's
   return driver.verificationStatus;
 }
 
-function assertDraft(driver: DriverApplicationRow): void {
-  const status = applicationStatus(driver);
-  if (status !== 'DRAFT') throw new ApplicationNotEditableError(status);
+/** A draft or a rejected application (to resubmit) can change; a submitted or verified one can't. */
+function assertEditable(driver: DriverApplicationRow): void {
+  if (!isEditable(driver)) throw new ApplicationNotEditableError(applicationStatus(driver));
 }
 
 function parseDocumentType(type: string): DriverDocumentType {

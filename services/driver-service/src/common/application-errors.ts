@@ -1,7 +1,7 @@
 import { AppError } from '@food-delivery/shared';
 import { DriverDocumentType } from './driver-documents';
 
-/** #207: the application is submitted or decided, so the driver can't change it now (409). */
+/** #207: the application is submitted or verified, so the driver can't change it now (409). */
 export class ApplicationNotEditableError extends AppError {
   constructor(applicationStatus: string) {
     super(
@@ -9,7 +9,21 @@ export class ApplicationNotEditableError extends AppError {
       'ApplicationNotEditable',
       applicationStatus === 'SUBMITTED'
         ? 'Your application is waiting for review and can no longer be changed.'
-        : 'Your application can no longer be changed.',
+        : 'Your application is approved and can no longer be changed.',
+      { applicationStatus },
+    );
+  }
+}
+
+/** #207: a review was refused: the application isn't waiting for review, or was resubmitted since (409). */
+export class ApplicationNotInReviewError extends AppError {
+  constructor(applicationStatus: string) {
+    super(
+      409,
+      'ApplicationNotInReview',
+      applicationStatus === 'SUBMITTED'
+        ? 'The driver resubmitted the application. Reload it and review the new submission.'
+        : 'This application is not waiting for review.',
       { applicationStatus },
     );
   }

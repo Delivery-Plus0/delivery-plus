@@ -528,6 +528,15 @@ describe('DriversService', () => {
       expect(drivers.updateVerification).toHaveBeenCalledWith('driver-1', { verificationStatus: 'VERIFIED', verificationNote: null, verifiedAt: now });
     });
 
+    it('passes the admin on, so the decision is kept in the review history (#207)', async () => {
+      drivers.findById.mockResolvedValue(baseDriver as any);
+      drivers.updateVerification.mockResolvedValue({ ...baseDriver, verificationStatus: 'VERIFIED', verifiedAt: now } as any);
+
+      await service.setVerification('driver-1', { status: 'VERIFIED' }, now, 'admin-1');
+
+      expect(drivers.updateVerification).toHaveBeenCalledWith('driver-1', { verificationStatus: 'VERIFIED', verificationNote: null, verifiedAt: now }, 'admin-1');
+    });
+
     it('keeps the note and clears the time for a rejection', async () => {
       drivers.findById.mockResolvedValue(baseDriver as any);
       drivers.updateVerification.mockResolvedValue({ ...baseDriver, verificationStatus: 'REJECTED' } as any);

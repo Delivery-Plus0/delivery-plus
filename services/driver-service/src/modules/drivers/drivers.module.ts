@@ -5,6 +5,7 @@ import { PrivateDocumentStorage } from '@food-delivery/shared';
 import { Driver } from '../../entities/driver.entity';
 import { DriverDocument } from '../../entities/driver-document.entity';
 import { DriverDocumentAccess } from '../../entities/driver-document-access.entity';
+import { DriverReview } from '../../entities/driver-review.entity';
 import { DriversRepository } from '../../repositories/drivers.repository';
 import { DriverApplicationRepository } from '../../repositories/driver-application.repository';
 import { DriversService } from '../../services/drivers.service';
@@ -16,7 +17,7 @@ import { UserServiceClient } from '../../common/user-service.client';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Driver, DriverDocument, DriverDocumentAccess]),
+    TypeOrmModule.forFeature([Driver, DriverDocument, DriverDocumentAccess, DriverReview]),
     JwtModule.registerAsync({
       useFactory: (config: AppConfig) => ({ secret: config.jwtSecret }),
       inject: [APP_CONFIG],

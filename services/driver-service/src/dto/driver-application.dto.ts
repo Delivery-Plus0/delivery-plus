@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsIn, IsString, Matches, MaxLength } from 'class-validator';
+import { IsISO8601, IsIn, IsString, Matches, MaxLength, MinLength, ValidateIf } from 'class-validator';
 import { PRIVATE_DOCUMENT_CONTENT_TYPES } from '@food-delivery/shared';
 
 const DATE_ONLY = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
@@ -44,4 +44,33 @@ export class ConfirmDocumentUploadDto {
   @IsString()
   @MaxLength(255)
   objectKey!: string;
+}
+
+export const REVIEW_DECISIONS = ['VERIFIED', 'REJECTED'] as const;
+
+/** POST /drivers/:id/application/review (#207, staff with onboarding.review). */
+export class ReviewDriverApplicationDto {
+  @ApiProperty({ enum: REVIEW_DECISIONS })
+  @IsIn(REVIEW_DECISIONS)
+  decision!: (typeof REVIEW_DECISIONS)[number];
+
+  @ApiProperty({
+    required: false,
+    minLength: 3,
+    maxLength: 300,
+    description: 'Shown to the driver. Required to reject: tell the driver what to fix.',
+  })
+  @ValidateIf((dto: ReviewDriverApplicationDto) => dto.decision === 'REJECTED' || dto.note !== undefined)
+  @IsString()
+  @Transform(trim)
+  @MinLength(3)
+  @MaxLength(300)
+  note?: string;
+
+  @ApiProperty({
+    description: "The application's submittedAt as the reviewer saw it. If the driver resubmitted since, the review is refused (409).",
+    example: '2026-11-08T10:15:00.000Z',
+  })
+  @IsISO8601({ strict: true })
+  submittedAt!: string;
 }

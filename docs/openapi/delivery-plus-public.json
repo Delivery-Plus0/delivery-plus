@@ -3990,7 +3990,7 @@
         ]
       },
       "put": {
-        "summary": "Save your national ID and licence expiry dates (draft only)",
+        "summary": "Save your national ID and licence expiry dates (draft or rejected only)",
         "tags": [
           "drivers"
         ],
@@ -4023,7 +4023,7 @@
             "description": "Forbidden"
           },
           "409": {
-            "description": "NationalIdAlreadyRegistered: the national ID is on another driver account; ApplicationNotEditable: not a draft",
+            "description": "NationalIdAlreadyRegistered: the national ID is on another driver account; ApplicationNotEditable: submitted or verified",
             "content": {
               "application/json": {
                 "schema": {
@@ -4052,7 +4052,7 @@
     },
     "/api/drivers/me/documents/{type}/upload-url": {
       "post": {
-        "summary": "Get a presigned POST to upload one application document (JPEG, PNG or PDF, up to 10 MB; draft only)",
+        "summary": "Get a presigned POST to upload one application document (JPEG, PNG or PDF, up to 10 MB; draft or rejected only)",
         "tags": [
           "drivers"
         ],
@@ -4085,7 +4085,7 @@
             "description": "Forbidden"
           },
           "409": {
-            "description": "ApplicationNotEditable: the application is submitted or decided (details.applicationStatus)",
+            "description": "ApplicationNotEditable: the application is submitted or verified (details.applicationStatus)",
             "content": {
               "application/json": {
                 "schema": {
@@ -4127,7 +4127,7 @@
     },
     "/api/drivers/me/documents/{type}/confirm": {
       "post": {
-        "summary": "Confirm an uploaded document: it is checked and becomes the current version (draft only)",
+        "summary": "Confirm an uploaded document: it is checked and becomes the current version (draft or rejected only)",
         "tags": [
           "drivers"
         ],
@@ -4160,7 +4160,7 @@
             "description": "Forbidden"
           },
           "409": {
-            "description": "DocumentVersionLimitReached: 5 uploads of this type already; ApplicationNotEditable: not a draft",
+            "description": "DocumentVersionLimitReached: 5 uploads of this type already; ApplicationNotEditable: submitted or verified",
             "content": {
               "application/json": {
                 "schema": {
@@ -4202,7 +4202,7 @@
     },
     "/api/drivers/me/application/submit": {
       "post": {
-        "summary": "Send a complete application for review",
+        "summary": "Send a complete application for review, or resubmit a corrected rejected one",
         "tags": [
           "drivers"
         ],
@@ -4235,7 +4235,7 @@
             "description": "Forbidden"
           },
           "409": {
-            "description": "ApplicationNotEditable: the application is submitted or decided (details.applicationStatus)",
+            "description": "ApplicationNotEditable: the application is submitted or verified (details.applicationStatus)",
             "content": {
               "application/json": {
                 "schema": {
@@ -4264,18 +4264,18 @@
     },
     "/api/drivers/{id}/application": {
       "get": {
-        "summary": "A driver's application (staff with onboarding.review)",
+        "summary": "A driver's application with its review history (staff with onboarding.review)",
         "tags": [
           "drivers"
         ],
         "operationId": "drivers_get_api_drivers_id_application",
         "responses": {
           "200": {
-            "description": "The application",
+            "description": "The application with its review history",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DriverApplication"
+                  "$ref": "#/components/schemas/StaffDriverApplication"
                 }
               }
             }
@@ -4312,6 +4312,88 @@
             "bearerAuth": []
           }
         ]
+      }
+    },
+    "/api/drivers/{id}/application/review": {
+      "post": {
+        "summary": "Approve or reject a submitted driver application (staff with onboarding.review)",
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "drivers_post_api_drivers_id_application_review",
+        "responses": {
+          "200": {
+            "description": "Decided, or the same decision on the same submission repeated (no-op). The application with its review history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffDriverApplication"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Requires an ADMIN token with onboarding.review"
+          },
+          "409": {
+            "description": "ApplicationNotInReview: the application is not waiting for review, or the driver resubmitted since (details.applicationStatus)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "ApplicationIncomplete: an approval needs every document and no expired licence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationIncompleteError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DriverApplicationReviewRequest"
+              }
+            }
+          }
+        }
       }
     },
     "/api/drivers/{id}/documents/{type}/read-url": {
@@ -4507,7 +4589,7 @@
     },
     "/api/drivers/{id}/verification": {
       "patch": {
-        "summary": "Set a driver's verification status (admin only)",
+        "summary": "Set a driver's verification status (admin only; a decision is kept in the review history)",
         "tags": [
           "drivers"
         ],
@@ -6014,17 +6096,44 @@
               "VERIFIED",
               "REJECTED"
             ],
-            "description": "DRAFT: the driver can edit and submit. SUBMITTED: in the review queue. VERIFIED or REJECTED: decided."
+            "description": "DRAFT: the driver can edit and submit. SUBMITTED: in the review queue. VERIFIED: approved. REJECTED: the driver can correct the application and submit it again."
           },
           "submittedAt": {
             "type": "string",
             "format": "date-time",
-            "nullable": true
+            "nullable": true,
+            "description": "The latest submission. A reviewer sends it back with the decision."
           },
           "verificationNote": {
             "type": "string",
             "nullable": true,
             "description": "The reviewer's note, e.g. why the application was rejected."
+          },
+          "lastReview": {
+            "type": "object",
+            "nullable": true,
+            "description": "The latest decision, kept after a resubmission.",
+            "required": [
+              "decision",
+              "reviewedAt"
+            ],
+            "properties": {
+              "decision": {
+                "type": "string",
+                "enum": [
+                  "VERIFIED",
+                  "REJECTED"
+                ]
+              },
+              "note": {
+                "type": "string",
+                "nullable": true
+              },
+              "reviewedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
           },
           "nationalIdLast4": {
             "type": "string",
@@ -6091,9 +6200,115 @@
           }
         }
       },
+      "StaffDriverApplication": {
+        "description": "#207: the application as staff see it, with every decision, newest first.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/DriverApplication"
+          },
+          {
+            "type": "object",
+            "required": [
+              "reviews"
+            ],
+            "properties": {
+              "reviews": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "decision",
+                    "reviewedAt",
+                    "reviewerUserId",
+                    "documents"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "decision": {
+                      "type": "string",
+                      "enum": [
+                        "VERIFIED",
+                        "REJECTED"
+                      ]
+                    },
+                    "note": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "reviewedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "reviewerUserId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "applicationSubmittedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "nullable": true,
+                      "description": "The submission decided; null for a decision made with PATCH /drivers/:id/verification on a driver who never applied."
+                    },
+                    "documents": {
+                      "type": "array",
+                      "description": "The document versions that were current when the decision was made.",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "type",
+                          "version"
+                        ],
+                        "properties": {
+                          "type": {
+                            "$ref": "#/components/schemas/DriverDocumentType"
+                          },
+                          "version": {
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "DriverApplicationReviewRequest": {
+        "type": "object",
+        "required": [
+          "decision",
+          "submittedAt"
+        ],
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "VERIFIED",
+              "REJECTED"
+            ]
+          },
+          "note": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Shown to the driver. Required to reject."
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The application's submittedAt as the reviewer saw it; if the driver resubmitted since, the review is refused."
+          }
+        }
+      },
       "ApplicationIncompleteError": {
         "type": "object",
-        "description": "#207: 422 when submit is called before every field and document is in place.",
+        "description": "#207: 422 when submit is called before every field and document is in place, or a reviewer approves an application that is no longer valid.",
         "properties": {
           "statusCode": {
             "type": "integer",

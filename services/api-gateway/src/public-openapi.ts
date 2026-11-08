@@ -147,16 +147,17 @@ export const SERVICE_DEFINITIONS = [
       { method: 'post', path: '/me/offline', summary: 'Go offline', auth: true, statusCode: 201 },
       { method: 'post', path: '/me/status', summary: 'Set driver status explicitly', auth: true, statusCode: 201 },
       { method: 'get', path: '/me/application', summary: 'Your driver application: status, fields, documents (no URLs) and what is missing', auth: true, statusCode: 200 },
-      { method: 'put', path: '/me/application', summary: 'Save your national ID and licence expiry dates (draft only)', auth: true, statusCode: 200 },
-      { method: 'post', path: '/me/documents/:type/upload-url', summary: 'Get a presigned POST to upload one application document (JPEG, PNG or PDF, up to 10 MB; draft only)', auth: true, statusCode: 201 },
-      { method: 'post', path: '/me/documents/:type/confirm', summary: 'Confirm an uploaded document: it is checked and becomes the current version (draft only)', auth: true, statusCode: 200 },
-      { method: 'post', path: '/me/application/submit', summary: 'Send a complete application for review', auth: true, statusCode: 200 },
-      { method: 'get', path: '/:id/application', summary: "A driver's application (staff with onboarding.review)", auth: true, statusCode: 200 },
+      { method: 'put', path: '/me/application', summary: 'Save your national ID and licence expiry dates (draft or rejected only)', auth: true, statusCode: 200 },
+      { method: 'post', path: '/me/documents/:type/upload-url', summary: 'Get a presigned POST to upload one application document (JPEG, PNG or PDF, up to 10 MB; draft or rejected only)', auth: true, statusCode: 201 },
+      { method: 'post', path: '/me/documents/:type/confirm', summary: 'Confirm an uploaded document: it is checked and becomes the current version (draft or rejected only)', auth: true, statusCode: 200 },
+      { method: 'post', path: '/me/application/submit', summary: 'Send a complete application for review, or resubmit a corrected rejected one', auth: true, statusCode: 200 },
+      { method: 'get', path: '/:id/application', summary: "A driver's application with its review history (staff with onboarding.review)", auth: true, statusCode: 200 },
+      { method: 'post', path: '/:id/application/review', summary: 'Approve or reject a submitted driver application (staff with onboarding.review)', auth: true, statusCode: 200 },
       { method: 'post', path: '/:id/documents/:type/read-url', summary: "A 5-minute URL to view a driver's document (staff with onboarding.review; every read is recorded)", auth: true, statusCode: 200 },
       { method: 'get', path: '/available', summary: 'List available, verified drivers longest-idle first (availableSince ASC, id ASC; services only, SYSTEM token; not callable through the gateway)', auth: true, statusCode: 200 },
       { method: 'get', path: '/:id', summary: 'Get a driver by id (self or admin)', auth: true, statusCode: 200 },
       { method: 'patch', path: '/:id/status', summary: 'Claim or release a driver (services only, SYSTEM token; not callable through the gateway)', auth: true, statusCode: 200 },
-      { method: 'patch', path: '/:id/verification', summary: "Set a driver's verification status (admin only)", auth: true, statusCode: 200 },
+      { method: 'patch', path: '/:id/verification', summary: "Set a driver's verification status (admin only; a decision is kept in the review history)", auth: true, statusCode: 200 },
     ],
   },
   {
@@ -663,10 +664,22 @@ const baseSchemas = {
       status: {
         type: 'string',
         enum: ['DRAFT', 'SUBMITTED', 'VERIFIED', 'REJECTED'],
-        description: 'DRAFT: the driver can edit and submit. SUBMITTED: in the review queue. VERIFIED or REJECTED: decided.',
+        description:
+          'DRAFT: the driver can edit and submit. SUBMITTED: in the review queue. VERIFIED: approved. REJECTED: the driver can correct the application and submit it again.',
       },
-      submittedAt: { type: 'string', format: 'date-time', nullable: true },
+      submittedAt: { type: 'string', format: 'date-time', nullable: true, description: 'The latest submission. A reviewer sends it back with the decision.' },
       verificationNote: { type: 'string', nullable: true, description: "The reviewer's note, e.g. why the application was rejected." },
+      lastReview: {
+        type: 'object',
+        nullable: true,
+        description: 'The latest decision, kept after a resubmission.',
+        required: ['decision', 'reviewedAt'],
+        properties: {
+          decision: { type: 'string', enum: ['VERIFIED', 'REJECTED'] },
+          note: { type: 'string', nullable: true },
+          reviewedAt: { type: 'string', format: 'date-time' },
+        },
+      },
       nationalIdLast4: { type: 'string', nullable: true, example: '4567' },
       drivingLicenceExpiresOn: { type: 'string', format: 'date', nullable: true },
       vehicleLicenceExpiresOn: { type: 'string', format: 'date', nullable: true },
@@ -689,9 +702,63 @@ const baseSchemas = {
       canSubmit: { type: 'boolean' },
     },
   },
+  StaffDriverApplication: {
+    description: '#207: the application as staff see it, with every decision, newest first.',
+    allOf: [
+      { $ref: '#/components/schemas/DriverApplication' },
+      {
+        type: 'object',
+        required: ['reviews'],
+        properties: {
+          reviews: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['id', 'decision', 'reviewedAt', 'reviewerUserId', 'documents'],
+              properties: {
+                id: { type: 'string', format: 'uuid' },
+                decision: { type: 'string', enum: ['VERIFIED', 'REJECTED'] },
+                note: { type: 'string', nullable: true },
+                reviewedAt: { type: 'string', format: 'date-time' },
+                reviewerUserId: { type: 'string', format: 'uuid' },
+                applicationSubmittedAt: {
+                  type: 'string',
+                  format: 'date-time',
+                  nullable: true,
+                  description: 'The submission decided; null for a decision made with PATCH /drivers/:id/verification on a driver who never applied.',
+                },
+                documents: {
+                  type: 'array',
+                  description: 'The document versions that were current when the decision was made.',
+                  items: {
+                    type: 'object',
+                    required: ['type', 'version'],
+                    properties: { type: { $ref: '#/components/schemas/DriverDocumentType' }, version: { type: 'integer' } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    ],
+  },
+  DriverApplicationReviewRequest: {
+    type: 'object',
+    required: ['decision', 'submittedAt'],
+    properties: {
+      decision: { type: 'string', enum: ['VERIFIED', 'REJECTED'] },
+      note: { type: 'string', minLength: 3, maxLength: 300, description: 'Shown to the driver. Required to reject.' },
+      submittedAt: {
+        type: 'string',
+        format: 'date-time',
+        description: "The application's submittedAt as the reviewer saw it; if the driver resubmitted since, the review is refused.",
+      },
+    },
+  },
   ApplicationIncompleteError: {
     type: 'object',
-    description: '#207: 422 when submit is called before every field and document is in place.',
+    description: '#207: 422 when submit is called before every field and document is in place, or a reviewer approves an application that is no longer valid.',
     properties: {
       statusCode: { type: 'integer', example: 422 },
       error: { type: 'string', example: 'ApplicationIncomplete' },
@@ -1026,7 +1093,7 @@ export function generatePublicOpenApiDocument() {
         if (typeParameter) typeParameter.schema = { $ref: '#/components/schemas/DriverDocumentType' };
         const success = String(route.statusCode || 200);
         const notEditable = {
-          description: 'ApplicationNotEditable: the application is submitted or decided (details.applicationStatus)',
+          description: 'ApplicationNotEditable: the application is submitted or verified (details.applicationStatus)',
           content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } },
         };
 
@@ -1049,21 +1116,41 @@ export function generatePublicOpenApiDocument() {
           };
           operation.responses['409'] = notEditable;
           operation.responses['429'] = { description: 'Too many upload URLs (20 an hour)' };
+        } else if (route.path.startsWith('/:id/application')) {
+          operation.responses[success] = {
+            description: 'The application with its review history',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/StaffDriverApplication' } } },
+          };
+          operation.responses['403'] = { description: 'Requires an ADMIN token with onboarding.review' };
+          if (route.path.endsWith('/review')) {
+            operation.requestBody = {
+              required: true,
+              content: { 'application/json': { schema: { $ref: '#/components/schemas/DriverApplicationReviewRequest' } } },
+            };
+            operation.responses['200'].description =
+              'Decided, or the same decision on the same submission repeated (no-op). The application with its review history';
+            operation.responses['409'] = {
+              description:
+                'ApplicationNotInReview: the application is not waiting for review, or the driver resubmitted since (details.applicationStatus)',
+              content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } },
+            };
+            operation.responses['422'] = {
+              description: 'ApplicationIncomplete: an approval needs every document and no expired licence',
+              content: { 'application/json': { schema: { $ref: '#/components/schemas/ApplicationIncompleteError' } } },
+            };
+          }
         } else {
           operation.responses[success] = {
             description: 'The application',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/DriverApplication' } } },
           };
-          if (route.path === '/:id/application') {
-            operation.responses['403'] = { description: 'Requires an ADMIN token with onboarding.review' };
-          }
           if (route.method === 'put') {
             operation.requestBody = {
               required: true,
               content: { 'application/json': { schema: { $ref: '#/components/schemas/SaveDriverApplicationRequest' } } },
             };
             operation.responses['409'] = {
-              description: 'NationalIdAlreadyRegistered: the national ID is on another driver account; ApplicationNotEditable: not a draft',
+              description: 'NationalIdAlreadyRegistered: the national ID is on another driver account; ApplicationNotEditable: submitted or verified',
               content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } },
             };
           }
@@ -1073,7 +1160,7 @@ export function generatePublicOpenApiDocument() {
               content: { 'application/json': { schema: { $ref: '#/components/schemas/DriverDocumentConfirmRequest' } } },
             };
             operation.responses['409'] = {
-              description: 'DocumentVersionLimitReached: 5 uploads of this type already; ApplicationNotEditable: not a draft',
+              description: 'DocumentVersionLimitReached: 5 uploads of this type already; ApplicationNotEditable: submitted or verified',
               content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } },
             };
             operation.responses['429'] = { description: 'Too many confirms (30 an hour)' };

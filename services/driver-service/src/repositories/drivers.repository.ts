@@ -3,6 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, Repository } from 'typeorm';
 import { DriverStatus } from '@food-delivery/shared';
 import { Driver } from '../entities/driver.entity';
+import { DriverDocument } from '../entities/driver-document.entity';
+import { DriverReview } from '../entities/driver-review.entity';
 
 /** #206: the statuses that put a driver on the road. Only a VERIFIED driver can be moved into them. */
 export const ON_DUTY_STATUSES: readonly DriverStatus[] = [DriverStatus.AVAILABLE, DriverStatus.BUSY];
@@ -56,8 +58,30 @@ export class DriversRepository {
     return result.affected ? this.findById(id) : null;
   }
 
-  async updateVerification(id: string, data: Pick<Driver, 'verificationStatus' | 'verificationNote' | 'verifiedAt'>): Promise<Driver | null> {
-    await this.repo.update({ id }, data);
+  /**
+   * Sets the verification directly (#147 admin route). With a reviewer, a VERIFIED or REJECTED decision
+   * is also appended to the review history (#207) in the same transaction, with the documents current
+   * at that moment, so the history is complete whichever route an admin used.
+   */
+  async updateVerification(
+    id: string,
+    data: Pick<Driver, 'verificationStatus' | 'verificationNote' | 'verifiedAt'>,
+    reviewerUserId?: string,
+  ): Promise<Driver | null> {
+    await this.repo.manager.transaction(async (manager) => {
+      const result = await manager.update(Driver, { id }, data);
+      if (!result.affected || !reviewerUserId || data.verificationStatus === 'PENDING') return;
+      const driver = await manager.findOneOrFail(Driver, { where: { id } });
+      const documents = await manager.find(DriverDocument, { where: { driverId: id, isCurrent: true }, select: { id: true } });
+      await manager.insert(DriverReview, {
+        driverId: id,
+        reviewerUserId,
+        decision: data.verificationStatus,
+        note: data.verificationNote,
+        applicationSubmittedAt: driver.submittedAt,
+        documentIds: documents.map((document) => document.id).sort(),
+      });
+    });
     return this.findById(id);
   }
 

@@ -19,6 +19,7 @@ import {
   PhoneNotVerifiedError,
   CartChangedError,
   MAX_CART_ITEM_QUANTITY,
+  RestaurantUnavailableError,
 } from '@food-delivery/shared';
 
 describe('OrdersService', () => {
@@ -151,11 +152,20 @@ describe('OrdersService', () => {
       expect(orders.create).not.toHaveBeenCalled();
     });
 
-    it('still refuses a closed restaurant after the cart checks out', async () => {
+    it.each([
+      [RestaurantStatus.BUSY, 'RestaurantBusy'],
+      [RestaurantStatus.CLOSED, 'RestaurantClosed'],
+      [RestaurantStatus.SUSPENDED, 'RestaurantClosed'],
+    ])('refuses a %s restaurant with 409 %s and creates nothing (#286)', async (status, code) => {
       cartClient.getCart.mockResolvedValue(cartWith([{ price: 10, quantity: 1 }]) as any);
-      restaurantClient.getRestaurant.mockResolvedValue({ id: 'rest-1', status: RestaurantStatus.CLOSED } as any);
+      restaurantClient.getRestaurant.mockResolvedValue({ id: 'rest-1', status } as any);
 
-      await expect(service.createFromCart('customer-1', 'Bearer x', undefined, { deliveryAddress: '1 St' } as any)).rejects.toThrow('Restaurant is currently closed');
+      const error = await service
+        .createFromCart('customer-1', 'Bearer x', undefined, { deliveryAddress: '1 St' } as any)
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(RestaurantUnavailableError);
+      expect(error).toMatchObject({ statusCode: 409, error: code, details: { restaurantStatus: status } });
+      expect(orders.create).not.toHaveBeenCalled();
     });
   });
 
@@ -197,7 +207,7 @@ describe('OrdersService', () => {
       await expect(service.createFromCart('customer-1', 'Bearer x')).rejects.toThrow(BadRequestError);
     });
 
-    it('throws BadRequestError when restaurant is not OPEN', async () => {
+    it('refuses a restaurant that is not OPEN with 409 RestaurantClosed (#286)', async () => {
       cartClient.getCart.mockResolvedValue({
         userId: 'c1',
         restaurantId: 'rest-1',
@@ -213,7 +223,7 @@ describe('OrdersService', () => {
         deliveryRadiusKm: 5,
       });
 
-      await expect(service.createFromCart('customer-1', 'Bearer x')).rejects.toThrow(BadRequestError);
+      await expect(service.createFromCart('customer-1', 'Bearer x')).rejects.toMatchObject({ statusCode: 409, error: 'RestaurantClosed' });
     });
 
     it('creates the order and clears the cart when everything is valid', async () => {

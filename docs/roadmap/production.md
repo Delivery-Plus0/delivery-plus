@@ -86,6 +86,7 @@ done
 - **Email provider (#203):** Amazon SES. The owner does the AWS setup in `docs/runbooks/email-ses.md`; bounces and complaints follow in #242.
 - **The admin console** is a separate private app on Expo Router web.
 - **No cash on delivery.**
+- **Busy restaurants (#286):** a BUSY restaurant takes no new orders; customers can browse and keep a cart and are told to try again in a few minutes. `docs/business/restaurant-availability.md`.
 
 **Still needed, before the milestone shown**
 

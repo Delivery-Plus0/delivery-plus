@@ -25,6 +25,7 @@ import {
   PhoneNotVerifiedError,
   MAX_CART_ITEM_QUANTITY,
   OutOfDeliveryAreaError,
+  RestaurantUnavailableError,
   haversineKm,
 } from '@food-delivery/shared';
 import { DeliveryAddress, OrdersRepository } from '../repositories/orders.repository';
@@ -222,8 +223,9 @@ export class OrdersService implements OnModuleInit {
     }
 
     const restaurant = await this.restaurantClient.getRestaurant(cart.restaurantId);
+    // #286: only OPEN restaurants take orders; BUSY says "try again shortly", CLOSED/SUSPENDED say closed.
     if (restaurant.status !== RestaurantStatus.OPEN) {
-      throw new BadRequestError('Restaurant is currently closed');
+      throw new RestaurantUnavailableError(restaurant.status);
     }
 
     const delivery = await this.resolveDeliveryAddress(checkout, authHeader);

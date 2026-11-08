@@ -13,6 +13,8 @@ From `services/cart-service/src/controllers/cart.controller.ts`:
 - `DELETE /cart` – clear the entire cart
 - `POST /cart/validate` – re-check the cart against the menu before checkout (#42); order-service calls it when an order is placed
 
+Each cart item is `{ menuItemId, name, price, quantity, imageUrl }`. `imageUrl` is the menu item's primary photo (or `null`), copied when the item is added and refreshed at validation (#286). Carts saved before #286 may not have it, so clients treat a missing value as no photo.
+
 ## Checkout re-validation (#42)
 
 - **Quantity cap:** at most `MAX_CART_ITEM_QUANTITY` (20) of one item. Adding past it is a 400; the DTOs reject larger quantities.

@@ -66,6 +66,22 @@ describe('CartService', () => {
       expect(result.restaurantId).toBe('rest-1');
     });
 
+    it('stores the menu photo with the item (#286)', async () => {
+      menuServiceClient.getItem.mockResolvedValue({
+        id: 'item-1',
+        restaurantId: 'rest-1',
+        name: 'Burger',
+        price: 9.99,
+        available: true,
+        imageUrl: 'https://cdn.example/burger.jpg',
+      });
+      seed(null);
+
+      const result = await service.addItem('user-1', { menuItemId: 'item-1', quantity: 1 });
+
+      expect(result.items[0]).toMatchObject({ menuItemId: 'item-1', imageUrl: 'https://cdn.example/burger.jpg' });
+    });
+
     it('increments quantity when the item already exists in the cart', async () => {
       menuServiceClient.getItem.mockResolvedValue({
         id: 'item-1',
@@ -206,8 +222,8 @@ describe('CartService', () => {
         { menuItemId: 'many', name: 'Menu many', change: 'QUANTITY_LIMITED', previousQuantity: 50, currentQuantity: MAX_CART_ITEM_QUANTITY },
       ]);
       expect(stored()?.items).toEqual([
-        { menuItemId: 'cheaper', name: 'Menu cheaper', price: 45, quantity: 1 },
-        { menuItemId: 'many', name: 'Menu many', price: 3, quantity: MAX_CART_ITEM_QUANTITY },
+        { menuItemId: 'cheaper', name: 'Menu cheaper', price: 45, quantity: 1, imageUrl: null },
+        { menuItemId: 'many', name: 'Menu many', price: 3, quantity: MAX_CART_ITEM_QUANTITY, imageUrl: null },
       ]);
     });
 
@@ -224,7 +240,15 @@ describe('CartService', () => {
       menuServiceClient.getItem.mockResolvedValue(menu('a', 10));
 
       await expect(service.validateForCheckout('user-1')).resolves.toMatchObject({ items: [{ name: 'Menu a', price: 10 }] });
-      expect(stored()?.items).toEqual([{ menuItemId: 'a', name: 'Menu a', price: 10, quantity: 1 }]);
+      expect(stored()?.items).toEqual([{ menuItemId: 'a', name: 'Menu a', price: 10, quantity: 1, imageUrl: null }]);
+    });
+
+    it('quietly refreshes a new photo without reporting a change (#286)', async () => {
+      seed({ ...cartOf(), items: [{ menuItemId: 'a', name: 'Menu a', price: 10, quantity: 1, imageUrl: null }] });
+      menuServiceClient.getItem.mockResolvedValue(menu('a', 10, { imageUrl: 'https://cdn.example/a.jpg' }));
+
+      await expect(service.validateForCheckout('user-1')).resolves.toMatchObject({ items: [{ imageUrl: 'https://cdn.example/a.jpg' }] });
+      expect(stored()?.items[0].imageUrl).toBe('https://cdn.example/a.jpg');
     });
 
     it('does not hide a menu-service outage as a removed item', async () => {

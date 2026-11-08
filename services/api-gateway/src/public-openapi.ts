@@ -267,6 +267,22 @@ const baseSchemas = {
       },
     },
   },
+  RestaurantUnavailableError: {
+    type: 'object',
+    required: ['statusCode', 'error', 'message', 'details'],
+    properties: {
+      statusCode: { type: 'integer', example: 409 },
+      error: { type: 'string', enum: ['RestaurantBusy', 'RestaurantClosed'], description: 'RestaurantBusy: try again in a few minutes. RestaurantClosed: CLOSED or SUSPENDED.' },
+      message: { type: 'string' },
+      details: {
+        type: 'object',
+        required: ['restaurantStatus'],
+        properties: {
+          restaurantStatus: { type: 'string', enum: ['BUSY', 'CLOSED', 'SUSPENDED'] },
+        },
+      },
+    },
+  },
   OutOfDeliveryAreaError: {
     type: 'object',
     required: ['statusCode', 'error', 'message', 'details'],
@@ -986,12 +1002,18 @@ export function generatePublicOpenApiDocument() {
       if (route.method === 'post' && ((service.service === 'orders' && route.path === '') || (service.service === 'cart' && route.path === '/validate'))) {
         operation.responses['409'] = {
           description: service.service === 'orders'
-            ? 'CartChanged: the cart was out of date with the menu; OutOfDeliveryArea: the drop-off exceeds the restaurant radius.'
+            ? 'CartChanged: the cart was out of date with the menu; OutOfDeliveryArea: the drop-off exceeds the restaurant radius; RestaurantBusy / RestaurantClosed: the restaurant is not taking orders right now (#286).'
             : 'CartChanged: the cart was out of date with the menu and has been updated; review it and try again',
           content: {
             'application/json': {
               schema: service.service === 'orders'
-                ? { oneOf: [{ $ref: '#/components/schemas/CartChangedError' }, { $ref: '#/components/schemas/OutOfDeliveryAreaError' }] }
+                ? {
+                    oneOf: [
+                      { $ref: '#/components/schemas/CartChangedError' },
+                      { $ref: '#/components/schemas/OutOfDeliveryAreaError' },
+                      { $ref: '#/components/schemas/RestaurantUnavailableError' },
+                    ],
+                  }
                 : { $ref: '#/components/schemas/CartChangedError' },
             },
           },

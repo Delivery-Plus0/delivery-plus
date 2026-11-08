@@ -3,6 +3,8 @@ export interface CartItem {
   name: string;
   price: number;
   quantity: number;
+  /** The menu item's photo when added or last validated (#286); null without one. Older carts may lack it. */
+  imageUrl?: string | null;
 }
 
 export interface Cart {

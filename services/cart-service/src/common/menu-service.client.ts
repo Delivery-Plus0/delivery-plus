@@ -8,6 +8,8 @@ export interface MenuItemDetails {
   name: string;
   price: number;
   available: boolean;
+  /** The item's primary photo, or null. */
+  imageUrl?: string | null;
   /** Archived items (#148) are kept for old orders but can never be bought again. */
   archived?: boolean;
 }
@@ -33,6 +35,7 @@ export class MenuServiceClient {
       name: string;
       price: string;
       available: boolean;
+      imageUrl?: string | null;
       archivedAt?: string | null;
     };
     return {
@@ -41,6 +44,7 @@ export class MenuServiceClient {
       name: body.name,
       price: parseFloat(body.price),
       available: body.available,
+      imageUrl: body.imageUrl ?? null,
       archived: Boolean(body.archivedAt),
     };
   }

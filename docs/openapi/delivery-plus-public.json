@@ -2441,7 +2441,7 @@
             "description": "Forbidden"
           },
           "409": {
-            "description": "CartChanged: the cart was out of date with the menu; OutOfDeliveryArea: the drop-off exceeds the restaurant radius.",
+            "description": "CartChanged: the cart was out of date with the menu; OutOfDeliveryArea: the drop-off exceeds the restaurant radius; RestaurantBusy / RestaurantClosed: the restaurant is not taking orders right now (#286).",
             "content": {
               "application/json": {
                 "schema": {
@@ -2451,6 +2451,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/OutOfDeliveryAreaError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RestaurantUnavailableError"
                     }
                   ]
                 }
@@ -4948,6 +4951,48 @@
                 "enum": [
                   "PENDING",
                   "REJECTED"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "RestaurantUnavailableError": {
+        "type": "object",
+        "required": [
+          "statusCode",
+          "error",
+          "message",
+          "details"
+        ],
+        "properties": {
+          "statusCode": {
+            "type": "integer",
+            "example": 409
+          },
+          "error": {
+            "type": "string",
+            "enum": [
+              "RestaurantBusy",
+              "RestaurantClosed"
+            ],
+            "description": "RestaurantBusy: try again in a few minutes. RestaurantClosed: CLOSED or SUSPENDED."
+          },
+          "message": {
+            "type": "string"
+          },
+          "details": {
+            "type": "object",
+            "required": [
+              "restaurantStatus"
+            ],
+            "properties": {
+              "restaurantStatus": {
+                "type": "string",
+                "enum": [
+                  "BUSY",
+                  "CLOSED",
+                  "SUSPENDED"
                 ]
               }
             }

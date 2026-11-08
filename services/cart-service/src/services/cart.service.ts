@@ -65,12 +65,14 @@ export class CartService {
       }
       if (existing) {
         existing.quantity += dto.quantity;
+        existing.imageUrl = item.imageUrl ?? null;
       } else {
         cart.items.push({
           menuItemId: item.id,
           name: item.name,
           price: item.price,
           quantity: dto.quantity,
+          imageUrl: item.imageUrl ?? null,
         });
       }
 
@@ -145,7 +147,7 @@ export class CartService {
         changes.push({ menuItemId: item.menuItemId, name: current.name, change: 'UNAVAILABLE' });
         continue;
       }
-      const next: CartItem = { ...item, name: current.name, price: current.price };
+      const next: CartItem = { ...item, name: current.name, price: current.price, imageUrl: current.imageUrl ?? null };
       if (toPiasters(current.price) !== toPiasters(item.price)) {
         changes.push({ menuItemId: item.menuItemId, name: current.name, change: 'PRICE_CHANGED', previousPrice: item.price, currentPrice: current.price });
       }
@@ -153,7 +155,8 @@ export class CartService {
         next.quantity = MAX_CART_ITEM_QUANTITY;
         changes.push({ menuItemId: item.menuItemId, name: current.name, change: 'QUANTITY_LIMITED', previousQuantity: item.quantity, currentQuantity: MAX_CART_ITEM_QUANTITY });
       }
-      if (next.name !== item.name) refreshed = true;
+      // A new name or photo is refreshed silently: nothing the customer pays differs (#286).
+      if (next.name !== item.name || (item.imageUrl ?? null) !== (current.imageUrl ?? null)) refreshed = true;
       kept.push(next);
     }
 

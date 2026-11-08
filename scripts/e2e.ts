@@ -518,6 +518,24 @@ async function runE2E() {
       throw new Error(`Quote: ${JSON.stringify(quote)}`);
     }
 
+    // Busy restaurants (#286): a BUSY restaurant takes no orders (409 RestaurantBusy, nothing created, the
+    // cart kept); once the owner reopens it the same cart checks out.
+    const orderTotal = async () => (await axios.get(`${API_URL}/api/orders?limit=1`, customerAuth)).data.total as number;
+    const ordersBefore = await orderTotal();
+    await axios.patch(`${API_URL}/api/restaurants/${restaurantId}/status`, { status: 'BUSY' }, ownerAuth);
+    let busyOutcome: { status: number; error?: string };
+    try {
+      busyOutcome = await outcomeOf(axios.post(`${API_URL}/api/orders`, {}, customerAuth));
+    } finally {
+      await axios.patch(`${API_URL}/api/restaurants/${restaurantId}/status`, { status: 'OPEN' }, ownerAuth);
+    }
+    const cartAfterBusy = (await axios.get(`${API_URL}/api/cart`, customerAuth)).data;
+    const ordersAfter = await orderTotal();
+    if (busyOutcome.status !== 409 || busyOutcome.error !== 'RestaurantBusy' || cartAfterBusy.items?.length !== 1 || ordersAfter !== ordersBefore) {
+      throw new Error(`Busy restaurant: expected 409 RestaurantBusy with the cart kept and no order, got ${JSON.stringify(busyOutcome)}, cart ${cartAfterBusy.items?.length}`);
+    }
+    console.log('Busy restaurant: checkout 409 RestaurantBusy, cart kept, no order; reopened');
+
     // 4. Create Order (CREATED)
     const orderRes = await axios.post(`${API_URL}/api/orders`, {}, customerAuth);
     const orderId = orderRes.data.id;

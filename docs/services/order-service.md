@@ -39,6 +39,17 @@ At checkout, order-service fetches the restaurant's current public record from r
 
 For compatibility, the check is skipped if either the restaurant or drop-off has no coordinates; this closes when customer-app #54 sends coordinates and restaurant/order flow #208 makes location mandatory at submit. A rejected request creates no order/outbox event and does not clear the cart. Delivery fees remain flat and are not distance-based.
 
+## Restaurant availability at checkout (#286)
+
+Only an **OPEN** restaurant takes new orders (owner decision, [restaurant availability](../business/restaurant-availability.md)). Checkout reads the restaurant's current status after the cart is validated and before the address check:
+
+| Status | Response | `details` |
+| --- | --- | --- |
+| `BUSY` | `409 RestaurantBusy`: busy right now, try again in a few minutes | `{ restaurantStatus: 'BUSY' }` |
+| `CLOSED`, `SUSPENDED` | `409 RestaurantClosed` | `{ restaurantStatus }` |
+
+A refused checkout creates no order, outbox event or payment and keeps the cart, so the customer can order once the restaurant reopens.
+
 ## Order outcomes and payment status (#143)
 
 Every order that ends unsuccessfully says who ended it and why, recorded **with** the status change (same compare-and-set), never worked out by clients:

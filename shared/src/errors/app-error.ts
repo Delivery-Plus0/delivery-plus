@@ -163,6 +163,24 @@ export class OutOfDeliveryAreaError extends AppError {
 }
 
 /**
+ * #286 (owner decision, Nov 2026): only an OPEN restaurant takes new orders. BUSY is temporary, so the
+ * customer is told to try again shortly; CLOSED and SUSPENDED read as closed.
+ */
+export class RestaurantUnavailableError extends AppError {
+  constructor(restaurantStatus: string) {
+    const busy = restaurantStatus === 'BUSY';
+    super(
+      409,
+      busy ? 'RestaurantBusy' : 'RestaurantClosed',
+      busy
+        ? 'The restaurant is busy right now and is not taking new orders. Try again in a few minutes.'
+        : 'The restaurant is closed right now and is not taking orders.',
+      { restaurantStatus },
+    );
+  }
+}
+
+/**
  * #153: whether ordering and going online need a verified phone. Off unless PHONE_VERIFICATION_REQUIRED=true;
  * turn it on only together with a real SMS provider, or nobody could verify.
  */

@@ -201,6 +201,7 @@ services:
       - INTERNAL_AUTH_ALLOWED_SERVICES=${INTERNAL_AUTH_ALLOWED_SERVICES:-menu-service,order-service}
       - DEFAULT_DELIVERY_RADIUS_KM=${DEFAULT_DELIVERY_RADIUS_KM:-5}
       - MENU_SERVICE_URL=http://menu-service:3004
+      - SYSTEM_JWT_SECRET=${SYSTEM_JWT_SECRET:?SYSTEM_JWT_SECRET must be set, this stack runs with NODE_ENV=production}
     healthcheck:
       test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3003/health/ready']
       interval: 5s

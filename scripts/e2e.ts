@@ -898,6 +898,22 @@ async function runE2E() {
     }
     console.log(`Driver card: ${card.displayName}, ${card.vehicleType ?? 'no vehicle'} ${card.licensePlate ?? ''}; another customer 403`);
 
+    // Contact during the delivery (#211): while it is active the driver gets the customer's and the
+    // restaurant's phones and the customer gets the driver's; the restaurant owner gets none.
+    const phoneOf = async (auth: { headers: { Authorization: string } }) => ((await axios.get(`${API_URL}/api/users/me`, auth)).data.phone ?? null) as string | null;
+    const [customerPhone, driverPhone] = [await phoneOf(customerAuth), await phoneOf(driverAuth)];
+    const activeContacts = {
+      customerPhone: current.data.customerPhone,
+      restaurantPhone: current.data.restaurantPhone,
+      driverPhone: (await axios.get(byOrderUrl, customerAuth)).data.driverPhone,
+      ownerSees: (await axios.get(byOrderUrl, ownerAuth)).data.driverPhone,
+    };
+    const expectedContacts = { customerPhone, restaurantPhone: '+201000000000', driverPhone, ownerSees: null };
+    if (JSON.stringify(activeContacts) !== JSON.stringify(expectedContacts)) {
+      throw new Error(`Delivery contacts while active: got ${JSON.stringify(activeContacts)}, expected ${JSON.stringify(expectedContacts)}`);
+    }
+    console.log('Delivery contacts: the driver sees the customer and restaurant phones, the customer the driver\'s, the owner none');
+
     // Realtime stream (#135): authorized before streaming, then pushes what changes.
     const anonymousStream = await openTrackingStream(deliveryId, null);
     const outsiderStream = await openTrackingStream(deliveryId, outsider.data.accessToken);
@@ -929,6 +945,13 @@ async function runE2E() {
     if (afterComplete.status !== 204) {
       throw new Error(`After completion the driver should have no current delivery (204), got ${afterComplete.status}`);
     }
+    // #211: once delivered, no number is returned again, history included.
+    const endedDriverPhone = (await axios.get(byOrderUrl, customerAuth)).data.driverPhone;
+    const driverHistory = JSON.stringify((await axios.get(`${API_URL}/api/deliveries/me/history`, driverAuth)).data);
+    if (endedDriverPhone !== null || /\+20\d{10}/.test(driverHistory)) {
+      throw new Error(`After delivery: driverPhone ${endedDriverPhone}, history ${/\+20\d{10}/.test(driverHistory) ? 'has' : 'has no'} a phone number`);
+    }
+    console.log('Delivery contacts after delivery: no driver phone for the customer, no phone in the driver history');
     const endedTracking = (await axios.get(trackingUrl, customerAuth)).data;
     if (endedTracking.tracking !== 'ENDED' || endedTracking.location !== null) {
       throw new Error(`Customer tracking after delivery: expected ENDED without a position, got ${JSON.stringify(endedTracking)}`);

@@ -1,3 +1,4 @@
+import { DeliveryContactService } from './delivery-contact.service';
 import { DeliveriesService, stageTime } from './deliveries.service';
 import { LedgerRepository } from '../repositories/ledger.repository';
 import { AppConfig } from '../config/app-config';
@@ -36,6 +37,7 @@ describe('DeliveriesService', () => {
   let outbox: { kick: jest.Mock };
   let restaurantClient: jest.Mocked<RestaurantServiceClient>;
   let ledger: { appendOnce: jest.Mock };
+  let contacts: { forDriver: jest.Mock };
 
   const baseDelivery = {
     id: 'delivery-1',
@@ -98,6 +100,7 @@ describe('DeliveriesService', () => {
     outbox = { kick: jest.fn() };
     restaurantClient = { getRestaurant: jest.fn() } as unknown as jest.Mocked<RestaurantServiceClient>;
     ledger = { appendOnce: jest.fn() };
+    contacts = { forDriver: jest.fn().mockResolvedValue({ customerPhone: '+201000000001', restaurantPhone: '+201000000002' }) };
     service = new DeliveriesService(
       deliveries,
       orderClient,
@@ -106,6 +109,7 @@ describe('DeliveriesService', () => {
       restaurantClient,
       ledger as unknown as LedgerRepository,
       { earningsSettlementHours: 12 } as AppConfig,
+      contacts as unknown as DeliveryContactService,
     );
   });
 
@@ -331,7 +335,11 @@ describe('DeliveriesService', () => {
         dropOff: { address: '9 Nile Corniche', notes: 'Gate 42', latitude: 30.0444, longitude: 31.2357 },
         order: { id: 'order-1', items: [{ name: 'Burger', quantity: 2 }], totalAmount: '19.98' },
         nextActions: ['pickup'],
+        customerPhone: '+201000000001',
+        restaurantPhone: '+201000000002',
       });
+      // #211: the contacts for this delivery, the order's customer and restaurant, shown to this driver.
+      expect(contacts.forDriver).toHaveBeenCalledWith(assigned, { customerId: fullOrder.customerId, restaurantId: fullOrder.restaurantId }, 'user-1');
     });
 
     it.each([

@@ -4,6 +4,7 @@ import type { Response } from 'express';
 import { JwtAuthGuard, CurrentUser, JwtPayload, Roles, RolesGuard, UserRole } from '@food-delivery/shared';
 import { DeliveriesService } from '../services/deliveries.service';
 import { DriverCardService } from '../services/driver-card.service';
+import { DeliveryContactService } from '../services/delivery-contact.service';
 import { CreateDeliveryDto } from '../dto/create-delivery.dto';
 import { CancelDeliveryDto } from '../dto/cancel-delivery.dto';
 import { DriverCurrentDeliveryDto } from '../dto/driver-current-delivery.dto';
@@ -25,6 +26,7 @@ export class DeliveriesController {
     private readonly driverHistory: DriverHistoryService,
     private readonly ratings: RatingsService,
     private readonly earnings: EarningsService,
+    private readonly contacts: DeliveryContactService,
   ) {}
 
   @Post()
@@ -161,7 +163,7 @@ export class DeliveriesController {
   @ApiOperation({
     summary: 'Get the delivery for an order (order owner, its restaurant owner, the assigned driver, or admin)',
     description:
-      'Includes `driver`: a customer-safe card (first name, photo, vehicle, plate) once a driver is assigned, null otherwise or when it cannot be composed (#140).',
+      'Includes `driver`: a customer-safe card (first name, photo, vehicle, plate) once a driver is assigned, null otherwise or when it cannot be composed (#140). Includes `driverPhone` for the order\'s customer only, while the delivery is active (#211); null otherwise.',
   })
   async getByOrderId(
     @Param('orderId') orderId: string,
@@ -171,7 +173,9 @@ export class DeliveriesController {
     // Authorization happens in getByOrderId; the card is only added to a delivery the reader may see.
     const delivery = await this.deliveriesService.getByOrderId(orderId, { userId: user.sub, role: user.role, authHeader });
     const driver = delivery.driverId ? await this.driverCards.getCard(delivery.driverId) : null;
-    return { ...delivery, driver };
+    // #211: the customer of the order may call the driver while the delivery is active; nobody else.
+    const driverPhone = user.role === UserRole.CUSTOMER ? await this.contacts.forCustomer(delivery, user.sub) : null;
+    return { ...delivery, driver, driverPhone };
   }
 
   @Get(':id')

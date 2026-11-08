@@ -468,4 +468,10 @@ describe('RestaurantsService', () => {
       });
     });
   });
+  it('gives delivery-service the contact phone, even before approval (#211)', async () => {
+    repo.findById.mockResolvedValue({ ...baseRestaurant, contactPhone: '+201012345678' });
+    await expect(service.getContact('r1')).resolves.toEqual({ id: 'r1', contactPhone: '+201012345678' });
+    repo.findById.mockResolvedValue(null);
+    await expect(service.getContact('r1')).rejects.toThrow(NotFoundError);
+  });
 });

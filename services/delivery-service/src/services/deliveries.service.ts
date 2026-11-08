@@ -21,6 +21,7 @@ import { DeliveriesRepository } from '../repositories/deliveries.repository';
 import { OrderServiceClient } from '../common/order-service.client';
 import { DriverDto, DriverServiceClient, DriverStatusRejectedError } from '../common/driver-service.client';
 import { RestaurantServiceClient } from '../common/restaurant-service.client';
+import { DeliveryContactService } from './delivery-contact.service';
 import { OutboxRelayService } from '../common/outbox-relay.service';
 import { DriverCurrentDeliveryDto, NEXT_DRIVER_ACTIONS } from '../dto/driver-current-delivery.dto';
 import { CreateDeliveryDto } from '../dto/create-delivery.dto';
@@ -104,6 +105,7 @@ export class DeliveriesService {
     private readonly restaurantClient: RestaurantServiceClient,
     private readonly ledger: LedgerRepository,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
+    private readonly contacts: DeliveryContactService,
   ) {}
 
   async create(requester: DeliveryRequester, dto: CreateDeliveryDto): Promise<Delivery> {
@@ -290,6 +292,8 @@ export class DeliveriesService {
 
     const order = await this.orderClient.getOrder(delivery.orderId);
     const restaurant = await this.restaurantClient.getRestaurant(order.restaurantId);
+    // #211: the customer's and restaurant's phones while the delivery is active.
+    const contacts = await this.contacts.forDriver(delivery, { customerId: order.customerId, restaurantId: order.restaurantId }, driver.userId);
 
     return {
       id: delivery.id,
@@ -311,6 +315,7 @@ export class DeliveriesService {
         totalAmount: order.totalAmount ?? '0.00',
       },
       nextActions: NEXT_DRIVER_ACTIONS[delivery.status] ?? [],
+      ...contacts,
     };
   }
 

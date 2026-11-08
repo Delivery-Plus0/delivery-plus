@@ -49,4 +49,9 @@ export class DriverCurrentDeliveryDto {
   @ApiProperty({ type: DropOffDto }) dropOff!: DropOffDto;
   @ApiProperty({ type: OrderSummaryDto }) order!: OrderSummaryDto;
   @ApiProperty({ enum: ['pickup', 'start', 'complete'], isArray: true }) nextActions!: DriverDeliveryAction[];
+  /** #211: only while the delivery is active, and only to its driver. Every reveal is recorded. */
+  @ApiProperty({ nullable: true, type: String, description: "The customer's phone (E.164) while the delivery is active; null otherwise or when unknown." })
+  customerPhone!: string | null;
+  @ApiProperty({ nullable: true, type: String, description: "The restaurant's contact phone (E.164) while the delivery is active; null otherwise or when unknown." })
+  restaurantPhone!: string | null;
 }

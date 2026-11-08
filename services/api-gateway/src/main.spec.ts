@@ -104,6 +104,14 @@ describe('gateway internal route exposure', () => {
     expect(isBlockedInternalRoute('/api/restaurants')).toBe(false);
   });
 
+  it("blocks the services-only restaurant contact route through the gateway (#211)", () => {
+    expect(isBlockedInternalRoute('/api/restaurants/550e8400-e29b-41d4-a716-446655440000/contact')).toBe(true);
+    expect(isBlockedInternalRoute('/API/Restaurants/550e8400-e29b-41d4-a716-446655440000/Contact/')).toBe(true);
+    expect(isBlockedInternalRoute('/api/restaurants/550e8400-e29b-41d4-a716-446655440000/contact-us')).toBe(false);
+    const document = generatePublicOpenApiDocument();
+    expect(document.paths['/api/restaurants/{id}/contact']).toBeUndefined();
+  });
+
   it('exposes owner restaurant selection and hides the internal ownership oracle', () => {
     const document = generatePublicOpenApiDocument();
     expect(document.paths['/api/restaurants/me'].get.security).toEqual([{ bearerAuth: [] }]);

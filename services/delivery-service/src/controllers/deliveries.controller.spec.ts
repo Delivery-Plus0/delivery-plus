@@ -7,6 +7,9 @@ import { DriverCardService } from '../services/driver-card.service';
 import { DriverHistoryService } from '../services/driver-history.service';
 import { RatingsService } from '../services/ratings.service';
 import { EarningsService } from '../services/earnings.service';
+import { DeliveryContactService } from '../services/delivery-contact.service';
+
+const contacts = { forCustomer: jest.fn().mockResolvedValue(null), forDriver: jest.fn() };
 
 describe('DeliveriesController', () => {
   it('requires a valid JWT on every route, including the read routes (401 otherwise)', () => {
@@ -15,7 +18,7 @@ describe('DeliveriesController', () => {
 
   it('passes the requester and their token through so ownership can be checked', async () => {
     const service = { getById: jest.fn(), getByOrderId: jest.fn().mockResolvedValue({ id: 'delivery-1' }) };
-    const controller = new DeliveriesController(service as any, { getCard: jest.fn() } as unknown as DriverCardService, {} as DriverHistoryService, {} as RatingsService, {} as EarningsService);
+    const controller = new DeliveriesController(service as any, { getCard: jest.fn() } as unknown as DriverCardService, {} as DriverHistoryService, {} as RatingsService, {} as EarningsService, contacts as unknown as DeliveryContactService);
     const user = { sub: 'customer-1', email: 'c@example.com', role: 'CUSTOMER' } as any;
 
     await controller.getById('delivery-1', user, 'Bearer t');
@@ -24,6 +27,30 @@ describe('DeliveriesController', () => {
     const reader = { userId: 'customer-1', role: 'CUSTOMER', authHeader: 'Bearer t' };
     expect(service.getById).toHaveBeenCalledWith('delivery-1', reader);
     expect(service.getByOrderId).toHaveBeenCalledWith('order-1', reader);
+  });
+
+  it("adds the driver's phone for the order's customer only (#211)", async () => {
+    const delivery = { id: 'delivery-1', status: 'IN_TRANSIT', driverId: 'driver-1' };
+    const service = { getByOrderId: jest.fn().mockResolvedValue(delivery) };
+    const phones = { forCustomer: jest.fn().mockResolvedValue('+201000000003') };
+    const controller = new DeliveriesController(
+      service as any,
+      { getCard: jest.fn().mockResolvedValue(null) } as unknown as DriverCardService,
+      {} as DriverHistoryService,
+      {} as RatingsService,
+      {} as EarningsService,
+      phones as unknown as DeliveryContactService,
+    );
+
+    const customer = await controller.getByOrderId('order-1', { sub: 'customer-1', role: UserRole.CUSTOMER } as JwtPayload, 'Bearer t');
+    expect(customer).toMatchObject({ driverPhone: '+201000000003' });
+    expect(phones.forCustomer).toHaveBeenCalledWith(delivery, 'customer-1');
+
+    for (const role of [UserRole.RESTAURANT_OWNER, UserRole.ADMIN, UserRole.DRIVER]) {
+      const other = await controller.getByOrderId('order-1', { sub: 'someone', role } as JwtPayload, 'Bearer t');
+      expect(other).toMatchObject({ driverPhone: null });
+    }
+    expect(phones.forCustomer).toHaveBeenCalledTimes(1);
   });
 
   describe('GET me/current', () => {
@@ -39,7 +66,7 @@ describe('DeliveriesController', () => {
       const service = { getCurrentForDriver: jest.fn().mockResolvedValue(current) };
       const res = { status: jest.fn() };
 
-      await expect(new DeliveriesController(service as unknown as DeliveriesService, {} as DriverCardService, {} as DriverHistoryService, {} as RatingsService, {} as EarningsService).getMyCurrent('Bearer driver', res as unknown as Response)).resolves.toBe(current);
+      await expect(new DeliveriesController(service as unknown as DeliveriesService, {} as DriverCardService, {} as DriverHistoryService, {} as RatingsService, {} as EarningsService, contacts as unknown as DeliveryContactService).getMyCurrent('Bearer driver', res as unknown as Response)).resolves.toBe(current);
       expect(service.getCurrentForDriver).toHaveBeenCalledWith('Bearer driver');
       expect(res.status).not.toHaveBeenCalled();
     });
@@ -48,7 +75,7 @@ describe('DeliveriesController', () => {
       const service = { getCurrentForDriver: jest.fn().mockResolvedValue(null) };
       const res = { status: jest.fn() };
 
-      await expect(new DeliveriesController(service as unknown as DeliveriesService, {} as DriverCardService, {} as DriverHistoryService, {} as RatingsService, {} as EarningsService).getMyCurrent('Bearer driver', res as unknown as Response)).resolves.toBeUndefined();
+      await expect(new DeliveriesController(service as unknown as DeliveriesService, {} as DriverCardService, {} as DriverHistoryService, {} as RatingsService, {} as EarningsService, contacts as unknown as DeliveryContactService).getMyCurrent('Bearer driver', res as unknown as Response)).resolves.toBeUndefined();
       expect(res.status).toHaveBeenCalledWith(204);
     });
   });
@@ -60,7 +87,7 @@ describe('DeliveriesController', () => {
     it('adds the card for an assigned delivery the reader is allowed to see', async () => {
       const service = { getByOrderId: jest.fn().mockResolvedValue({ id: 'delivery-1', driverId: 'driver-1', status: 'DRIVER_ASSIGNED' }) };
       const cards = { getCard: jest.fn().mockResolvedValue(card) };
-      const result = await new DeliveriesController(service as unknown as DeliveriesService, cards as unknown as DriverCardService, {} as DriverHistoryService, {} as RatingsService, {} as EarningsService).getByOrderId('order-1', user, 'Bearer t');
+      const result = await new DeliveriesController(service as unknown as DeliveriesService, cards as unknown as DriverCardService, {} as DriverHistoryService, {} as RatingsService, {} as EarningsService, contacts as unknown as DeliveryContactService).getByOrderId('order-1', user, 'Bearer t');
 
       expect(result).toMatchObject({ id: 'delivery-1', driverId: 'driver-1', driver: card });
       expect(cards.getCard).toHaveBeenCalledWith('driver-1');
@@ -69,7 +96,7 @@ describe('DeliveriesController', () => {
     it('no driver yet: driver is null and no lookup happens', async () => {
       const service = { getByOrderId: jest.fn().mockResolvedValue({ id: 'delivery-1', status: 'CREATED' }) };
       const cards = { getCard: jest.fn() };
-      const result = await new DeliveriesController(service as unknown as DeliveriesService, cards as unknown as DriverCardService, {} as DriverHistoryService, {} as RatingsService, {} as EarningsService).getByOrderId('order-1', user, 'Bearer t');
+      const result = await new DeliveriesController(service as unknown as DeliveriesService, cards as unknown as DriverCardService, {} as DriverHistoryService, {} as RatingsService, {} as EarningsService, contacts as unknown as DeliveryContactService).getByOrderId('order-1', user, 'Bearer t');
 
       expect(result).toMatchObject({ driver: null });
       expect(cards.getCard).not.toHaveBeenCalled();
@@ -78,7 +105,7 @@ describe('DeliveriesController', () => {
     it('another customer: authorization fails first, so no card is ever composed', async () => {
       const service = { getByOrderId: jest.fn().mockRejectedValue(new Error('You do not have access to this order')) };
       const cards = { getCard: jest.fn() };
-      await expect(new DeliveriesController(service as unknown as DeliveriesService, cards as unknown as DriverCardService, {} as DriverHistoryService, {} as RatingsService, {} as EarningsService).getByOrderId('order-1', user, 'Bearer other')).rejects.toThrow('access');
+      await expect(new DeliveriesController(service as unknown as DeliveriesService, cards as unknown as DriverCardService, {} as DriverHistoryService, {} as RatingsService, {} as EarningsService, contacts as unknown as DeliveryContactService).getByOrderId('order-1', user, 'Bearer other')).rejects.toThrow('access');
       expect(cards.getCard).not.toHaveBeenCalled();
     });
   });
@@ -93,7 +120,7 @@ describe('DeliveriesController', () => {
     it('passes the caller token and the validated query to the history service', async () => {
       const page = { items: [], page: 2, limit: 5, total: 0, totalPages: 1 };
       const history = { getForDriver: jest.fn().mockResolvedValue(page) };
-      const controller = new DeliveriesController({} as DeliveriesService, {} as DriverCardService, history as unknown as DriverHistoryService, {} as RatingsService, {} as EarningsService);
+      const controller = new DeliveriesController({} as DeliveriesService, {} as DriverCardService, history as unknown as DriverHistoryService, {} as RatingsService, {} as EarningsService, contacts as unknown as DeliveryContactService);
 
       await expect(controller.getMyHistory('Bearer driver', { status: 'completed', page: 2, limit: 5 })).resolves.toBe(page);
       expect(history.getForDriver).toHaveBeenCalledWith('Bearer driver', { status: 'completed', page: 2, limit: 5 });
@@ -112,7 +139,7 @@ describe('DeliveriesController', () => {
     it('answers 201 for a new rating and 200 for an identical retry', async () => {
       const rating = { score: 5, comment: null, createdAt: new Date() };
       const ratings = { rate: jest.fn().mockResolvedValueOnce({ rating, created: true }).mockResolvedValueOnce({ rating, created: false }) };
-      const controller = new DeliveriesController({} as DeliveriesService, {} as DriverCardService, {} as DriverHistoryService, ratings as unknown as RatingsService, {} as EarningsService);
+      const controller = new DeliveriesController({} as DeliveriesService, {} as DriverCardService, {} as DriverHistoryService, ratings as unknown as RatingsService, {} as EarningsService, contacts as unknown as DeliveryContactService);
       const user = { sub: 'customer-1', role: UserRole.CUSTOMER } as JwtPayload;
       const res = { status: jest.fn() };
 

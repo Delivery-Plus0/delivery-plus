@@ -404,6 +404,46 @@ const baseSchemas = {
         },
       },
       nextActions: { type: 'array', items: { type: 'string', enum: ['pickup', 'start', 'complete'] } },
+      customerPhone: {
+        type: 'string',
+        nullable: true,
+        example: '+201012345678',
+        description: "#211: the customer's phone while the delivery is active, only for its driver; every reveal is recorded. Null when unknown.",
+      },
+      restaurantPhone: {
+        type: 'string',
+        nullable: true,
+        example: '+201112345678',
+        description: "#211: the restaurant's contact phone while the delivery is active, only for its driver. Null when unknown.",
+      },
+    },
+  },
+  DeliveryForOrder: {
+    type: 'object',
+    description: 'The delivery of an order, with the customer-safe driver card (#140) and, for the order\'s customer only, the driver\'s phone (#211).',
+    required: ['id', 'orderId', 'status', 'driver', 'driverPhone'],
+    additionalProperties: true,
+    properties: {
+      id: { type: 'string', format: 'uuid' },
+      orderId: { type: 'string', format: 'uuid' },
+      status: { type: 'string', enum: ['CREATED', 'DRIVER_ASSIGNED', 'PICKED_UP', 'IN_TRANSIT', 'DELIVERED', 'CANCELLED'] },
+      driver: {
+        type: 'object',
+        nullable: true,
+        properties: {
+          displayName: { type: 'string' },
+          avatarUrl: { type: 'string', nullable: true },
+          vehicleType: { type: 'string', nullable: true },
+          licensePlate: { type: 'string', nullable: true },
+        },
+      },
+      driverPhone: {
+        type: 'string',
+        nullable: true,
+        example: '+201012345678',
+        description:
+          "#211: the driver's phone, for the order's customer only and only while the delivery is active (DRIVER_ASSIGNED, PICKED_UP, IN_TRANSIT); null otherwise. Every reveal is recorded.",
+      },
     },
   },
   DriverHistoryPage: {
@@ -1117,6 +1157,13 @@ export function generatePublicOpenApiDocument() {
           content: {
             'application/json': { schema: { $ref: `#/components/schemas/${requestSchema}` } },
           },
+        };
+      }
+
+      if (route.method === 'get' && service.service === 'deliveries' && route.path === '/by-order/:orderId') {
+        operation.responses['200'] = {
+          description: 'The delivery, with the driver card and the driver\'s phone for the customer during an active delivery',
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/DeliveryForOrder' } } },
         };
       }
 

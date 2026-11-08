@@ -7,6 +7,9 @@ import { DriverRatingSummary } from '../../entities/driver-rating-summary.entity
 import { RatingsRepository } from '../../repositories/ratings.repository';
 import { RatingsService } from '../../services/ratings.service';
 import { DriverLedgerEntry } from '../../entities/driver-ledger-entry.entity';
+import { DeliveryContactService } from '../../services/delivery-contact.service';
+import { ContactRevealsRepository } from '../../repositories/contact-reveals.repository';
+import { DeliveryContactReveal } from '../../entities/delivery-contact-reveal.entity';
 import { LedgerRepository } from '../../repositories/ledger.repository';
 import { EarningsService } from '../../services/earnings.service';
 import { DeliveriesRepository } from '../../repositories/deliveries.repository';
@@ -26,7 +29,7 @@ import { APP_CONFIG, AppConfig } from '../../config/app-config';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Delivery, DeliveryRating, DriverRatingSummary, DriverLedgerEntry]),
+    TypeOrmModule.forFeature([Delivery, DeliveryRating, DriverRatingSummary, DriverLedgerEntry, DeliveryContactReveal]),
     JwtModule.registerAsync({
       useFactory: (config: AppConfig) => ({ secret: config.jwtSecret }),
       inject: [APP_CONFIG],
@@ -50,6 +53,8 @@ import { APP_CONFIG, AppConfig } from '../../config/app-config';
     LedgerRepository,
     EarningsService,
     SystemTokenService,
+    DeliveryContactService,
+    ContactRevealsRepository,
   ],
 })
 export class DeliveriesModule {}

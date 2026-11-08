@@ -16,6 +16,7 @@ From `services/restaurant-service/src/controllers/restaurants.controller.ts`:
 - `POST /restaurants/:id/review` – approve or reject a submitted application (staff with `onboarding.review`)
 - `PATCH /restaurants/:id/status` – update status (owner or admin; an owner opens only an approved restaurant)
 - `PATCH /restaurants/:id/delivery-radius` – set the delivery radius in kilometers (admin only; staff permission support arrives with #212)
+- `GET /restaurants/:id/contact` – services only (SYSTEM token, blocked at the gateway): the contact phone, for delivery-service during an active delivery (#211)
 - `GET /restaurants/:id/ownership/:userId` – internal ownership verification used by menu-service and order-service; requires the shared HMAC internal-auth guard and Redis nonce replay protection
 - `POST /restaurants/:id/image-upload-url` – create a presigned cover/logo POST policy (owner only)
 - `POST /restaurants/:id/image-confirm` – verify the uploaded cover/logo and save its public URL (owner only)
@@ -41,6 +42,7 @@ From `services/restaurant-service/src/config/app-config.ts`:
 - `INTERNAL_AUTH_ALLOWED_SERVICES` or legacy `INTERNAL_AUTH_ALLOWED_SERVICE` (comma-delimited trusted internal callers; default: `menu-service,order-service`)
 - `DEFAULT_DELIVERY_RADIUS_KM` (default: `5`; must be greater than 0 and no more than 50)
 - `MENU_SERVICE_URL` (default: `http://localhost:3004`; #208, the submit and approval menu check)
+- `SYSTEM_JWT_SECRET` (#211; verifies delivery-service's SYSTEM token on the contact route; required in production, local default otherwise)
 - `AWS_REGION`, `AWS_S3_BUCKET`, and `AWS_PUBLIC_BASE_URL`; S3 endpoint and credentials are configurable for the local media-storage service (SeaweedFS's S3 gateway) or a cloud provider
 
 ## Notes

@@ -4,6 +4,8 @@ import { JwtModule, JwtService } from '@nestjs/jwt';
 import {
   AllExceptionsFilter,
   ForbiddenError,
+  GATEWAY_MARKER_HEADER,
+  LOCAL_SYSTEM_JWT_SECRET,
   INTERNAL_AUTH_HEADERS,
   signInternalRequest,
   UserRole,
@@ -36,6 +38,7 @@ const restaurantsService = {
   submit: jest.fn(),
   getApplicationForStaff: jest.fn(),
   review: jest.fn(),
+  getContact: jest.fn(),
 };
 const silentLogger = { log: jest.fn() };
 
@@ -103,6 +106,7 @@ describe('RestaurantsController HTTP boundaries', () => {
     restaurantsService.submit.mockReset().mockResolvedValue({ id: restaurantId, approvalStatus: 'SUBMITTED' });
     restaurantsService.getApplicationForStaff.mockReset().mockResolvedValue({ id: restaurantId, reviews: [] });
     restaurantsService.review.mockReset().mockResolvedValue({ id: restaurantId, approvalStatus: 'APPROVED', reviews: [] });
+    restaurantsService.getContact.mockReset().mockResolvedValue({ id: restaurantId, contactPhone: '+201012345678' });
   });
 
   afterAll(async () => {
@@ -451,6 +455,32 @@ describe('RestaurantsController HTTP boundaries', () => {
       expect(restaurantsService.update).toHaveBeenCalledWith(restaurantId, ownerA, expect.objectContaining({ contactPhone: '+201012345678', legalName: 'Kitchen LLC' }));
       expect((await call('PATCH', `/restaurants/${restaurantId}`, owner, { contactPhone: '0223456789' })).status).toBe(400);
       expect((await call('PATCH', `/restaurants/${restaurantId}`, owner, { cuisineTags: ['a', 'b', 'c', 'd', 'e', 'f'].map((tag) => tag.repeat(3)) })).status).toBe(400);
+    });
+  });
+  describe('GET /restaurants/:id/contact (#211)', () => {
+    const systemToken = () => jwt.sign({ sub: 'delivery-service', role: UserRole.SYSTEM }, { secret: LOCAL_SYSTEM_JWT_SECRET });
+    const contact = (token?: string, headers: Record<string, string> = {}) =>
+      fetch(`${baseUrl}/restaurants/${restaurantId}/contact`, { headers: { ...(token ? { Authorization: 'Bearer ' + token } : {}), ...headers } });
+
+    it('answers a service with a SYSTEM token', async () => {
+      const response = await contact(systemToken());
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ id: restaurantId, contactPhone: '+201012345678' });
+    });
+
+    it.each([
+      ['no token', undefined, 401],
+      ['the owner', () => ownerToken(ownerA, UserRole.RESTAURANT_OWNER), 403],
+      ['an admin', () => ownerToken(ownerA, UserRole.ADMIN, ['onboarding.review']), 403],
+      ['a customer', () => ownerToken(ownerA, UserRole.CUSTOMER), 403],
+    ] as const)('refuses %s', async (_label, token, status) => {
+      expect((await contact(typeof token === 'function' ? token() : token)).status).toBe(status);
+      expect(restaurantsService.getContact).not.toHaveBeenCalled();
+    });
+
+    it('refuses a SYSTEM token that came through the public gateway', async () => {
+      expect((await contact(systemToken(), { [GATEWAY_MARKER_HEADER]: '1' })).status).toBeGreaterThanOrEqual(401);
+      expect(restaurantsService.getContact).not.toHaveBeenCalled();
     });
   });
 });

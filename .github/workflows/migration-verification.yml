@@ -176,6 +176,7 @@ jobs:
 
           check delivery_service     "select count(*) from information_schema.tables where table_name='deliveries'" "table deliveries"
           check delivery_service     "select count(*) from pg_indexes where indexname='UQ_deliveries_orderId'" "index UQ_deliveries_orderId"
+          check delivery_service     "select count(*) from information_schema.tables where table_name='delivery_contact_reveals'" "table delivery_contact_reveals"
 
           check driver_service       "select count(*) from information_schema.tables where table_name='drivers'" "table drivers"
           check driver_service       "select count(*) from pg_indexes where indexname='UQ_drivers_userId'" "index UQ_drivers_userId"

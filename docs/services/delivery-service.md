@@ -23,7 +23,8 @@ From `services/delivery-service/src/controllers/deliveries.controller.ts`:
 ## Dependencies
 - Calls `order-service` to validate order state and update order status
 - Calls `driver-service` to find and update drivers, and to resolve the calling driver (`GET /drivers/me` with their own token)
-- Calls `restaurant-service` (public read) for the pickup name and address
+- Calls `restaurant-service` (public read) for the pickup name and address, and its services-only contact route (SYSTEM token) for the restaurant's phone (#211)
+- Calls `user-service` (SYSTEM token) for the driver card and, during an active delivery, the participants' phones (#211)
 - Uses PostgreSQL for delivery records
 - Uses Redis for durable Kafka idempotency (consumer group `delivery-service-group`)
 - Publishes `delivery.events`; consumes `order.ready_for_pickup` (auto-dispatch)
@@ -48,6 +49,17 @@ Every lifecycle transition publishes to `delivery.events`: `delivery.created`, `
 
 Consumed from:
 - `order.events` → `order.ready_for_pickup` (auto-dispatch, below), with durable per-group idempotency
+
+## Contact during a delivery (#211)
+
+Owner decision: direct numbers for the pilot, only between the delivery's participants and only while it is active. Masked calling can later return a proxy number in the same fields, with no API change.
+
+- **The window** is `DRIVER_ASSIGNED`, `PICKED_UP` and `IN_TRANSIT`. Before a driver is assigned and once the delivery is `DELIVERED` or `CANCELLED`, every phone field is null, history included (the driver history never has them).
+- **The driver** (`GET /deliveries/me/current`) gets `customerPhone` (the customer's user-service profile phone) and `restaurantPhone` (the restaurant's contact phone from #208, through restaurant-service's services-only `GET /restaurants/:id/contact`, which the gateway blocks).
+- **The order's customer** (`GET /deliveries/by-order/:orderId`) gets `driverPhone` (the assigned driver's profile phone). The restaurant owner, admins and drivers get `driverPhone: null` on that read.
+- **Every reveal is recorded** in `delivery_contact_reveals`: delivery, viewer user id and role, which field, the first and last time and how often. One row per delivery, viewer and field, so the driver app's polling doesn't grow the table. Never the number. The record is written before the numbers are returned: if it can't be written, the read succeeds without them.
+- A number that can't be read (the other service is down, no phone on the profile) is null and never fails the delivery read.
+- The phone comes from the profile, whether or not it was confirmed by a code. Phone verification is off until a real SMS provider is live (#228).
 
 ## Required env vars
 From `services/delivery-service/src/config/app-config.ts`:
@@ -90,7 +102,8 @@ Manual `POST /deliveries` and `/assign` stay available to admins and restaurant 
    - `pickup` (restaurant id, name, address);
    - `dropOff` (the order's snapshot address, notes and optional coordinates; null fields for orders placed before addresses were stored);
    - `order` (item names and quantities, total);
-   - `nextActions`: `pickup` when DRIVER_ASSIGNED, `start` when PICKED_UP, `complete` when IN_TRANSIT. Each maps to `POST /deliveries/:id/<action>`.
+   - `nextActions`: `pickup` when DRIVER_ASSIGNED, `start` when PICKED_UP, `complete` when IN_TRANSIT. Each maps to `POST /deliveries/:id/<action>`;
+   - `customerPhone` and `restaurantPhone` (#211, see "Contact during a delivery").
 4. **204 No Content** when the driver has no active delivery, or no driver profile yet.
 5. **Other roles get 403**, so the route can't be used to read someone else's delivery.
 

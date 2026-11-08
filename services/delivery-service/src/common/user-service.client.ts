@@ -8,11 +8,14 @@ export interface UserProfileDto {
   id: string;
   fullName: string;
   avatarUrl?: string | null;
+  /** #211: E.164; shown only to the participants of an active delivery (DeliveryContactService). */
+  phone?: string | null;
 }
 
 /**
- * Reads a user profile as this service (system token). Used only to compose the customer-safe driver
- * card (#140): callers must never forward anything beyond the display fields to clients.
+ * Reads a user profile as this service (system token). Used to compose the customer-safe driver card
+ * (#140), which must never carry more than the display fields, and the contact window of an active
+ * delivery (#211), the only place a phone number may be forwarded.
  */
 @Injectable()
 export class UserServiceClient {

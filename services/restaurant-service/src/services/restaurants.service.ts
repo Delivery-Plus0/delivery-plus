@@ -115,6 +115,16 @@ export class RestaurantsService {
     return this.toOwnerRestaurant(submitted, await this.restaurants.reviews(id));
   }
 
+  /**
+   * #211: the contact phone, for delivery-service only (SYSTEM token). It decides who may see it and
+   * when (the participants of an active delivery); this service never shows it publicly.
+   */
+  async getContact(id: string): Promise<{ id: string; contactPhone: string | null }> {
+    const restaurant = await this.restaurants.findById(id);
+    if (!restaurant) throw new NotFoundError(`Restaurant ${id} not found`);
+    return { id: restaurant.id, contactPhone: restaurant.contactPhone ?? null };
+  }
+
   /** #208: the application with its review history, for staff with onboarding.review. */
   async getApplicationForStaff(id: string): Promise<StaffRestaurantApplicationDto> {
     const restaurant = await this.restaurants.findById(id);

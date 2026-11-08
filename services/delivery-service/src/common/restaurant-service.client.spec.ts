@@ -4,7 +4,8 @@ import { AppConfig } from '../config/app-config';
 
 describe('DeliveryService.RestaurantServiceClient', () => {
   const restaurantId = '550e8400-e29b-41d4-a716-446655440000';
-  const client = new RestaurantServiceClient({ restaurantServiceUrl: 'http://restaurant-service:3003' } as AppConfig);
+  const systemToken = { mint: jest.fn().mockResolvedValue('Bearer system-token') };
+  const client = new RestaurantServiceClient({ restaurantServiceUrl: 'http://restaurant-service:3003' } as AppConfig, systemToken as never);
 
   afterEach(() => {
     jest.restoreAllMocks();
@@ -33,5 +34,15 @@ describe('DeliveryService.RestaurantServiceClient', () => {
   it('maps 404 to NotFoundError', async () => {
     global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 404 }) as unknown as typeof fetch;
     await expect(client.getRestaurant(restaurantId)).rejects.toThrow(NotFoundError);
+  });
+
+  it('reads the contact phone with a SYSTEM token (#211)', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ id: restaurantId, contactPhone: '+201012345678' }) });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(client.getContact(restaurantId)).resolves.toEqual({ id: restaurantId, contactPhone: '+201012345678' });
+    expect(fetchMock).toHaveBeenCalledWith(`http://restaurant-service:3003/restaurants/${restaurantId}/contact`, {
+      headers: { Authorization: 'Bearer system-token' },
+    });
   });
 });

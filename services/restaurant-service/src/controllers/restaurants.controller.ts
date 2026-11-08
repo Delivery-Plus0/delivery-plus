@@ -168,6 +168,18 @@ export class RestaurantsController {
     return this.restaurantsService.confirmImageUpload(id, user.sub, dto.imageType, dto.objectKey);
   }
 
+  @Get(':id/contact')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SYSTEM)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary:
+      "Services only (SYSTEM token; refused through the gateway): the restaurant's contact phone, for the participants of an active delivery (#211)",
+  })
+  getContact(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.restaurantsService.getContact(id);
+  }
+
   @Get(':id/ownership/:userId')
   @UseGuards(InternalAuthGuard)
   @ApiOperation({

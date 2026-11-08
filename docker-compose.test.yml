@@ -217,6 +217,7 @@ services:
       INTERNAL_AUTH_ALLOWED_SERVICES: ${INTERNAL_AUTH_ALLOWED_SERVICES:-menu-service,order-service}
       DEFAULT_DELIVERY_RADIUS_KM: ${DEFAULT_DELIVERY_RADIUS_KM:-5}
       MENU_SERVICE_URL: http://menu-service:3004
+      SYSTEM_JWT_SECRET: ${SYSTEM_JWT_SECRET:-local-system-jwt-development-only}
       AWS_REGION: ${AWS_REGION:-us-east-1}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-minioadmin}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-minioadmin}

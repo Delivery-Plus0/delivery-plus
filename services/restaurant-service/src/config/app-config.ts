@@ -1,3 +1,5 @@
+import { loadSystemJwtSecret } from '@food-delivery/shared';
+
 export const APP_CONFIG = Symbol('APP_CONFIG');
 
 export interface AppConfig {
@@ -11,6 +13,8 @@ export interface AppConfig {
   defaultDeliveryRadiusKm: number;
   /** #208: submit reads the restaurant's menu from menu-service (at least one category and available item). */
   menuServiceUrl: string;
+  /** #211: verifies delivery-service's SYSTEM token on the contact route; required in production. */
+  systemJwtSecret: string;
 }
 
 export function loadConfig(): AppConfig {
@@ -32,6 +36,7 @@ export function loadConfig(): AppConfig {
     ),
     defaultDeliveryRadiusKm: parseDefaultDeliveryRadius(process.env.DEFAULT_DELIVERY_RADIUS_KM),
     menuServiceUrl: process.env.MENU_SERVICE_URL || 'http://localhost:3004',
+    systemJwtSecret: loadSystemJwtSecret(process.env.NODE_ENV || 'development'),
   };
 }
 

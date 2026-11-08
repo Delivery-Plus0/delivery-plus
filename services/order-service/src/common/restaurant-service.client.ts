@@ -18,6 +18,8 @@ export interface RestaurantDto {
   latitude: number | null;
   longitude: number | null;
   deliveryRadiusKm: number;
+  /** #208: always APPROVED from the public route; absent from a restaurant-service older than #208. */
+  approvalStatus?: 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED';
 }
 
 @Injectable()

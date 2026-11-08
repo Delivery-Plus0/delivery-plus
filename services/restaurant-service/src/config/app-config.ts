@@ -9,6 +9,8 @@ export interface AppConfig {
   internalAuthSecret: string;
   internalAuthAllowedServices: string[];
   defaultDeliveryRadiusKm: number;
+  /** #208: submit reads the restaurant's menu from menu-service (at least one category and available item). */
+  menuServiceUrl: string;
 }
 
 export function loadConfig(): AppConfig {
@@ -29,6 +31,7 @@ export function loadConfig(): AppConfig {
       process.env.INTERNAL_AUTH_ALLOWED_SERVICES || process.env.INTERNAL_AUTH_ALLOWED_SERVICE || 'menu-service,order-service',
     ),
     defaultDeliveryRadiusKm: parseDefaultDeliveryRadius(process.env.DEFAULT_DELIVERY_RADIUS_KM),
+    menuServiceUrl: process.env.MENU_SERVICE_URL || 'http://localhost:3004',
   };
 }
 

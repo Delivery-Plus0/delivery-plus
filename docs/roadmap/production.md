@@ -87,12 +87,14 @@ done
 - **The admin console** is a separate private app on Expo Router web.
 - **No cash on delivery.**
 - **Busy restaurants (#286):** a BUSY restaurant takes no new orders; customers can browse and keep a cart and are told to try again in a few minutes. `docs/business/restaurant-availability.md`.
+- **Restaurant registration (#208):** only the legal name is mandatory among the legal details (commercial registration and tax card are optional), and one restaurant per owner account for now. `docs/business/restaurant-onboarding.md`.
+- **Contact during a delivery (#211):** direct phone numbers for the pilot, shown only to the delivery's participants and only while it is active; masked calling can replace them later.
 
 **Still needed, before the milestone shown**
 
 | Before | Decision |
 | --- | --- |
-| M2 | Default delivery radius and pilot area; mandatory restaurant registration fields; document retention; direct numbers or masked calling during a delivery |
+| M2 | Default delivery radius and pilot area; driver document retention (90 days after a final rejection is the working default, to confirm) |
 | M4 | Partial refunds: yes or no |
 | M5 | Hosting, region and domains; crash-reporting tool; admin app IP restriction |
 | M6 | Payment gateway (Paymob assumed; merchant onboarding takes weeks); restaurant commission and settlement period; who carries the cost of a rejected order; driver payout method and cadence |

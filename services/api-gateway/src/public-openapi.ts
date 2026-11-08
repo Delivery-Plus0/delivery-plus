@@ -50,12 +50,15 @@ export const SERVICE_DEFINITIONS = [
     service: 'restaurants',
     publicPrefix: '/api/restaurants',
     routes: [
-      { method: 'post', path: '', summary: 'Create a restaurant', auth: true, statusCode: 201 },
+      { method: 'post', path: '', summary: 'Create your restaurant as a draft application (owner; one per owner)', auth: true, statusCode: 201 },
       { method: 'get', path: '', summary: 'List restaurants', auth: false, statusCode: 200 },
-      { method: 'get', path: '/me', summary: 'List restaurants owned by the current restaurant owner', auth: true, statusCode: 200 },
-      { method: 'get', path: '/:id', summary: 'Get a restaurant by id', auth: false, statusCode: 200 },
+      { method: 'get', path: '/me', summary: 'Your restaurants with their application status and private details', auth: true, statusCode: 200 },
+      { method: 'get', path: '/:id', summary: 'Get an approved restaurant by id', auth: false, statusCode: 200 },
       { method: 'patch', path: '/:id', summary: 'Update restaurant details', auth: true, statusCode: 200 },
-      { method: 'patch', path: '/:id/status', summary: 'Update restaurant status', auth: true, statusCode: 200 },
+      { method: 'post', path: '/:id/submit', summary: 'Send your restaurant application for review, or resubmit a rejected one', auth: true, statusCode: 200 },
+      { method: 'get', path: '/:id/application', summary: "A restaurant's application with its review history (staff with onboarding.review)", auth: true, statusCode: 200 },
+      { method: 'post', path: '/:id/review', summary: 'Approve or reject a submitted restaurant application (staff with onboarding.review)', auth: true, statusCode: 200 },
+      { method: 'patch', path: '/:id/status', summary: 'Update restaurant status (an owner opens only an approved restaurant)', auth: true, statusCode: 200 },
       { method: 'patch', path: '/:id/delivery-radius', summary: 'Set a restaurant delivery radius (admin only)', auth: true, statusCode: 200 },
       { method: 'post', path: '/:id/image-upload-url', summary: 'Create a presigned restaurant image upload URL', auth: true, statusCode: 201 },
       { method: 'post', path: '/:id/image-confirm', summary: 'Confirm and save a restaurant image', auth: true, statusCode: 201 },
@@ -564,6 +567,11 @@ const baseSchemas = {
       address: { type: 'string' },
       latitude: { type: 'number', minimum: -90, maximum: 90, description: 'Requires longitude.' },
       longitude: { type: 'number', minimum: -180, maximum: 180, description: 'Requires latitude.' },
+      legalName: { type: 'string', minLength: 2, maxLength: 200, nullable: true, description: '#208: the registered name; the only legal detail required to submit. Never public.' },
+      commercialRegistrationNumber: { type: 'string', maxLength: 50, nullable: true, description: '#208: optional. Never public.' },
+      taxCardNumber: { type: 'string', maxLength: 50, nullable: true, description: '#208: optional. Never public.' },
+      contactPhone: { type: 'string', nullable: true, example: '01012345678', description: '#208: an Egyptian mobile, stored as E.164; required to submit. Never public.' },
+      cuisineTags: { type: 'array', maxItems: 5, items: { type: 'string', minLength: 2, maxLength: 30 }, example: ['Burgers'] },
     },
   },
   RestaurantUpdateRequest: {
@@ -574,6 +582,11 @@ const baseSchemas = {
       address: { type: 'string' },
       latitude: { type: 'number', minimum: -90, maximum: 90, description: 'Requires longitude.' },
       longitude: { type: 'number', minimum: -180, maximum: 180, description: 'Requires latitude.' },
+      legalName: { type: 'string', minLength: 2, maxLength: 200, nullable: true, description: '#208: the registered name; the only legal detail required to submit. Never public.' },
+      commercialRegistrationNumber: { type: 'string', maxLength: 50, nullable: true, description: '#208: optional. Never public.' },
+      taxCardNumber: { type: 'string', maxLength: 50, nullable: true, description: '#208: optional. Never public.' },
+      contactPhone: { type: 'string', nullable: true, example: '01012345678', description: '#208: an Egyptian mobile, stored as E.164; required to submit. Never public.' },
+      cuisineTags: { type: 'array', maxItems: 5, items: { type: 'string', minLength: 2, maxLength: 30 }, example: ['Burgers'] },
     },
   },
   UpdateDeliveryRadiusRequest: {
@@ -598,6 +611,101 @@ const baseSchemas = {
       deliveryRadiusKm: { type: 'number', description: 'Effective radius, including the configured default.' },
       distanceKm: { type: 'number', description: 'Present only when lat and lng are supplied to the list endpoint.' },
       status: { type: 'string', enum: ['OPEN', 'CLOSED', 'BUSY', 'SUSPENDED'] },
+      approvalStatus: {
+        type: 'string',
+        enum: ['DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED'],
+        description: '#208: always APPROVED on public routes; customers never see a restaurant that is not approved.',
+      },
+      cuisineTags: { type: 'array', items: { type: 'string' } },
+    },
+  },
+  OwnerRestaurant: {
+    description: '#208: the owner\'s view of their restaurant: the public card plus the application.',
+    allOf: [
+      { $ref: '#/components/schemas/PublicRestaurant' },
+      {
+        type: 'object',
+        required: ['approvalStatus', 'submittedAt', 'approvedAt', 'approvalNote', 'legalName', 'commercialRegistrationNumber', 'taxCardNumber', 'contactPhone', 'lastReview'],
+        properties: {
+          approvalStatus: {
+            type: 'string',
+            enum: ['DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED'],
+            description: 'DRAFT: fill in and submit. SUBMITTED: waiting for review. APPROVED: can open. REJECTED: fix what the note says and submit again.',
+          },
+          submittedAt: { type: 'string', format: 'date-time', nullable: true },
+          approvedAt: { type: 'string', format: 'date-time', nullable: true },
+          approvalNote: { type: 'string', nullable: true, description: "The reviewer's latest note, e.g. what to fix." },
+          legalName: { type: 'string', nullable: true },
+          commercialRegistrationNumber: { type: 'string', nullable: true },
+          taxCardNumber: { type: 'string', nullable: true },
+          contactPhone: { type: 'string', nullable: true, example: '+201012345678' },
+          lastReview: {
+            type: 'object',
+            nullable: true,
+            required: ['decision', 'reviewedAt'],
+            properties: {
+              decision: { type: 'string', enum: ['APPROVED', 'REJECTED'] },
+              note: { type: 'string', nullable: true },
+              reviewedAt: { type: 'string', format: 'date-time' },
+            },
+          },
+        },
+      },
+    ],
+  },
+  StaffRestaurantApplication: {
+    description: '#208: the application as staff see it, with the owner and every decision, newest first.',
+    allOf: [
+      { $ref: '#/components/schemas/OwnerRestaurant' },
+      {
+        type: 'object',
+        required: ['ownerId', 'reviews'],
+        properties: {
+          ownerId: { type: 'string', format: 'uuid' },
+          reviews: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['id', 'decision', 'reviewerUserId', 'applicationSubmittedAt', 'reviewedAt'],
+              properties: {
+                id: { type: 'string', format: 'uuid' },
+                decision: { type: 'string', enum: ['APPROVED', 'REJECTED'] },
+                note: { type: 'string', nullable: true },
+                reviewerUserId: { type: 'string', format: 'uuid' },
+                applicationSubmittedAt: { type: 'string', format: 'date-time' },
+                reviewedAt: { type: 'string', format: 'date-time' },
+              },
+            },
+          },
+        },
+      },
+    ],
+  },
+  RestaurantReviewRequest: {
+    type: 'object',
+    required: ['decision', 'submittedAt'],
+    properties: {
+      decision: { type: 'string', enum: ['APPROVED', 'REJECTED'] },
+      note: { type: 'string', minLength: 3, maxLength: 300, description: 'Shown to the owner. Required to reject.' },
+      submittedAt: { type: 'string', format: 'date-time', description: "The application's submittedAt as the reviewer saw it." },
+    },
+  },
+  RestaurantApplicationIncompleteError: {
+    type: 'object',
+    description: '#208: 422 when submit (or an approval) finds the application incomplete.',
+    properties: {
+      statusCode: { type: 'integer', example: 422 },
+      error: { type: 'string', example: 'ApplicationIncomplete' },
+      message: { type: 'string' },
+      details: {
+        type: 'object',
+        properties: {
+          missing: {
+            type: 'array',
+            items: { type: 'string', enum: ['legalName', 'contactPhone', 'location', 'menuCategory', 'availableMenuItem'] },
+          },
+        },
+      },
     },
   },
   PublicRestaurantList: {
@@ -889,13 +997,22 @@ export function generatePublicOpenApiDocument() {
         };
       }
 
+      const errorContent = { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } };
+
       if (service.service === 'restaurants' && route.method === 'post' && route.path === '') {
         operation.requestBody = {
           required: true,
           content: { 'application/json': { schema: { $ref: '#/components/schemas/RestaurantCreateRequest' } } },
         };
         operation.responses['201'].content = {
-          'application/json': { schema: { $ref: '#/components/schemas/PublicRestaurant' } },
+          'application/json': { schema: { $ref: '#/components/schemas/OwnerRestaurant' } },
+        };
+        operation.responses['409'] = { description: 'RestaurantLimitReached: the owner already has a restaurant (#208)', content: errorContent };
+      }
+
+      if (service.service === 'restaurants' && route.method === 'get' && route.path === '/me') {
+        operation.responses['200'].content = {
+          'application/json': { schema: { type: 'array', items: { $ref: '#/components/schemas/OwnerRestaurant' } } },
         };
       }
 
@@ -905,13 +1022,60 @@ export function generatePublicOpenApiDocument() {
           content: { 'application/json': { schema: { $ref: '#/components/schemas/RestaurantUpdateRequest' } } },
         };
         operation.responses['200'].content = {
-          'application/json': { schema: { $ref: '#/components/schemas/PublicRestaurant' } },
+          'application/json': { schema: { $ref: '#/components/schemas/OwnerRestaurant' } },
+        };
+        operation.responses['409'] = {
+          description:
+            'ApplicationNotEditable: legal details change only before approval, and name, address and location not while submitted (details.approvalStatus, details.fields)',
+          content: errorContent,
         };
       }
 
       if (service.service === 'restaurants' && route.method === 'get' && route.path === '/:id') {
         operation.responses['200'].content = {
           'application/json': { schema: { $ref: '#/components/schemas/PublicRestaurant' } },
+        };
+        operation.responses['404'] = { description: 'No such restaurant, or it is not approved (#208)' };
+      }
+
+      if (service.service === 'restaurants' && route.path === '/:id/submit') {
+        operation.responses['200'].content = {
+          'application/json': { schema: { $ref: '#/components/schemas/OwnerRestaurant' } },
+        };
+        operation.responses['409'] = { description: 'ApplicationNotEditable: already submitted or approved (details.approvalStatus)', content: errorContent };
+        operation.responses['422'] = {
+          description: 'ApplicationIncomplete: details.missing lists what is needed',
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/RestaurantApplicationIncompleteError' } } },
+        };
+      }
+
+      if (service.service === 'restaurants' && (route.path === '/:id/application' || route.path === '/:id/review')) {
+        operation.responses['200'].content = {
+          'application/json': { schema: { $ref: '#/components/schemas/StaffRestaurantApplication' } },
+        };
+        operation.responses['403'] = { description: 'Requires an ADMIN token with onboarding.review' };
+        operation.responses['404'] = { description: 'No such restaurant' };
+        if (route.path === '/:id/review') {
+          operation.requestBody = {
+            required: true,
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/RestaurantReviewRequest' } } },
+          };
+          operation.responses['200'].description = 'Decided, or the same decision on the same submission repeated (no-op)';
+          operation.responses['409'] = {
+            description: 'ApplicationNotInReview: not waiting for review, or resubmitted since (details.approvalStatus)',
+            content: errorContent,
+          };
+          operation.responses['422'] = {
+            description: 'ApplicationIncomplete: an approval re-checks the application and the menu',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/RestaurantApplicationIncompleteError' } } },
+          };
+        }
+      }
+
+      if (service.service === 'restaurants' && route.path === '/:id/status') {
+        operation.responses['409'] = {
+          description: 'RestaurantNotApproved: an owner can open (OPEN or BUSY) only an approved restaurant (details.approvalStatus)',
+          content: errorContent,
         };
       }
 

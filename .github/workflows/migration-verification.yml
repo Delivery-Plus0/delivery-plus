@@ -156,6 +156,9 @@ jobs:
 
           check restaurant_service   "select count(*) from information_schema.tables where table_name='restaurants'" "table restaurants"
           check restaurant_service   "select count(*) from pg_indexes where indexname='IDX_restaurants_ownerId'" "index IDX_restaurants_ownerId"
+          check restaurant_service   "select count(*) from information_schema.columns where table_name='restaurants' and column_name='approvalStatus'" "column restaurants.approvalStatus"
+          check restaurant_service   "select count(*) from information_schema.tables where table_name='restaurant_reviews'" "table restaurant_reviews"
+          check restaurant_service   "select count(*) from pg_trigger where tgname='TRG_restaurant_reviews_append_only'" "trigger TRG_restaurant_reviews_append_only"
 
           check menu_service         "select count(*) from information_schema.tables where table_name='categories'" "table categories"
           check menu_service         "select count(*) from information_schema.tables where table_name='menu_items'" "table menu_items"
@@ -199,6 +202,16 @@ jobs:
         run: |
           psql -h localhost -U postgres -c "CREATE DATABASE driver_service_repository_test"
           npm test --workspace=services/driver-service -- --runInBand
+
+      # #208: one restaurant per owner (advisory lock), the compare-and-set submit, status and review
+      # writes, the public APPROVED filter and the migration backfill live in SQL.
+      - name: Run restaurant-service Postgres repository test
+        env:
+          PGPASSWORD: postgres
+          RESTAURANT_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/restaurant_service_repository_test
+        run: |
+          psql -h localhost -U postgres -c "CREATE DATABASE restaurant_service_repository_test"
+          npm test --workspace=services/restaurant-service -- --runInBand
 
       # #34: refresh-token rotation and family revocation are conditional UPDATEs, and #202:
       # the first-admin bootstrap is a locked transaction, so sessions.repository.integration.spec.ts

@@ -258,7 +258,7 @@ The services, PostgreSQL and Redis aren't published to the host; everything goes
 | Account | Created by | Email / password |
 | --- | --- | --- |
 | Customer, restaurant owner, driver | `npm run seed` | `customer@example.com`, `owner@example.com`, `driver@example.com` / `password123` |
-| Demo customer with orders in every state | `npm run seed:demo` | `demo.customer@example.com` / `password123` |
+| Demo customer with orders in every state | `npm run seed:demo` | `demo.customer@example.com` / `password123`; each demo restaurant other than Burger Palace has its own owner, `<name>.owner@example.com` (one restaurant per owner, #208) |
 | Staff admin (all permissions) | the stack itself, at startup | `qa.admin@delivery-plus.test` / `Qa-Only-Admin-Passw0rd!` |
 
 These are local test accounts only. On the development stack, new drivers are verified automatically (`DRIVER_AUTO_VERIFY`) and verification emails are kept in Redis instead of being sent (`EMAIL_PROVIDER=test`). SMS is disabled, so phone codes and password reset answer `503` here; use the E2E stack below to try them.

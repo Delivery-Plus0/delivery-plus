@@ -17,7 +17,7 @@ The service-level database design matches the entity models in each service and 
 | --- | --- | --- | --- |
 | auth-service | PostgreSQL | credentials, auth_sessions | Stores user credentials and canonical `userId` identity; one refresh session per sign-in, rotated in place (#34) |
 | user-service | PostgreSQL | user_profiles | Stores profile detail keyed by the same `id` as auth credentials, plus `authCredentialId` and `createdByService` |
-| restaurant-service | PostgreSQL | restaurants | Restaurant ownership and operating state |
+| restaurant-service | PostgreSQL | restaurants, restaurant_reviews | Restaurant ownership, operating state, the application (`approvalStatus`, legal details, contact phone, cuisine tags) and the append-only review history (#208) |
 | menu-service | PostgreSQL | menu_items | Catalog data keyed by restaurant and optional category |
 | cart-service | Redis | cart state | Customer-scoped cart; not a relational table |
 | order-service | PostgreSQL | orders, order_items | Central orchestration object with nested order items |

@@ -33,6 +33,9 @@ const restaurantsService = {
   getById: jest.fn(),
   update: jest.fn(),
   setDeliveryRadius: jest.fn(),
+  submit: jest.fn(),
+  getApplicationForStaff: jest.fn(),
+  review: jest.fn(),
 };
 const silentLogger = { log: jest.fn() };
 
@@ -97,6 +100,9 @@ describe('RestaurantsController HTTP boundaries', () => {
       id: restaurantId,
       deliveryRadiusKm: 8,
     });
+    restaurantsService.submit.mockReset().mockResolvedValue({ id: restaurantId, approvalStatus: 'SUBMITTED' });
+    restaurantsService.getApplicationForStaff.mockReset().mockResolvedValue({ id: restaurantId, reviews: [] });
+    restaurantsService.review.mockReset().mockResolvedValue({ id: restaurantId, approvalStatus: 'APPROVED', reviews: [] });
   });
 
   afterAll(async () => {
@@ -105,8 +111,8 @@ describe('RestaurantsController HTTP boundaries', () => {
     }
   });
 
-  function ownerToken(sub: string, role: UserRole): string {
-    return jwt.sign({ sub, email: `${sub}@example.com`, role });
+  function ownerToken(sub: string, role: UserRole, perms?: string[]): string {
+    return jwt.sign({ sub, email: `${sub}@example.com`, role, ...(perms ? { perms } : {}) });
   }
 
   async function signedOwnershipFetch(
@@ -394,5 +400,57 @@ describe('RestaurantsController HTTP boundaries', () => {
 
     expect(response.status).toBe(400);
     expect(restaurantsService.setDeliveryRadius).not.toHaveBeenCalled();
+  });
+  describe('restaurant applications (#208)', () => {
+    const submittedAt = '2026-11-08T09:00:00.000Z';
+    const call = (method: string, route: string, token?: string, body?: unknown) =>
+      fetch(`${baseUrl}${route}`, {
+        method,
+        headers: { ...(token ? { Authorization: 'Bearer ' + token } : {}), 'Content-Type': 'application/json' },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+    const reviewer = () => ownerToken(ownerB, UserRole.ADMIN, ['onboarding.review']);
+
+    it('lets only the owner submit, as themself', async () => {
+      expect((await call('POST', `/restaurants/${restaurantId}/submit`, ownerToken(ownerA, UserRole.RESTAURANT_OWNER))).status).toBe(200);
+      expect(restaurantsService.submit).toHaveBeenCalledWith(restaurantId, ownerA);
+      expect((await call('POST', `/restaurants/${restaurantId}/submit`, ownerToken(ownerA, UserRole.CUSTOMER))).status).toBe(403);
+      expect((await call('POST', `/restaurants/${restaurantId}/submit`)).status).toBe(401);
+    });
+
+    it.each([
+      ['no token', undefined, 401],
+      ['the owner', () => ownerToken(ownerA, UserRole.RESTAURANT_OWNER, ['onboarding.review']), 403],
+      ['staff without onboarding.review', () => ownerToken(ownerB, UserRole.ADMIN, ['support.read']), 403],
+    ] as const)('refuses %s on the staff routes and decides nothing', async (_label, token, status) => {
+      const bearer = typeof token === 'function' ? token() : token;
+      expect((await call('GET', `/restaurants/${restaurantId}/application`, bearer)).status).toBe(status);
+      expect((await call('POST', `/restaurants/${restaurantId}/review`, bearer, { decision: 'APPROVED', submittedAt })).status).toBe(status);
+      expect(restaurantsService.review).not.toHaveBeenCalled();
+      expect(restaurantsService.getApplicationForStaff).not.toHaveBeenCalled();
+    });
+
+    it('records a review with the reviewer from the token', async () => {
+      const response = await call('POST', `/restaurants/${restaurantId}/review`, reviewer(), { decision: 'REJECTED', note: ' Logo missing ', submittedAt });
+      expect(response.status).toBe(200);
+      expect(restaurantsService.review).toHaveBeenCalledWith(ownerB, restaurantId, { decision: 'REJECTED', note: 'Logo missing', submittedAt });
+    });
+
+    it.each([
+      ['a rejection without a note', { decision: 'REJECTED', submittedAt }],
+      ['an unknown decision', { decision: 'VERIFIED', submittedAt }],
+      ['no submittedAt', { decision: 'APPROVED' }],
+    ])('refuses %s with 400', async (_label, body) => {
+      expect((await call('POST', `/restaurants/${restaurantId}/review`, reviewer(), body)).status).toBe(400);
+      expect(restaurantsService.review).not.toHaveBeenCalled();
+    });
+
+    it('normalizes the contact phone and refuses a number that is not an Egyptian mobile', async () => {
+      const owner = ownerToken(ownerA, UserRole.RESTAURANT_OWNER);
+      expect((await call('PATCH', `/restaurants/${restaurantId}`, owner, { contactPhone: '0101 234 5678', legalName: ' Kitchen LLC ' })).status).toBe(200);
+      expect(restaurantsService.update).toHaveBeenCalledWith(restaurantId, ownerA, expect.objectContaining({ contactPhone: '+201012345678', legalName: 'Kitchen LLC' }));
+      expect((await call('PATCH', `/restaurants/${restaurantId}`, owner, { contactPhone: '0223456789' })).status).toBe(400);
+      expect((await call('PATCH', `/restaurants/${restaurantId}`, owner, { cuisineTags: ['a', 'b', 'c', 'd', 'e', 'f'].map((tag) => tag.repeat(3)) })).status).toBe(400);
+    });
   });
 });

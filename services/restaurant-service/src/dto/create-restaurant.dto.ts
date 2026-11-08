@@ -1,7 +1,8 @@
+import { RestaurantApplicationFieldsDto } from './restaurant-application.dto';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsLatitude, IsLongitude, IsOptional, IsString, MinLength, ValidateIf } from 'class-validator';
 
-export class CreateRestaurantDto {
+export class CreateRestaurantDto extends RestaurantApplicationFieldsDto {
   @ApiProperty({
     description: 'Name of the restaurant.',
     minLength: 2,

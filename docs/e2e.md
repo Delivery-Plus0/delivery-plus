@@ -29,7 +29,7 @@ npm run e2e:env:reset   # down → up → seed (reproduce from scratch)
 `E2E_ALLOW_REMOTE=1`, and is rerunnable (existing accounts, catalog and scenarios are reused). The
 manifest (git-ignored) carries the generated ids that UI flows need.
 
-Seeded data: see `scripts/seed-e2e.ts` (`QA` accounts, `QA Kitchen` / `QA Night Cafe`, scenarios
+Seeded data: see `scripts/seed-e2e.ts` (`QA` accounts, `QA Kitchen` / `QA Night Cafe` with their own owners because an owner has one restaurant (#208), both submitted and approved by the stack's super admin, scenarios
 S1 delivered, S2 payment declined, S4 another customer's confirmed order). There is no seeded
 "waiting for a driver" order (formerly S3): with auto-dispatch a ready order is assigned as soon as a driver
 is free, so UI tests create that state at runtime (driver offline → order ready → driver online). The E2E

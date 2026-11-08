@@ -20,6 +20,7 @@ describe('RestaurantsRepository', () => {
     const restaurants = [{ id: 'near' }, { id: 'far' }] as any[];
     const countQuery = { getCount: jest.fn().mockResolvedValue(7) };
     const queryBuilder = {
+      where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       addSelect: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
@@ -52,6 +53,8 @@ describe('RestaurantsRepository', () => {
       { restaurant: restaurants[1], distanceKm: 4.8 },
     ]);
     expect(total).toBe(7);
+    // #208: customers only see approved restaurants.
+    expect(queryBuilder.where).toHaveBeenCalledWith(`r.approvalStatus = 'APPROVED'`);
     expect(queryBuilder.andWhere).toHaveBeenCalledWith('r.latitude IS NOT NULL AND r.longitude IS NOT NULL');
     expect(queryBuilder.addSelect).toHaveBeenCalledWith(
       expect.stringContaining('COS(RADIANS(r.latitude))'),
@@ -70,6 +73,7 @@ describe('RestaurantsRepository', () => {
 
   it('preserves the unlocated list sort and paging behavior', async () => {
     const queryBuilder = {
+      where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
       skip: jest.fn().mockReturnThis(),

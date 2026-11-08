@@ -1016,7 +1016,7 @@
     },
     "/api/restaurants": {
       "post": {
-        "summary": "Create a restaurant",
+        "summary": "Create your restaurant as a draft application (owner; one per owner)",
         "tags": [
           "restaurants"
         ],
@@ -1027,7 +1027,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PublicRestaurant"
+                  "$ref": "#/components/schemas/OwnerRestaurant"
                 }
               }
             }
@@ -1047,6 +1047,16 @@
           },
           "403": {
             "description": "Forbidden"
+          },
+          "409": {
+            "description": "RestaurantLimitReached: the owner already has a restaurant (#208)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1196,14 +1206,24 @@
     },
     "/api/restaurants/me": {
       "get": {
-        "summary": "List restaurants owned by the current restaurant owner",
+        "summary": "Your restaurants with their application status and private details",
         "tags": [
           "restaurants"
         ],
         "operationId": "restaurants_get_api_restaurants_me",
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OwnerRestaurant"
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Bad request",
@@ -1231,7 +1251,7 @@
     },
     "/api/restaurants/{id}": {
       "get": {
-        "summary": "Get a restaurant by id",
+        "summary": "Get an approved restaurant by id",
         "tags": [
           "restaurants"
         ],
@@ -1262,6 +1282,9 @@
           },
           "403": {
             "description": "Forbidden"
+          },
+          "404": {
+            "description": "No such restaurant, or it is not approved (#208)"
           }
         },
         "parameters": [
@@ -1288,7 +1311,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PublicRestaurant"
+                  "$ref": "#/components/schemas/OwnerRestaurant"
                 }
               }
             }
@@ -1308,6 +1331,16 @@
           },
           "403": {
             "description": "Forbidden"
+          },
+          "409": {
+            "description": "ApplicationNotEditable: legal details change only before approval, and name, address and location not while submitted (details.approvalStatus, details.fields)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "parameters": [
@@ -1337,9 +1370,221 @@
         }
       }
     },
+    "/api/restaurants/{id}/submit": {
+      "post": {
+        "summary": "Send your restaurant application for review, or resubmit a rejected one",
+        "tags": [
+          "restaurants"
+        ],
+        "operationId": "restaurants_post_api_restaurants_id_submit",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OwnerRestaurant"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "409": {
+            "description": "ApplicationNotEditable: already submitted or approved (details.approvalStatus)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "ApplicationIncomplete: details.missing lists what is needed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestaurantApplicationIncompleteError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/restaurants/{id}/application": {
+      "get": {
+        "summary": "A restaurant's application with its review history (staff with onboarding.review)",
+        "tags": [
+          "restaurants"
+        ],
+        "operationId": "restaurants_get_api_restaurants_id_application",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffRestaurantApplication"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Requires an ADMIN token with onboarding.review"
+          },
+          "404": {
+            "description": "No such restaurant"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/restaurants/{id}/review": {
+      "post": {
+        "summary": "Approve or reject a submitted restaurant application (staff with onboarding.review)",
+        "tags": [
+          "restaurants"
+        ],
+        "operationId": "restaurants_post_api_restaurants_id_review",
+        "responses": {
+          "200": {
+            "description": "Decided, or the same decision on the same submission repeated (no-op)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffRestaurantApplication"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Requires an ADMIN token with onboarding.review"
+          },
+          "404": {
+            "description": "No such restaurant"
+          },
+          "409": {
+            "description": "ApplicationNotInReview: not waiting for review, or resubmitted since (details.approvalStatus)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "ApplicationIncomplete: an approval re-checks the application and the menu",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestaurantApplicationIncompleteError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RestaurantReviewRequest"
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/restaurants/{id}/status": {
       "patch": {
-        "summary": "Update restaurant status",
+        "summary": "Update restaurant status (an owner opens only an approved restaurant)",
         "tags": [
           "restaurants"
         ],
@@ -1363,6 +1608,16 @@
           },
           "403": {
             "description": "Forbidden"
+          },
+          "409": {
+            "description": "RestaurantNotApproved: an owner can open (OPEN or BUSY) only an approved restaurant (details.approvalStatus)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "parameters": [
@@ -5839,6 +6094,43 @@
             "minimum": -180,
             "maximum": 180,
             "description": "Requires latitude."
+          },
+          "legalName": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 200,
+            "nullable": true,
+            "description": "#208: the registered name; the only legal detail required to submit. Never public."
+          },
+          "commercialRegistrationNumber": {
+            "type": "string",
+            "maxLength": 50,
+            "nullable": true,
+            "description": "#208: optional. Never public."
+          },
+          "taxCardNumber": {
+            "type": "string",
+            "maxLength": 50,
+            "nullable": true,
+            "description": "#208: optional. Never public."
+          },
+          "contactPhone": {
+            "type": "string",
+            "nullable": true,
+            "example": "01012345678",
+            "description": "#208: an Egyptian mobile, stored as E.164; required to submit. Never public."
+          },
+          "cuisineTags": {
+            "type": "array",
+            "maxItems": 5,
+            "items": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 30
+            },
+            "example": [
+              "Burgers"
+            ]
           }
         }
       },
@@ -5865,6 +6157,43 @@
             "minimum": -180,
             "maximum": 180,
             "description": "Requires latitude."
+          },
+          "legalName": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 200,
+            "nullable": true,
+            "description": "#208: the registered name; the only legal detail required to submit. Never public."
+          },
+          "commercialRegistrationNumber": {
+            "type": "string",
+            "maxLength": 50,
+            "nullable": true,
+            "description": "#208: optional. Never public."
+          },
+          "taxCardNumber": {
+            "type": "string",
+            "maxLength": 50,
+            "nullable": true,
+            "description": "#208: optional. Never public."
+          },
+          "contactPhone": {
+            "type": "string",
+            "nullable": true,
+            "example": "01012345678",
+            "description": "#208: an Egyptian mobile, stored as E.164; required to submit. Never public."
+          },
+          "cuisineTags": {
+            "type": "array",
+            "maxItems": 5,
+            "items": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 30
+            },
+            "example": [
+              "Burgers"
+            ]
           }
         }
       },
@@ -5940,6 +6269,238 @@
               "BUSY",
               "SUSPENDED"
             ]
+          },
+          "approvalStatus": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "SUBMITTED",
+              "APPROVED",
+              "REJECTED"
+            ],
+            "description": "#208: always APPROVED on public routes; customers never see a restaurant that is not approved."
+          },
+          "cuisineTags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "OwnerRestaurant": {
+        "description": "#208: the owner's view of their restaurant: the public card plus the application.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/PublicRestaurant"
+          },
+          {
+            "type": "object",
+            "required": [
+              "approvalStatus",
+              "submittedAt",
+              "approvedAt",
+              "approvalNote",
+              "legalName",
+              "commercialRegistrationNumber",
+              "taxCardNumber",
+              "contactPhone",
+              "lastReview"
+            ],
+            "properties": {
+              "approvalStatus": {
+                "type": "string",
+                "enum": [
+                  "DRAFT",
+                  "SUBMITTED",
+                  "APPROVED",
+                  "REJECTED"
+                ],
+                "description": "DRAFT: fill in and submit. SUBMITTED: waiting for review. APPROVED: can open. REJECTED: fix what the note says and submit again."
+              },
+              "submittedAt": {
+                "type": "string",
+                "format": "date-time",
+                "nullable": true
+              },
+              "approvedAt": {
+                "type": "string",
+                "format": "date-time",
+                "nullable": true
+              },
+              "approvalNote": {
+                "type": "string",
+                "nullable": true,
+                "description": "The reviewer's latest note, e.g. what to fix."
+              },
+              "legalName": {
+                "type": "string",
+                "nullable": true
+              },
+              "commercialRegistrationNumber": {
+                "type": "string",
+                "nullable": true
+              },
+              "taxCardNumber": {
+                "type": "string",
+                "nullable": true
+              },
+              "contactPhone": {
+                "type": "string",
+                "nullable": true,
+                "example": "+201012345678"
+              },
+              "lastReview": {
+                "type": "object",
+                "nullable": true,
+                "required": [
+                  "decision",
+                  "reviewedAt"
+                ],
+                "properties": {
+                  "decision": {
+                    "type": "string",
+                    "enum": [
+                      "APPROVED",
+                      "REJECTED"
+                    ]
+                  },
+                  "note": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "reviewedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "StaffRestaurantApplication": {
+        "description": "#208: the application as staff see it, with the owner and every decision, newest first.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/OwnerRestaurant"
+          },
+          {
+            "type": "object",
+            "required": [
+              "ownerId",
+              "reviews"
+            ],
+            "properties": {
+              "ownerId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "reviews": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "decision",
+                    "reviewerUserId",
+                    "applicationSubmittedAt",
+                    "reviewedAt"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "decision": {
+                      "type": "string",
+                      "enum": [
+                        "APPROVED",
+                        "REJECTED"
+                      ]
+                    },
+                    "note": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "reviewerUserId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "applicationSubmittedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "reviewedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "RestaurantReviewRequest": {
+        "type": "object",
+        "required": [
+          "decision",
+          "submittedAt"
+        ],
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "APPROVED",
+              "REJECTED"
+            ]
+          },
+          "note": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300,
+            "description": "Shown to the owner. Required to reject."
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The application's submittedAt as the reviewer saw it."
+          }
+        }
+      },
+      "RestaurantApplicationIncompleteError": {
+        "type": "object",
+        "description": "#208: 422 when submit (or an approval) finds the application incomplete.",
+        "properties": {
+          "statusCode": {
+            "type": "integer",
+            "example": 422
+          },
+          "error": {
+            "type": "string",
+            "example": "ApplicationIncomplete"
+          },
+          "message": {
+            "type": "string"
+          },
+          "details": {
+            "type": "object",
+            "properties": {
+              "missing": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "legalName",
+                    "contactPhone",
+                    "location",
+                    "menuCategory",
+                    "availableMenuItem"
+                  ]
+                }
+              }
+            }
           }
         }
       },

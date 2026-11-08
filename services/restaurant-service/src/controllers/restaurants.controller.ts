@@ -2,14 +2,26 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
   UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiOkResponse } from '@nestjs/swagger';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, UserRole } from '@food-delivery/shared';
+import {
+  JwtAuthGuard,
+  RolesGuard,
+  Roles,
+  CurrentUser,
+  JwtPayload,
+  UserRole,
+  PermissionsGuard,
+  RequirePermissions,
+} from '@food-delivery/shared';
+import { ReviewRestaurantApplicationDto } from '../dto/restaurant-application.dto';
 import { InternalAuthGuard } from '../guards/internal-auth.guard';
 import { RestaurantsService } from '../services/restaurants.service';
 import { CreateRestaurantDto } from '../dto/create-restaurant.dto';
@@ -30,7 +42,7 @@ export class RestaurantsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.RESTAURANT_OWNER)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Create a restaurant (owner only)' })
+  @ApiOperation({ summary: 'Create your restaurant as a DRAFT application (owner only; one per owner, 409 RestaurantLimitReached)' })
   create(@CurrentUser() user: JwtPayload, @Body() dto: CreateRestaurantDto) {
     return this.restaurantsService.create(user.sub, dto);
   }
@@ -46,14 +58,13 @@ export class RestaurantsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.RESTAURANT_OWNER)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'List restaurants owned by the current restaurant owner' })
-  @ApiOkResponse({ type: PublicRestaurantDto, isArray: true })
+  @ApiOperation({ summary: 'Your restaurants with their application status, details and latest review note' })
   listMine(@CurrentUser() user: JwtPayload) {
     return this.restaurantsService.listMine(user.sub);
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get a restaurant by id (public)' })
+  @ApiOperation({ summary: 'Get an approved restaurant by id (public; 404 for one not approved)' })
   @ApiOkResponse({ type: PublicRestaurantDto })
   getById(@Param('id') id: string) {
     return this.restaurantsService.getById(id);
@@ -63,7 +74,10 @@ export class RestaurantsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.RESTAURANT_OWNER)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Update restaurant details (owner only)' })
+  @ApiOperation({
+    summary:
+      'Update restaurant details (owner only; legal details only before approval, name/address/location not while submitted: 409 ApplicationNotEditable)',
+  })
   update(
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,
@@ -72,11 +86,44 @@ export class RestaurantsController {
     return this.restaurantsService.update(id, user.sub, dto);
   }
 
+  @Post(':id/submit')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.RESTAURANT_OWNER)
+  @ApiBearerAuth()
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Send your application for review, or resubmit a rejected one (422 ApplicationIncomplete with what is missing)' })
+  submit(@Param('id', new ParseUUIDPipe()) id: string, @CurrentUser() user: JwtPayload) {
+    return this.restaurantsService.submit(id, user.sub);
+  }
+
+  @Get(':id/application')
+  @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
+  @Roles(UserRole.ADMIN)
+  @RequirePermissions('onboarding.review')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "A restaurant's application with its review history (staff with onboarding.review)" })
+  getApplication(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.restaurantsService.getApplicationForStaff(id);
+  }
+
+  @Post(':id/review')
+  @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
+  @Roles(UserRole.ADMIN)
+  @RequirePermissions('onboarding.review')
+  @ApiBearerAuth()
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Approve or reject a submitted application (staff with onboarding.review; 409 ApplicationNotInReview, 422 ApplicationIncomplete)',
+  })
+  review(@Param('id', new ParseUUIDPipe()) id: string, @CurrentUser() user: JwtPayload, @Body() dto: ReviewRestaurantApplicationDto) {
+    return this.restaurantsService.review(user.sub, id, dto);
+  }
+
   @Patch(':id/status')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.RESTAURANT_OWNER, UserRole.ADMIN)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Update restaurant status (owner or admin)' })
+  @ApiOperation({ summary: 'Update restaurant status (owner or admin; an owner opens only an APPROVED restaurant: 409 RestaurantNotApproved)' })
   updateStatus(
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,

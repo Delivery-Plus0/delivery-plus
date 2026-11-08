@@ -223,6 +223,11 @@ export class OrdersService implements OnModuleInit {
     }
 
     const restaurant = await this.restaurantClient.getRestaurant(cart.restaurantId);
+    // #208, defense in depth: restaurant-service already answers 404 for a restaurant that isn't approved.
+    // A missing field (an older restaurant-service during a rolling deploy) means approved.
+    if (restaurant.approvalStatus !== undefined && restaurant.approvalStatus !== 'APPROVED') {
+      throw new RestaurantUnavailableError(RestaurantStatus.CLOSED);
+    }
     // #286: only OPEN restaurants take orders; BUSY says "try again shortly", CLOSED/SUSPENDED say closed.
     if (restaurant.status !== RestaurantStatus.OPEN) {
       throw new RestaurantUnavailableError(restaurant.status);

@@ -2,6 +2,10 @@ import axios, { AxiosError } from 'axios';
 
 const API_URL = process.env.API_URL || 'http://localhost:3000';
 type Auth = { headers: { Authorization: string } };
+// The test and dev stacks' super admin (TEST_ADMIN_* in their compose overlays, #202); it approves the
+// seeded restaurant's application (#208).
+const ADMIN_EMAIL = process.env.TEST_ADMIN_EMAIL || 'qa.admin@delivery-plus.test';
+const ADMIN_PASSWORD = process.env.TEST_ADMIN_PASSWORD || 'Qa-Only-Admin-Passw0rd!';
 
 async function loginOrRegister(email: string, fullName: string, role: string): Promise<Auth> {
   try {
@@ -57,8 +61,9 @@ async function seed() {
     console.log('Registering driver...');
     const driverAuth = await loginOrRegister('driver@example.com', 'Speedy Driver', 'DRIVER');
 
-    const restaurantsResponse = await axios.get(`${API_URL}/api/restaurants`);
-    let restaurant = restaurantsResponse.data.items?.find((item: any) => item.name === 'Burger Palace');
+    // The owner's own list: a restaurant that isn't approved yet is not in the public one (#208).
+    const ownedResponse = await axios.get(`${API_URL}/api/restaurants/me`, ownerAuth);
+    let restaurant = ownedResponse.data?.find((item: any) => item.name === 'Burger Palace');
     if (!restaurant) {
       console.log('Creating restaurant...');
       restaurant = (
@@ -81,11 +86,6 @@ async function seed() {
       { latitude: 30.0444, longitude: 31.2357 },
       ownerAuth,
     );
-
-    if (restaurant.status !== 'OPEN') {
-      console.log('Opening restaurant...');
-      await axios.patch(`${API_URL}/api/restaurants/${restaurantId}/status`, { status: 'OPEN' }, ownerAuth);
-    }
 
     let menu = (await axios.get(`${API_URL}/api/menus/restaurants/${restaurantId}/menu`)).data;
     let category = menu.categories?.find((item: any) => item.name === 'Mains');
@@ -115,6 +115,33 @@ async function seed() {
       ).data;
     }
     const menuItemId = menuItem.id;
+
+    // #208: the owner submits the application (it needs the menu above), and the admin approves it.
+    if (restaurant.approvalStatus && restaurant.approvalStatus !== 'APPROVED') {
+      console.log('Submitting and approving the restaurant application...');
+      let submitted = restaurant;
+      if (restaurant.approvalStatus !== 'SUBMITTED') {
+        await axios.patch(
+          `${API_URL}/api/restaurants/${restaurantId}`,
+          { legalName: 'Burger Palace LLC', contactPhone: '01000000000' },
+          ownerAuth,
+        );
+        submitted = (await axios.post(`${API_URL}/api/restaurants/${restaurantId}/submit`, {}, ownerAuth)).data;
+      }
+      const admin = await axios.post(`${API_URL}/api/auth/login`, { email: ADMIN_EMAIL, password: ADMIN_PASSWORD });
+      restaurant = (
+        await axios.post(
+          `${API_URL}/api/restaurants/${restaurantId}/review`,
+          { decision: 'APPROVED', submittedAt: submitted.submittedAt },
+          { headers: { Authorization: `Bearer ${admin.data.accessToken}` } },
+        )
+      ).data;
+    }
+
+    if (restaurant.status !== 'OPEN') {
+      console.log('Opening restaurant...');
+      await axios.patch(`${API_URL}/api/restaurants/${restaurantId}/status`, { status: 'OPEN' }, ownerAuth);
+    }
 
     console.log('Registering driver profile...');
     try {

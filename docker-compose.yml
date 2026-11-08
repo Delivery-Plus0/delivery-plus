@@ -200,6 +200,7 @@ services:
       - INTERNAL_AUTH_SECRET=${INTERNAL_AUTH_SECRET:-local-internal-auth-development-only}
       - INTERNAL_AUTH_ALLOWED_SERVICES=${INTERNAL_AUTH_ALLOWED_SERVICES:-menu-service,order-service}
       - DEFAULT_DELIVERY_RADIUS_KM=${DEFAULT_DELIVERY_RADIUS_KM:-5}
+      - MENU_SERVICE_URL=http://menu-service:3004
     healthcheck:
       test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3003/health/ready']
       interval: 5s

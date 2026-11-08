@@ -458,6 +458,134 @@ async function assertEmailVerification() {
   console.log('Email verification: the code arrives by the test sender; resend within a minute 429; a wrong code 401, the right one verifies once, login 200');
 }
 
+/**
+ * Restaurant applications (#208), end to end on the real stack: a new owner's restaurant is a draft that
+ * customers can't see, order from or have opened; submit lists what is missing; a reviewer with
+ * onboarding.review rejects with a note, the owner fixes and resubmits, a decision on the stale
+ * submission is refused, the approval lets the owner open and customers see it. One restaurant per owner.
+ */
+async function assertRestaurantApplication(customerAuth: { headers: { Authorization: string } }) {
+  await clearRateLimits();
+  const bearer = (token: string) => ({ headers: { Authorization: `Bearer ${token}` } });
+  const failure = async (request: Promise<unknown>) => {
+    try {
+      await request;
+      return { status: 200 as number, error: undefined as string | undefined, details: undefined as any };
+    } catch (error: any) {
+      if (!error.response) throw error;
+      return { status: error.response.status as number, error: error.response.data?.error as string | undefined, details: error.response.data?.details };
+    }
+  };
+
+  const stamp = Date.now();
+  const owner = (
+    await axios.post(`${API_URL}/api/auth/register`, {
+      email: `e2e.restaurant.${stamp}@example.com`,
+      password: 'password123',
+      fullName: 'E2E Restaurant Owner',
+      role: 'RESTAURANT_OWNER',
+    })
+  ).data;
+  const ownerAuth = bearer(owner.accessToken);
+  const admin = bearer((await axios.post(`${API_URL}/api/auth/login`, { email: ADMIN_EMAIL, password: ADMIN_PASSWORD })).data.accessToken);
+  const name = `E2E Application ${stamp}`;
+
+  const created = (await axios.post(`${API_URL}/api/restaurants`, { name, address: '1 Corniche, Alexandria' }, ownerAuth)).data;
+  const id = created.id;
+  const secondCreate = await failure(axios.post(`${API_URL}/api/restaurants`, { name: `${name} 2`, address: 'x' }, ownerAuth));
+  const openDraft = await failure(axios.patch(`${API_URL}/api/restaurants/${id}/status`, { status: 'OPEN' }, ownerAuth));
+  const publicDraft = await failure(axios.get(`${API_URL}/api/restaurants/${id}`));
+  const listedDraft = (await axios.get(`${API_URL}/api/restaurants`, { params: { search: name } })).data.items.length;
+  const emptySubmit = await failure(axios.post(`${API_URL}/api/restaurants/${id}/submit`, {}, ownerAuth));
+
+  // The owner prepares the menu and the application while it is a draft.
+  const category = (await axios.post(`${API_URL}/api/menus/categories`, { restaurantId: id, name: 'Mains', displayOrder: 1 }, ownerAuth)).data;
+  const item = (
+    await axios.post(`${API_URL}/api/menus/menu-items`, { restaurantId: id, categoryId: category.id, name: 'E2E Fish', price: 9 }, ownerAuth)
+  ).data;
+  await axios.patch(
+    `${API_URL}/api/restaurants/${id}`,
+    { legalName: 'E2E Seafood LLC', contactPhone: '0101 234 5678', latitude: 31.2001, longitude: 29.9187, cuisineTags: ['Seafood'] },
+    ownerAuth,
+  );
+
+  // A customer can put a draft's item in the cart (menus are public), but checkout finds no restaurant.
+  await axios.delete(`${API_URL}/api/cart`, customerAuth);
+  await axios.post(`${API_URL}/api/cart/items`, { menuItemId: item.id, quantity: 1 }, customerAuth);
+  const ordersBefore = (await axios.get(`${API_URL}/api/orders?limit=1`, customerAuth)).data.total;
+  const draftCheckout = await failure(axios.post(`${API_URL}/api/orders`, { deliveryAddress: '1 Test Street' }, customerAuth));
+  const ordersAfter = (await axios.get(`${API_URL}/api/orders?limit=1`, customerAuth)).data.total;
+  await axios.delete(`${API_URL}/api/cart`, customerAuth);
+
+  const first = (await axios.post(`${API_URL}/api/restaurants/${id}/submit`, {}, ownerAuth)).data;
+  const legalWhileSubmitted = await failure(axios.patch(`${API_URL}/api/restaurants/${id}`, { legalName: 'Other LLC' }, ownerAuth));
+  const ownerReview = await failure(
+    axios.post(`${API_URL}/api/restaurants/${id}/review`, { decision: 'APPROVED', submittedAt: first.submittedAt }, ownerAuth),
+  );
+
+  await axios.post(`${API_URL}/api/restaurants/${id}/review`, { decision: 'REJECTED', note: 'Add your tax card', submittedAt: first.submittedAt }, admin);
+  const [rejected] = (await axios.get(`${API_URL}/api/restaurants/me`, ownerAuth)).data;
+
+  await axios.patch(`${API_URL}/api/restaurants/${id}`, { taxCardNumber: '123-456-789' }, ownerAuth);
+  const second = (await axios.post(`${API_URL}/api/restaurants/${id}/submit`, {}, ownerAuth)).data;
+  const staleReview = await failure(
+    axios.post(`${API_URL}/api/restaurants/${id}/review`, { decision: 'APPROVED', submittedAt: first.submittedAt }, admin),
+  );
+  const approved = (
+    await axios.post(`${API_URL}/api/restaurants/${id}/review`, { decision: 'APPROVED', submittedAt: second.submittedAt }, admin)
+  ).data;
+  const opened = (await axios.patch(`${API_URL}/api/restaurants/${id}/status`, { status: 'OPEN' }, ownerAuth)).data;
+  const publicCard = (await axios.get(`${API_URL}/api/restaurants/${id}`)).data;
+  const listed = (await axios.get(`${API_URL}/api/restaurants`, { params: { search: name } })).data.items.length;
+  // Leave it closed so it can't take part in the rest of the run.
+  await axios.patch(`${API_URL}/api/restaurants/${id}/status`, { status: 'CLOSED' }, ownerAuth);
+
+  const got = {
+    draft: created.approvalStatus,
+    secondCreate: `${secondCreate.status} ${secondCreate.error}`,
+    openDraft: `${openDraft.status} ${openDraft.error}`,
+    publicDraft: publicDraft.status,
+    listedDraft,
+    emptySubmit: `${emptySubmit.status} ${[...(emptySubmit.details?.missing ?? [])].sort().join(',')}`,
+    draftCheckout: draftCheckout.status,
+    noOrder: ordersAfter === ordersBefore,
+    submitted: first.approvalStatus,
+    legalWhileSubmitted: `${legalWhileSubmitted.status} ${legalWhileSubmitted.error}`,
+    ownerReview: ownerReview.status,
+    rejected: `${rejected.approvalStatus} ${rejected.approvalNote} ${rejected.lastReview?.decision}`,
+    staleReview: `${staleReview.status} ${staleReview.error}`,
+    approved: `${approved.approvalStatus} ${approved.reviews.map((review: { decision: string }) => review.decision).join(',')}`,
+    opened: opened.status,
+    publicCard: `${publicCard.approvalStatus} ${publicCard.cuisineTags.join(',')} ${'contactPhone' in publicCard || 'legalName' in publicCard}`,
+    listed,
+  };
+  const want = {
+    draft: 'DRAFT',
+    secondCreate: '409 RestaurantLimitReached',
+    openDraft: '409 RestaurantNotApproved',
+    publicDraft: 404,
+    listedDraft: 0,
+    emptySubmit: '422 availableMenuItem,contactPhone,legalName,location,menuCategory',
+    draftCheckout: 404,
+    noOrder: true,
+    submitted: 'SUBMITTED',
+    legalWhileSubmitted: '409 ApplicationNotEditable',
+    ownerReview: 403,
+    rejected: 'REJECTED Add your tax card REJECTED',
+    staleReview: '409 ApplicationNotInReview',
+    approved: 'APPROVED APPROVED,REJECTED',
+    opened: 'OPEN',
+    publicCard: 'APPROVED Seafood false',
+    listed: 1,
+  };
+  if (JSON.stringify(got) !== JSON.stringify(want)) {
+    throw new Error(`Restaurant application: got ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`);
+  }
+  console.log(
+    'Restaurant application: a draft is hidden, unorderable and unopenable; one per owner; submit lists what is missing; rejected with a note, resubmitted, a stale review 409, approved, opened and listed',
+  );
+}
+
 async function runE2E() {
   console.log('Starting E2E test...');
 
@@ -492,6 +620,7 @@ async function runE2E() {
     await assertPasswordReset();
     await assertAccountSuspension();
     await assertEmailVerification();
+    await assertRestaurantApplication(customerAuth);
 
     // 1. Get Restaurants
     const restaurantsRes = await axios.get(`${API_URL}/api/restaurants`, customerAuth);

@@ -167,6 +167,17 @@ describe('OrdersService', () => {
       expect(error).toMatchObject({ statusCode: 409, error: code, details: { restaurantStatus: status } });
       expect(orders.create).not.toHaveBeenCalled();
     });
+
+    it.each(['DRAFT', 'SUBMITTED', 'REJECTED'])('refuses a restaurant whose application is %s, even if it reads OPEN (#208)', async (approvalStatus) => {
+      cartClient.getCart.mockResolvedValue(cartWith([{ price: 10, quantity: 1 }]) as any);
+      restaurantClient.getRestaurant.mockResolvedValue({ id: 'rest-1', status: RestaurantStatus.OPEN, approvalStatus } as any);
+
+      await expect(service.createFromCart('customer-1', 'Bearer x', undefined, { deliveryAddress: '1 St' } as any)).rejects.toMatchObject({
+        statusCode: 409,
+        error: 'RestaurantClosed',
+      });
+      expect(orders.create).not.toHaveBeenCalled();
+    });
   });
 
   describe('phone gate (#153)', () => {

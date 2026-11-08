@@ -34,6 +34,15 @@ export class PublicRestaurantDto {
 
   @ApiProperty({ enum: RestaurantStatus, enumName: 'RestaurantStatus' })
   status!: RestaurantStatus;
+
+  @ApiProperty({
+    enum: ['DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED'],
+    description: '#208: always APPROVED on public routes; the owner sees their own application status on /restaurants/me.',
+  })
+  approvalStatus!: 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED';
+
+  @ApiProperty({ type: [String], description: '#208: up to 5 cuisine labels.', example: ['Burgers'] })
+  cuisineTags!: string[];
 }
 
 export class PublicRestaurantListResponseDto {

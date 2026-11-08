@@ -20,6 +20,7 @@ import {
   ensureDriverProfile,
   get,
   log,
+  loginAdmin,
   loginOrRegister,
   patch,
   placeOrder,
@@ -41,6 +42,14 @@ import {
 const API_URL = process.env.API_URL || 'http://localhost:3000';
 const PASSWORD = 'password123';
 useGateway(API_URL);
+
+/**
+ * #208: one restaurant per owner. Burger Palace keeps the base seed's owner@example.com (so `npm run e2e`
+ * and the restaurant app's default login still find it); every other restaurant gets its own owner.
+ */
+function ownerEmail(restaurant: string): string {
+  return restaurant === 'Burger Palace' ? 'owner@example.com' : `${restaurant.toLowerCase().replace(/[^a-z0-9]+/g, '.')}.owner@example.com`;
+}
 
 const RESTAURANTS: RestaurantSeed[] = [
   {
@@ -299,7 +308,7 @@ const CUSTOMER = {
 
 async function seedOrders(
   customer: Auth,
-  owner: Auth,
+  ownerOf: (restaurant: string) => Auth,
   driver: Auth,
   catalog: Map<string, Map<string, MenuItem>>,
   missing: (status: string) => boolean,
@@ -330,7 +339,7 @@ async function seedOrders(
       ],
       'success',
     );
-    const deliveredDelivery = await dispatch(delivered.id, owner, driver, driverProfile.id);
+    const deliveredDelivery = await dispatch(delivered.id, ownerOf('Burger Palace'), driver, driverProfile.id);
     await post('/api/tracking/location', { latitude: 36.1627, longitude: -86.7816 }, driver);
     await driveDelivery(deliveredDelivery, driver, true);
     await waitForOrder(delivered.id, customer, 'DELIVERED');
@@ -373,7 +382,7 @@ async function seedOrders(
       ],
       'success',
     );
-    await patch(`/api/orders/${preparing.id}/status`, { status: 'PREPARING' }, owner);
+    await patch(`/api/orders/${preparing.id}/status`, { status: 'PREPARING' }, ownerOf('Cairo Kitchen'));
   }
 
   async function seedOnTheWay() {
@@ -387,7 +396,7 @@ async function seedOrders(
       ],
       'success',
     );
-    const liveDelivery = await dispatch(onTheWay.id, owner, driver, driverProfile.id);
+    const liveDelivery = await dispatch(onTheWay.id, ownerOf('Pizza Napoli'), driver, driverProfile.id);
     await driveDelivery(liveDelivery, driver, false);
     await post('/api/tracking/location', { latitude: 36.1581, longitude: -86.7762 }, driver);
     await waitForOrder(onTheWay.id, customer, 'PICKED_UP');
@@ -448,12 +457,17 @@ async function seedDemo() {
 `);
 
   log('Accounts');
-  const owner = await loginOrRegister(
-    'owner@example.com',
-    PASSWORD,
-    'Restaurant Owner',
-    'RESTAURANT_OWNER',
-  );
+  const owners = new Map<string, Auth>();
+  for (const seed of RESTAURANTS) {
+    const fullName = seed.name === 'Burger Palace' ? 'Restaurant Owner' : `${seed.name} Owner`;
+    owners.set(seed.name, await loginOrRegister(ownerEmail(seed.name), PASSWORD, fullName, 'RESTAURANT_OWNER'));
+  }
+  const ownerOf = (restaurant: string) => {
+    const auth = owners.get(restaurant);
+    if (!auth) throw new Error(`No owner for ${restaurant}`);
+    return auth;
+  };
+  const admin = await loginAdmin();
   const driver = await loginOrRegister(DRIVER.email, PASSWORD, DRIVER.fullName, 'DRIVER');
   const customer = await loginOrRegister(
     CUSTOMER.email,
@@ -478,7 +492,7 @@ async function seedDemo() {
   log('\nRestaurants');
   const catalog = new Map<string, Map<string, MenuItem>>();
   for (const seed of RESTAURANTS) {
-    const { items } = await seedRestaurant(seed, owner);
+    const { items } = await seedRestaurant(seed, ownerOf(seed.name), admin);
     catalog.set(seed.name, items);
   }
 
@@ -487,7 +501,7 @@ async function seedDemo() {
   const statuses = new Set(existing.items.map((order) => order.status));
   const missing = (status: string) => moreOrders || !statuses.has(status);
   if (['DELIVERED', 'CANCELLED', 'FAILED', 'PREPARING', 'PICKED_UP'].some(missing)) {
-    await withBaseDriverPaused(() => seedOrders(customer, owner, driver, catalog, missing));
+    await withBaseDriverPaused(() => seedOrders(customer, ownerOf, driver, catalog, missing));
     await markSomeNotificationsRead(customer, 4);
   } else {
     log(
@@ -513,7 +527,7 @@ async function seedDemo() {
   log(`
 Demo data ready.
   Customer login:  ${CUSTOMER.email} / ${PASSWORD}
-  Owner login:     owner@example.com / ${PASSWORD}
+  Owner login:     owner@example.com / ${PASSWORD} (Burger Palace; each other restaurant has <name>.owner@example.com)
   Driver login:    ${DRIVER.email} / ${PASSWORD}`);
 }
 

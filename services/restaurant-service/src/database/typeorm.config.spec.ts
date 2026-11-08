@@ -59,7 +59,7 @@ describe('AppDataSource', () => {
   it('wires the service entity without connecting or enabling implicit schema changes', () => {
     const entities = AppDataSource.options.entities as Array<{ name?: string }>;
     expect(defaultDataSource).toBe(AppDataSource);
-    expect(entities.map((entity) => entity.name)).toEqual(['Restaurant']);
+    expect(entities.map((entity) => entity.name)).toEqual(['Restaurant', 'RestaurantReview']);
     expect(AppDataSource.options.synchronize).toBe(false);
     expect(AppDataSource.options.migrationsRun).toBe(false);
     expect(AppDataSource.isInitialized).toBe(false);

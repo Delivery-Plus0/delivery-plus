@@ -9,14 +9,18 @@ import {
   NotFoundError,
 } from '@food-delivery/shared';
 import { AppConfig } from '../config/app-config';
+import { Restaurant } from '../entities/restaurant.entity';
+import { MenuServiceClient } from '../common/menu-service.client';
+import { NotInReviewError, OwnerHasRestaurantError } from '../repositories/restaurants.repository';
 
 describe('RestaurantsService', () => {
   let service: RestaurantsService;
   let repo: jest.Mocked<RestaurantsRepository>;
   let storage: jest.Mocked<S3StorageService>;
   let cache: { getOrSet: jest.Mock; del: jest.Mock };
+  let menus: { menuReadiness: jest.Mock };
 
-  const baseRestaurant = {
+  const baseRestaurant: Restaurant = {
     id: 'r1',
     ownerId: 'owner-1',
     name: 'Pizza Place',
@@ -26,6 +30,15 @@ describe('RestaurantsService', () => {
     longitude: null,
     deliveryRadiusKm: null,
     status: RestaurantStatus.CLOSED,
+    approvalStatus: 'APPROVED',
+    submittedAt: null,
+    approvedAt: null,
+    approvalNote: null,
+    legalName: null,
+    commercialRegistrationNumber: null,
+    taxCardNumber: null,
+    contactPhone: null,
+    cuisineTags: [],
     createdAt: new Date(),
     updatedAt: new Date(),
   };
@@ -34,8 +47,12 @@ describe('RestaurantsService', () => {
     repo = {
       findById: jest.fn(),
       findByOwner: jest.fn(),
-      create: jest.fn(),
+      createForOwner: jest.fn(),
       update: jest.fn(),
+      updateIfApprovalIn: jest.fn(),
+      submitIfSubmittable: jest.fn(),
+      decideIfSubmitted: jest.fn().mockResolvedValue('decided'),
+      reviews: jest.fn().mockResolvedValue([]),
       updateStatusUnlessSuspended: jest.fn(),
       list: jest.fn(),
       findOpenById: jest.fn(),
@@ -48,7 +65,8 @@ describe('RestaurantsService', () => {
     } as unknown as jest.Mocked<S3StorageService>;
     cache = { getOrSet: jest.fn((_key, callback) => callback()), del: jest.fn() };
 
-    service = new RestaurantsService(repo, cache as any, storage, { defaultDeliveryRadiusKm: 5 } as AppConfig);
+    menus = { menuReadiness: jest.fn().mockResolvedValue({ categories: 1, availableItems: 1 }) };
+    service = new RestaurantsService(repo, cache as any, storage, { defaultDeliveryRadiusKm: 5 } as AppConfig, menus as unknown as MenuServiceClient);
   });
 
   it('getById throws NotFoundError when missing', async () => {
@@ -72,7 +90,7 @@ describe('RestaurantsService', () => {
   });
 
   it('creates a restaurant with both supplied coordinates', async () => {
-    repo.create.mockResolvedValue({
+    repo.createForOwner.mockResolvedValue({
       ...baseRestaurant,
       latitude: 30.0444,
       longitude: 31.2357,
@@ -85,7 +103,7 @@ describe('RestaurantsService', () => {
       longitude: 31.2357,
     });
 
-    expect(repo.create).toHaveBeenCalledWith({
+    expect(repo.createForOwner).toHaveBeenCalledWith({
       ownerId: 'owner-1',
       name: 'Cairo Kitchen',
       address: '9 Nile Corniche',
@@ -103,15 +121,15 @@ describe('RestaurantsService', () => {
 
   it('update succeeds for the owner', async () => {
     repo.findById.mockResolvedValue(baseRestaurant);
-    repo.update.mockResolvedValue({ ...baseRestaurant, name: 'New Name', latitude: 30.0444, longitude: 31.2357 });
+    repo.updateIfApprovalIn.mockResolvedValue({ ...baseRestaurant, name: 'New Name', latitude: 30.0444, longitude: 31.2357 });
 
     const result = await service.update('r1', 'owner-1', { name: 'New Name', latitude: 30.0444, longitude: 31.2357 });
     expect(result.name).toBe('New Name');
-    expect(repo.update).toHaveBeenCalledWith('r1', {
-      name: 'New Name',
-      latitude: 30.0444,
-      longitude: 31.2357,
-    });
+    expect(repo.updateIfApprovalIn).toHaveBeenCalledWith(
+      'r1',
+      { name: 'New Name', latitude: 30.0444, longitude: 31.2357 },
+      ['DRAFT', 'APPROVED', 'REJECTED'],
+    );
     expect(cache.del).toHaveBeenCalledWith('restaurant:r1');
   });
 
@@ -268,5 +286,186 @@ describe('RestaurantsService', () => {
     ).rejects.toThrow(ForbiddenError);
 
     expect(storage.generateUploadUrl).not.toHaveBeenCalled();
+  });
+  describe('application and approval (#208)', () => {
+    const draft: Restaurant = { ...baseRestaurant, approvalStatus: 'DRAFT' };
+    const complete: Restaurant = { ...draft, legalName: 'Pizza Place LLC', contactPhone: '+201012345678', latitude: 30.04, longitude: 31.23 };
+    const SUBMITTED_AT = new Date('2026-11-08T09:00:00Z');
+
+    it('refuses a second restaurant for the same owner with 409', async () => {
+      repo.createForOwner.mockRejectedValue(new OwnerHasRestaurantError());
+      await expect(service.create('owner-1', { name: 'Second', address: 'x' })).rejects.toMatchObject({
+        statusCode: 409,
+        error: 'RestaurantLimitReached',
+      });
+    });
+
+    it('hides a restaurant that is not approved from the public read', async () => {
+      for (const approvalStatus of ['DRAFT', 'SUBMITTED', 'REJECTED'] as const) {
+        repo.findById.mockResolvedValue({ ...baseRestaurant, approvalStatus });
+        await expect(service.getById('r1')).rejects.toThrow(NotFoundError);
+      }
+    });
+
+    it('shows the owner the application, the private details and the latest note', async () => {
+      repo.findByOwner.mockResolvedValue([{ ...complete, approvalStatus: 'REJECTED', approvalNote: 'Logo missing' }]);
+      repo.reviews.mockResolvedValue([
+        { id: 'v1', restaurantId: 'r1', reviewerUserId: 'staff-1', decision: 'REJECTED', note: 'Logo missing', applicationSubmittedAt: SUBMITTED_AT, reviewedAt: SUBMITTED_AT },
+      ]);
+
+      const [mine] = await service.listMine('owner-1');
+
+      expect(mine).toMatchObject({
+        approvalStatus: 'REJECTED',
+        approvalNote: 'Logo missing',
+        legalName: 'Pizza Place LLC',
+        contactPhone: '+201012345678',
+        lastReview: { decision: 'REJECTED', note: 'Logo missing', reviewedAt: SUBMITTED_AT },
+      });
+      expect(mine.lastReview).not.toHaveProperty('reviewerUserId');
+      expect(mine).not.toHaveProperty('ownerId');
+    });
+
+    it('never puts the private application details in the public card', async () => {
+      repo.findById.mockResolvedValue({ ...complete, approvalStatus: 'APPROVED' });
+      const card = await service.getById('r1');
+      for (const field of ['legalName', 'commercialRegistrationNumber', 'taxCardNumber', 'contactPhone', 'approvalNote']) {
+        expect(card).not.toHaveProperty(field);
+      }
+    });
+
+    it('refuses an owner opening a restaurant that is not approved with 409 RestaurantNotApproved', async () => {
+      repo.findById.mockResolvedValue(draft);
+      repo.updateStatusUnlessSuspended.mockResolvedValue(null);
+
+      await expect(service.updateStatus('r1', 'owner-1', UserRole.RESTAURANT_OWNER, { status: RestaurantStatus.OPEN })).rejects.toMatchObject({
+        statusCode: 409,
+        error: 'RestaurantNotApproved',
+        details: { approvalStatus: 'DRAFT' },
+      });
+    });
+
+    it('submits a complete draft', async () => {
+      repo.findById.mockResolvedValue(complete);
+      repo.submitIfSubmittable.mockResolvedValue({ ...complete, approvalStatus: 'SUBMITTED', submittedAt: SUBMITTED_AT });
+
+      const submitted = await service.submit('r1', 'owner-1');
+
+      expect(submitted).toMatchObject({ approvalStatus: 'SUBMITTED', submittedAt: SUBMITTED_AT });
+      expect(menus.menuReadiness).toHaveBeenCalledWith('r1');
+      expect(cache.del).toHaveBeenCalledWith('restaurant:r1');
+    });
+
+    it('says everything that is missing before a submit', async () => {
+      repo.findById.mockResolvedValue(draft);
+      menus.menuReadiness.mockResolvedValue({ categories: 0, availableItems: 0 });
+
+      await expect(service.submit('r1', 'owner-1')).rejects.toMatchObject({
+        statusCode: 422,
+        error: 'ApplicationIncomplete',
+        details: { missing: ['legalName', 'contactPhone', 'location', 'menuCategory', 'availableMenuItem'] },
+      });
+      expect(repo.submitIfSubmittable).not.toHaveBeenCalled();
+    });
+
+    it('asks only for the legal name among the legal details (owner decision)', async () => {
+      repo.findById.mockResolvedValue({ ...complete, commercialRegistrationNumber: null, taxCardNumber: null });
+      repo.submitIfSubmittable.mockResolvedValue({ ...complete, approvalStatus: 'SUBMITTED', submittedAt: SUBMITTED_AT });
+      await expect(service.submit('r1', 'owner-1')).resolves.toMatchObject({ approvalStatus: 'SUBMITTED' });
+    });
+
+    it('needs an available item, not just a category', async () => {
+      repo.findById.mockResolvedValue(complete);
+      menus.menuReadiness.mockResolvedValue({ categories: 2, availableItems: 0 });
+      await expect(service.submit('r1', 'owner-1')).rejects.toMatchObject({ details: { missing: ['availableMenuItem'] } });
+    });
+
+    it.each(['SUBMITTED', 'APPROVED'] as const)('refuses to submit an application that is %s', async (approvalStatus) => {
+      repo.findById.mockResolvedValue({ ...complete, approvalStatus });
+      await expect(service.submit('r1', 'owner-1')).rejects.toMatchObject({ statusCode: 409, error: 'ApplicationNotEditable', details: { approvalStatus } });
+    });
+
+    it('resubmits a corrected rejected application', async () => {
+      repo.findById.mockResolvedValue({ ...complete, approvalStatus: 'REJECTED', approvalNote: 'Logo missing' });
+      repo.submitIfSubmittable.mockResolvedValue({ ...complete, approvalStatus: 'SUBMITTED', submittedAt: SUBMITTED_AT });
+      await expect(service.submit('r1', 'owner-1')).resolves.toMatchObject({ approvalStatus: 'SUBMITTED', approvalNote: null });
+    });
+
+    it('lets the legal details change only before approval, and freezes the card while submitted', async () => {
+      repo.findById.mockResolvedValue(complete);
+      repo.updateIfApprovalIn.mockResolvedValue(complete);
+
+      await service.update('r1', 'owner-1', { legalName: 'New LLC' });
+      expect(repo.updateIfApprovalIn).toHaveBeenLastCalledWith('r1', { legalName: 'New LLC' }, ['DRAFT', 'REJECTED']);
+
+      await service.update('r1', 'owner-1', { address: 'New street' });
+      expect(repo.updateIfApprovalIn).toHaveBeenLastCalledWith('r1', { address: 'New street' }, ['DRAFT', 'APPROVED', 'REJECTED']);
+
+      await service.update('r1', 'owner-1', { contactPhone: '+201112345678', cuisineTags: ['Pizza'] });
+      expect(repo.updateIfApprovalIn).toHaveBeenLastCalledWith(
+        'r1',
+        { contactPhone: '+201112345678', cuisineTags: ['Pizza'] },
+        ['DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED'],
+      );
+    });
+
+    it('answers 409 with the locked fields when the change is refused', async () => {
+      repo.findById.mockResolvedValue({ ...complete, approvalStatus: 'APPROVED' });
+      repo.updateIfApprovalIn.mockResolvedValue(null);
+
+      await expect(service.update('r1', 'owner-1', { legalName: 'New LLC', description: 'x' })).rejects.toMatchObject({
+        statusCode: 409,
+        error: 'ApplicationNotEditable',
+        details: { approvalStatus: 'APPROVED', fields: ['legalName'] },
+      });
+    });
+
+    describe('review', () => {
+      const review = (overrides: Record<string, unknown> = {}) =>
+        ({ decision: 'APPROVED', submittedAt: SUBMITTED_AT.toISOString(), ...overrides }) as never;
+
+      beforeEach(() => repo.findById.mockResolvedValue({ ...complete, approvalStatus: 'SUBMITTED', submittedAt: SUBMITTED_AT }));
+
+      it('passes the decision on the exact submission to the compare-and-set and clears the cache', async () => {
+        await service.review('staff-1', 'r1', review({ decision: 'REJECTED', note: 'Logo missing' }));
+
+        expect(repo.decideIfSubmitted).toHaveBeenCalledWith(
+          'r1',
+          { decision: 'REJECTED', note: 'Logo missing', reviewerUserId: 'staff-1', submittedAt: SUBMITTED_AT },
+          expect.any(Function),
+        );
+        expect(cache.del).toHaveBeenCalledWith('restaurant:r1');
+      });
+
+      it('re-checks the menu before an approval (422) but not before a rejection', async () => {
+        menus.menuReadiness.mockResolvedValue({ categories: 1, availableItems: 0 });
+        repo.decideIfSubmitted.mockImplementation(async (_id, _review, check) => {
+          await check({ ...complete, approvalStatus: 'SUBMITTED' });
+          return 'decided';
+        });
+
+        await expect(service.review('staff-1', 'r1', review())).rejects.toMatchObject({ statusCode: 422, details: { missing: ['availableMenuItem'] } });
+        await expect(service.review('staff-1', 'r1', review({ decision: 'REJECTED', note: 'Menu empty' }))).resolves.toBeDefined();
+      });
+
+      it('answers 409 ApplicationNotInReview with the current status', async () => {
+        repo.findById.mockResolvedValueOnce({ ...complete, approvalStatus: 'SUBMITTED' }).mockResolvedValueOnce({ ...complete, approvalStatus: 'APPROVED' });
+        repo.decideIfSubmitted.mockRejectedValue(new NotInReviewError());
+
+        await expect(service.review('staff-1', 'r1', review())).rejects.toMatchObject({
+          statusCode: 409,
+          error: 'ApplicationNotInReview',
+          details: { approvalStatus: 'APPROVED' },
+        });
+      });
+
+      it('shows staff the owner and the whole history', async () => {
+        repo.reviews.mockResolvedValue([
+          { id: 'v1', restaurantId: 'r1', reviewerUserId: 'staff-1', decision: 'APPROVED', note: null, applicationSubmittedAt: SUBMITTED_AT, reviewedAt: SUBMITTED_AT },
+        ]);
+        const view = await service.review('staff-1', 'r1', review());
+        expect(view).toMatchObject({ ownerId: 'owner-1', reviews: [{ id: 'v1', decision: 'APPROVED', reviewerUserId: 'staff-1' }] });
+      });
+    });
   });
 });

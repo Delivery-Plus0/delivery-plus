@@ -18,6 +18,7 @@ import {
   ensureDriverProfile,
   get,
   log,
+  loginAdmin,
   loginOrRegister,
   patch,
   placeOrder,
@@ -49,12 +50,15 @@ export const QA = {
     address: '2 Test Street, Apt 2',
   },
   restaurant: { email: 'qa.restaurant@delivery-plus.test', fullName: 'QA Restaurant Owner' },
+  /** #208: one restaurant per owner, so the closed restaurant has its own owner. */
+  nightCafeOwner: { email: 'qa.restaurant2@delivery-plus.test', fullName: 'QA Night Cafe Owner' },
   driver: { email: 'qa.driver@delivery-plus.test', fullName: 'QA Driver', plate: 'QA-0001' },
 } as const;
 
-const RESTAURANTS: RestaurantSeed[] = [
+const RESTAURANTS: (RestaurantSeed & { owner: keyof typeof QA })[] = [
   {
     name: 'QA Kitchen',
+    owner: 'restaurant',
     description: 'Deterministic restaurant for UI tests',
     address: '100 QA Avenue',
     latitude: 30.0444,
@@ -80,6 +84,7 @@ const RESTAURANTS: RestaurantSeed[] = [
   },
   {
     name: 'QA Night Cafe',
+    owner: 'nightCafeOwner',
     description: 'Closed restaurant for filter tests',
     address: '200 QA Avenue',
     latitude: 29.9792,
@@ -156,8 +161,11 @@ async function seedE2e() {
   log('\nRestaurants');
   const items = new Map<string, MenuItem>();
   const restaurantIds: Record<string, string> = {};
+  const admin = await loginAdmin();
+  const nightCafeOwner = await loginOrRegister(QA.nightCafeOwner.email, PASSWORD, QA.nightCafeOwner.fullName, 'RESTAURANT_OWNER');
+  const owners: Partial<Record<keyof typeof QA, Auth>> = { restaurant: owner, nightCafeOwner };
   for (const seed of RESTAURANTS) {
-    const { restaurant, items: seeded } = await seedRestaurant(seed, owner);
+    const { restaurant, items: seeded } = await seedRestaurant(seed, owners[seed.owner]!, admin);
     restaurantIds[seed.name] = restaurant.id;
     seeded.forEach((item, name) => items.set(name, item));
   }

@@ -28,13 +28,55 @@ export type RestaurantSeed = {
   categories: { name: string; items: MenuItemSeed[] }[];
   /** Items with no category, to exercise the app's uncategorized "More" section. */
   uncategorized?: MenuItemSeed[];
+  /** #208: the application's legal name and contact phone (defaults: "<name> LLC" and a fixed test mobile). */
+  legalName?: string;
+  contactPhone?: string;
 };
 export type Restaurant = {
   id: string;
   name: string;
   status: string;
   coverImageUrl?: string | null;
+  approvalStatus?: 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED';
+  submittedAt?: string | null;
 };
+
+/** The test and dev stacks' super admin (TEST_ADMIN_* in their compose overlays, #202). */
+export const TEST_ADMIN = {
+  email: process.env.TEST_ADMIN_EMAIL || 'qa.admin@delivery-plus.test',
+  password: process.env.TEST_ADMIN_PASSWORD || 'Qa-Only-Admin-Passw0rd!',
+};
+
+export async function loginAdmin(): Promise<Auth> {
+  const response = await post<{ accessToken: string; userId: string }>('/api/auth/login', TEST_ADMIN);
+  return { headers: { Authorization: `Bearer ${response.accessToken}` }, userId: response.userId };
+}
+
+/**
+ * #208: a new restaurant is a draft that customers can't see and the owner can't open. Seeds go through
+ * the real flow: the owner fills in the application and submits it, and the stack's super admin approves
+ * exactly that submission. A restaurant approved earlier (or migrated as APPROVED) is left alone.
+ */
+export async function approveRestaurant(
+  restaurant: Restaurant,
+  owner: Auth,
+  admin: Auth,
+  application: { legalName: string; contactPhone: string },
+): Promise<Restaurant> {
+  if (!restaurant.approvalStatus || restaurant.approvalStatus === 'APPROVED') return restaurant;
+  let current = restaurant;
+  if (current.approvalStatus !== 'SUBMITTED') {
+    await patch(`/api/restaurants/${current.id}`, application, owner);
+    current = await post<Restaurant>(`/api/restaurants/${current.id}/submit`, {}, owner);
+  }
+  const approved = await post<Restaurant>(
+    `/api/restaurants/${current.id}/review`,
+    { decision: 'APPROVED', submittedAt: current.submittedAt },
+    admin,
+  );
+  log('  application approved');
+  return approved;
+}
 export type MenuItem = { id: string; name: string; available: boolean; categoryId?: string | null };
 export type Order = { id: string; status: string };
 type Menu = { categories: { id: string; name: string }[]; items: MenuItem[] };
@@ -166,6 +208,7 @@ export async function uploadAvatar(customer: Auth, file: string) {
 export async function seedRestaurant(
   seed: RestaurantSeed,
   owner: Auth,
+  admin: Auth,
 ): Promise<{ restaurant: Restaurant; items: Map<string, MenuItem> }> {
   log(`• ${seed.name}`);
   const owned = await get<Restaurant[]>('/api/restaurants/me', owner);
@@ -263,6 +306,12 @@ export async function seedRestaurant(
       log(`  ${item.name} marked ${desired ? 'available' : 'sold out'}`);
     }
   }
+
+  // #208: submit and approve once the menu exists (a submit needs a category and an available item).
+  restaurant = await approveRestaurant(restaurant, owner, admin, {
+    legalName: seed.legalName ?? `${seed.name} LLC`,
+    contactPhone: seed.contactPhone ?? '01000000000',
+  });
 
   if (restaurant.status !== seed.status) {
     restaurant = await patch<Restaurant>(

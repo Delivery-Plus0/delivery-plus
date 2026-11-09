@@ -61,7 +61,7 @@ describe('RestaurantsRepository', () => {
       'distanceKm',
     );
     expect(queryBuilder.andWhere).toHaveBeenCalledWith(
-      expect.stringContaining('COALESCE(r.deliveryRadiusKm::double precision, :defaultRadiusKm)'),
+      expect.stringContaining('COALESCE("r"."deliveryRadiusKm"::double precision, :defaultRadiusKm)'),
       { lat: 30.0444, lng: 31.2357, defaultRadiusKm: 5 },
     );
     expect(queryBuilder.orderBy).toHaveBeenCalledWith('"distanceKm"', 'ASC');

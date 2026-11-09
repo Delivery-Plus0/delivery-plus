@@ -145,6 +145,21 @@ describeDb('RestaurantsRepository (PostgreSQL integration, #208)', () => {
       expect(listed.map(({ restaurant }) => restaurant.id)).toEqual([first.id]);
     });
 
+    it('lists approved restaurants by distance from a delivery point, only within their delivery radius (#54)', async () => {
+      const near = await submitted();
+      await repo.decideIfSubmitted(near.id, { decision: 'APPROVED', note: null, reviewerUserId: randomUUID(), submittedAt: near.submittedAt! }, () => undefined);
+
+      const query = (lat: number, lng: number) =>
+        ({ page: 1, limit: 10, sortBy: 'createdAt', sortOrder: 'DESC', lat, lng }) as ListRestaurantsQueryDto;
+      const [here, total] = await repo.list(query(30.04, 31.23), 5);
+      expect(total).toBe(1);
+      expect(here.map(({ restaurant }) => restaurant.id)).toEqual([near.id]);
+      expect(here[0].distanceKm).toBeCloseTo(0, 3);
+
+      const [far] = await repo.list(query(31.2001, 29.9187), 5);
+      expect(far).toEqual([]);
+    });
+
     it('refuses a decision on a draft or on a replaced submission, repeats the same one as a no-op, and lets one of two racing reviewers win', async () => {
       const draft = await create();
       await expect(

@@ -180,7 +180,8 @@ export class RestaurantsRepository {
       qb.andWhere('r.latitude IS NOT NULL AND r.longitude IS NOT NULL')
         .addSelect(distanceExpression, 'distanceKm')
         .andWhere(
-          `${distanceExpression} <= COALESCE(r.deliveryRadiusKm::double precision, :defaultRadiusKm)`,
+          // Quoted: TypeORM doesn't rewrite `r.deliveryRadiusKm` before `::`, and Postgres would fold it to lower case.
+          `${distanceExpression} <= COALESCE("r"."deliveryRadiusKm"::double precision, :defaultRadiusKm)`,
           params,
         );
 

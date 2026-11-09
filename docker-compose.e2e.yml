@@ -47,6 +47,12 @@ services:
       AWS_S3_PUBLIC_ENDPOINT: http://localhost:9100
       AWS_PUBLIC_BASE_URL: http://localhost:9100/delivery-plus-media
 
+  # Driver documents (#207) are uploaded with presigned POSTs signed for this endpoint, so they must
+  # point at the E2E object store too (the test layout's default is the dev store on :9000).
+  driver-service:
+    environment:
+      AWS_S3_PUBLIC_ENDPOINT: http://localhost:9100
+
   # UI checkout tests must be deterministic, so every payment succeeds unless a test forces a
   # decline via the API (`simulateFailure: true`, used by seed:e2e for the FAILED scenario).
   # #201: that hook needs PAYMENT_TEST_HOOKS=true, set only here and in docker-compose.test.yml.

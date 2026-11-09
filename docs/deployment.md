@@ -41,7 +41,7 @@ docker compose up -d --build
 
 The root multi-stage `Dockerfile` accepts `SERVICE_NAME` and builds the shared package followed by the selected service.
 
-For local media uploads, start the dev overlay (`docker compose -f docker-compose.base.yml -f docker-compose.dev.yml up`) so the `media-storage` service (SeaweedFS's S3 gateway) and its bucket initializer are included. The production overlay requires `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_S3_BUCKET`, `AWS_PUBLIC_BASE_URL`, and `CORS_ORIGINS`; use deployment secrets, not committed credentials. Configure the bucket to expire objects with the `pending/` prefix after one day so unconfirmed uploads are cleaned up.
+For local media uploads, start the dev overlay (`docker compose -f docker-compose.base.yml -f docker-compose.dev.yml up`) so the `media-storage` service (SeaweedFS's S3 gateway) and its bucket initializer are included. The production overlay requires `AWS_S3_BUCKET`, `AWS_PUBLIC_BASE_URL`, and `CORS_ORIGINS`. S3 credentials come from the AWS default credential chain: on EC2 the instance role (IMDSv2 with a hop limit of 2, so containers reach it), and no keys in any file. `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` are optional, for hosts without a role; if you set them, use deployment secrets, not committed credentials. Configure the bucket to expire objects with the `pending/` prefix after one day so unconfirmed uploads are cleaned up.
 
 Driver documents (#207) need a **second, private bucket**, named by `DRIVER_DOCUMENTS_BUCKET` (driver-service refuses to start in production without it, and refuses the public media bucket's name). Use separate buckets for staging and production. Set it up with:
 

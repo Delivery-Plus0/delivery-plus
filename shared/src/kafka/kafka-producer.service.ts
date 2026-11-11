@@ -8,6 +8,7 @@ import { KafkaModuleOptions } from './kafka.module';
 export class KafkaProducerService implements OnModuleInit, OnModuleDestroy {
   private kafka: Kafka;
   private producer: Producer;
+  private connected = false;
   private readonly logger = new Logger(KafkaProducerService.name);
 
   constructor(@Inject('KAFKA_OPTIONS') private options: KafkaModuleOptions) {
@@ -16,6 +17,12 @@ export class KafkaProducerService implements OnModuleInit, OnModuleDestroy {
       brokers: this.options.brokers,
     });
     this.producer = this.kafka.producer();
+    this.producer.on(this.producer.events.CONNECT, () => {
+      this.connected = true;
+    });
+    this.producer.on(this.producer.events.DISCONNECT, () => {
+      this.connected = false;
+    });
   }
 
   async onModuleInit() {
@@ -25,6 +32,12 @@ export class KafkaProducerService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleDestroy() {
     await this.producer.disconnect();
+    this.connected = false;
+  }
+
+  /** True while the producer holds a live broker connection (readiness probes, #8). */
+  isReady(): boolean {
+    return this.connected;
   }
 
   async publish<T>(topic: string, event: BaseEvent<T>) {

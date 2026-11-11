@@ -185,3 +185,10 @@ PAYMENT_TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5432/payment_se
 
 ## Notes
 The implementation is intentionally simulation-based rather than a real payment gateway. The outcome is chosen by a configurable success rate.
+
+## Health and readiness
+
+`GET /health`, `GET /health/live` and `GET /health/ready` are served from `services/payment-service/src/controllers/health.controller.ts`.
+
+- `GET /health` and `GET /health/live` are liveness checks: process health only, no dependency checks.
+- `GET /health/ready` checks PostgreSQL (`SELECT 1` via the TypeORM connection). Kafka readiness (`kafka` check: shared producer connected and consumer group joined) is included in `GET /health/ready` (#8); a Kafka failure answers 503.

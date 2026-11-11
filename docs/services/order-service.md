@@ -131,3 +131,10 @@ From `services/order-service/src/config/app-config.ts`:
 
 ## Notes
 This is one of the central orchestration services: it owns the order state machine and bridges cart, payment, and delivery flows.
+
+## Health and readiness
+
+`GET /health`, `GET /health/live` and `GET /health/ready` are served from `services/order-service/src/controllers/health.controller.ts`.
+
+- `GET /health` and `GET /health/live` are liveness checks: process health only, no dependency checks.
+- `GET /health/ready` checks PostgreSQL (`SELECT 1` via the TypeORM connection). Kafka readiness (`kafka` check: shared producer connected and consumer group joined, via `KafkaProducerService.isReady()` / `KafkaConsumerService.isReady()`) is included in `GET /health/ready` (#8). A Kafka failure answers 503 `{ "status": "error", "checks": { "postgres": ..., "kafka": "error" } }` without leaking connection details.

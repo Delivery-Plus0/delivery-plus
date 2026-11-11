@@ -66,3 +66,10 @@ From `services/notification-service/src/config/app-config.ts`:
 
 ## Notes
 This service mainly acts as an event consumer and notification inbox, keeping user-facing updates out of the core business services.
+
+## Health and readiness
+
+`GET /health`, `GET /health/live` and `GET /health/ready` are served from `services/notification-service/src/controllers/health.controller.ts`.
+
+- `GET /health` and `GET /health/live` are liveness checks: process health only, no dependency checks.
+- `GET /health/ready` checks PostgreSQL (`SELECT 1` via the TypeORM connection). Kafka readiness (`kafka` check: shared producer connected and consumer group joined) is included in `GET /health/ready` (#8); a Kafka failure answers 503.

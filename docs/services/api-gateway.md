@@ -70,6 +70,8 @@ Set it to the exact number of proxies. Too low, and every client shares the bala
 
 `GET /health` and `GET /health/live` return `{ "status": "ok" }` and back the Compose healthcheck on port `3000`. They are liveness checks only: they do not verify that downstream services are reachable.
 
+`GET /health/ready` (#8) returns `{ "status": "ok", "checks": { "process": "ok" } }` with process-only semantics: the gateway owns no data of its own and must not go unready when a single upstream is temporarily down — each upstream service reports its own dependency readiness at its `/health/ready`.
+
 ## Runtime requirement
 
 The proxy uses `http-proxy-middleware` 4.x, which is ESM-only and requires Node `^22.15.0`; the gateway runs on Node 22. Its Jest spec stubs the module with `jest.mock`, because Jest's CommonJS runtime cannot load ESM-only packages and the spec only tests pure helpers.

@@ -58,7 +58,7 @@ Purpose:
 
 ## Service startup model
 
-The stack is built with health checks and `depends_on` conditions. This expresses the intended startup order, but it is not a complete readiness guarantee: Redis and Kafka readiness are not generally checked by application health endpoints, and the gateway's health route checks only its own process.
+The stack is built with health checks and `depends_on` conditions. This expresses the intended startup order, but it is not a complete readiness guarantee: Redis readiness is not checked by application health endpoints, and the gateway's readiness route checks only its own process. Kafka readiness is checked (`isReady()`: producer connected and, once subscriptions exist, consumer group joined) in the order, payment, delivery and notification services' `/health/ready` (#8).
 
 Examples from the compose file:
 

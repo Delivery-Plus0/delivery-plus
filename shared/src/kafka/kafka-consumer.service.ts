@@ -43,6 +43,8 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
   private consumer: Consumer;
   private readonly groupId: string;
   private readonly maxAttempts: number;
+  private connected = false;
+  private groupJoined = false;
   private handlers = new Map<string, Map<string, MessageHandler<any>>>();
   /** Only used without durable idempotency: dedupes within this process, forgotten on restart. */
   private processedInMemory = new Set<string>();
@@ -66,12 +68,32 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleInit() {
+    this.consumer.on(this.consumer.events.CONNECT, () => {
+      this.connected = true;
+    });
+    this.consumer.on(this.consumer.events.DISCONNECT, () => {
+      this.connected = false;
+      this.groupJoined = false;
+    });
     await this.consumer.connect();
     this.logger.log(`Kafka Consumer connected for ${this.options.clientId}`);
   }
 
   async onModuleDestroy() {
     await this.consumer.disconnect();
+    this.connected = false;
+    this.groupJoined = false;
+  }
+
+  /**
+   * True when this consumer can serve traffic: connected to the brokers and, once
+   * subscriptions exist, having joined its consumer group (readiness probes, #8).
+   * A consumer with no subscriptions is only required to be connected.
+   */
+  isReady(): boolean {
+    if (!this.connected) return false;
+    if (this.handlers.size === 0) return true;
+    return this.groupJoined;
   }
 
   async subscribe<T>(topic: string, eventType: string, handler: MessageHandler<T>) {
@@ -93,6 +115,7 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
       autoCommit: false, // Manual offset commit
       eachMessage: (payload) => this.handleMessage(payload),
     });
+    this.groupJoined = true;
   }
 
   /**

@@ -24,4 +24,16 @@ export class HealthController {
     // Liveness: process is up and can respond. No dependency checks.
     return { status: 'ok' };
   }
+
+  @Get('ready')
+  @ApiOperation({ summary: 'Readiness check for the API Gateway' })
+  ready() {
+    // Readiness (#8): the gateway owns no data of its own and proxies to
+    // upstreams that report their own /health/ready, so its readiness is
+    // process-only. Per-upstream health is visible through each service's
+    // /health/ready; the gateway must not fail readiness because a single
+    // upstream is temporarily down (that would take the whole platform
+    // offline behind one load balancer probe).
+    return { status: 'ok', checks: { process: 'ok' } };
+  }
 }

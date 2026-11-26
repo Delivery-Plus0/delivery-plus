@@ -2,7 +2,8 @@
 
 A one-page snapshot of what the platform does today, what is partial, and what is missing. Read it right after [01-project-overview.md](./01-project-overview.md) so later files are read with the right expectations.
 
-Snapshot of `dev` after per-stage customer notifications (#129, 2026-10-06). Merged so far:
+Snapshot of `dev` after per-stage customer notifications (#129, 2026-10-06).
+- #212 (Production 3): admin API conventions — shared `@RequirePermissions`/`PermissionsGuard` (SYSTEM → 401), gateway `/api/admin/<service>` routing, `docs/openapi/admin.json` admin contract, `GET /admin/orders` in order-service. See ADR 002. Merged so far:
 - Phase 1 and 2 cores, including the transactional outbox (#98).
 - All of Phase 3 (automatic dispatch + driver contracts).
 - All of Phase 4 (driver and restaurant clients, in their own private repos).

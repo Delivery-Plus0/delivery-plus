@@ -55,6 +55,7 @@ import { OutboxRelayService } from '../common/outbox-relay.service';
 import { cancellationRefusal, isRoleAllowedForTransition } from '../common/order-transition-rules';
 import { UpdateOrderStatusDto } from '../dto/update-order-status.dto';
 import { CreateOrderDto } from '../dto/create-order.dto';
+import { AdminListOrdersQueryDto } from '../dto/admin-list-orders-query.dto';
 import { Order } from '../entities/order.entity';
 
 /** The order event for each status an order can be moved to. */
@@ -391,6 +392,19 @@ export class OrdersService implements OnModuleInit {
     await this.restaurantClient.assertOwnership(restaurantId, requesterId);
     const [items, total] = await this.orders.findByRestaurant(restaurantId, page, limit);
     return { items, page, limit, total, totalPages: Math.ceil(total / limit) || 1 };
+  }
+
+  /** #212: staff list of every order; guarded by PermissionsGuard (`support.read`). */
+  async listForAdmin(query: AdminListOrdersQueryDto): Promise<PaginatedResult<Order>> {
+    const [items, total] = await this.orders.findForAdmin(query.page, query.limit, {
+      statuses: query.statuses(),
+      q: query.q,
+      id: query.id,
+      customerId: query.customerId,
+      restaurantId: query.restaurantId,
+      sort: query.sort === 'createdAt:asc' ? 'ASC' : 'DESC',
+    });
+    return { items, page: query.page, limit: query.limit, total, totalPages: Math.ceil(total / query.limit) || 1 };
   }
 
   async updateStatus(

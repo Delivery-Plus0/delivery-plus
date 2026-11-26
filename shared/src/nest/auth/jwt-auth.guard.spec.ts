@@ -3,6 +3,7 @@ import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { PermissionsGuard, RequirePermissions } from './permissions';
+import { UnauthorizedError } from '../../errors/app-error';
 import { GATEWAY_MARKER_HEADER, LOCAL_SYSTEM_JWT_SECRET, loadSystemJwtSecret, systemSecretForVerification } from './system-principal';
 import { UserRole } from '../../types/enums';
 
@@ -113,7 +114,9 @@ describe('PermissionsGuard (#202)', () => {
 
   it('never honours perms on a non-staff token', () => {
     expect(() => permissions.canActivate(ctx('suspend', { role: UserRole.CUSTOMER, perms: ['users.manage'] }))).toThrow();
-    expect(() => permissions.canActivate(ctx('suspend', { role: UserRole.SYSTEM, perms: ['users.manage'] }))).toThrow();
+    // #212: SYSTEM tokens answer 401 (Unauthorized), not 403.
+    expect(() => permissions.canActivate(ctx('suspend', { role: UserRole.SYSTEM, perms: ['users.manage'] }))).toThrow(UnauthorizedError);
+    expect(() => permissions.canActivate(ctx('suspend', { role: UserRole.SYSTEM }))).toThrow(UnauthorizedError);
   });
 
   it('does nothing on a route without permissions', () => {

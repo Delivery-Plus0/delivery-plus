@@ -18,9 +18,27 @@ export const PROXIES = {
   '/api/drivers': process.env.DRIVER_SERVICE_URL || 'http://localhost:3009',
   '/api/tracking': process.env.TRACKING_SERVICE_URL || 'http://localhost:3010',
   '/api/notifications': process.env.NOTIFICATION_SERVICE_URL || 'http://localhost:3011',
+  // #212: staff admin routes. `/api/admin/<service>/...` proxies to `<service> /admin/...`.
+  // The public prefix exists only at the gateway; each service owns its own /admin routes.
+  '/api/admin/auth': process.env.AUTH_SERVICE_URL || 'http://localhost:3001',
+  '/api/admin/users': process.env.USER_SERVICE_URL || 'http://localhost:3002',
+  '/api/admin/restaurants': process.env.RESTAURANT_SERVICE_URL || 'http://localhost:3003',
+  '/api/admin/menus': process.env.MENU_SERVICE_URL || 'http://localhost:3004',
+  '/api/admin/cart': process.env.CART_SERVICE_URL || 'http://localhost:3005',
+  '/api/admin/orders': process.env.ORDER_SERVICE_URL || 'http://localhost:3006',
+  '/api/admin/payments': process.env.PAYMENT_SERVICE_URL || 'http://localhost:3007',
+  '/api/admin/deliveries': process.env.DELIVERY_SERVICE_URL || 'http://localhost:3008',
+  '/api/admin/drivers': process.env.DRIVER_SERVICE_URL || 'http://localhost:3009',
+  '/api/admin/tracking': process.env.TRACKING_SERVICE_URL || 'http://localhost:3010',
+  '/api/admin/notifications': process.env.NOTIFICATION_SERVICE_URL || 'http://localhost:3011',
 } as const;
 
 export function getServicePrefix(gatewayPath: string): string {
+  // #212: the admin public prefix `/api/admin/<service>` rewrites to the
+  // service's own `/admin/<service>` route space.
+  if (gatewayPath.startsWith('/api/admin/')) {
+    return gatewayPath.slice('/api'.length);
+  }
   return gatewayPath === '/api/menus'
     ? ''
     : gatewayPath.replace(/^\/api/, '');

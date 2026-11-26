@@ -11,7 +11,7 @@ import {
   validatePublicOpenApiDocument,
 } from './public-openapi';
 import { isBlockedInternalRoute } from './route-policy';
-import { getCorsOptions, getServicePrefix, rewriteProxyPath } from './main';
+import { getCorsOptions, getServicePrefix, PROXIES, rewriteProxyPath } from './main';
 
 describe('gateway browser CORS', () => {
   it('allows the idempotency header used by order and payment clients', () => {
@@ -160,6 +160,14 @@ describe('gateway internal route exposure', () => {
     expect(getServicePrefix('/api/users')).toBe('/users');
     expect(rewriteProxyPath('/api/users', '/me')).toBe('/users/me');
     expect(rewriteProxyPath('/api/users', '/123')).toBe('/users/123');
+  });
+
+  it('rewrites admin routes to the service /admin route space (#212)', () => {
+    expect(getServicePrefix('/api/admin/orders')).toBe('/admin/orders');
+    expect(rewriteProxyPath('/api/admin/orders', '/')).toBe('/admin/orders/');
+    expect(rewriteProxyPath('/api/admin/orders', '/?page=2&limit=50')).toBe('/admin/orders/?page=2&limit=50');
+    expect(rewriteProxyPath('/api/admin/orders', '/abc')).toBe('/admin/orders/abc');
+    expect(Object.keys(PROXIES).filter((p) => p.startsWith('/api/admin/')).length).toBe(11);
   });
 
   it('preserves menu-service root routes and swagger-json rewrite behavior', () => {

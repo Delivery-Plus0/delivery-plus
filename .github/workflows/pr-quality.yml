@@ -63,7 +63,7 @@ jobs:
         run: npm run openapi:generate
 
       - name: Check committed public OpenAPI contract
-        run: git diff --exit-code -- docs/openapi/delivery-plus-public.json
+        run: git diff --exit-code -- docs/openapi/
 
       - name: Validate public OpenAPI contract
         run: npm run openapi:validate

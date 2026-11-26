@@ -184,6 +184,41 @@ export const SERVICE_DEFINITIONS = [
   },
 ] as const;
 
+/**
+ * Staff admin routes (#212). Each service owns its own `/admin/...` routes; the
+ * gateway publishes them under `/api/admin/<service>/...`. They never appear in
+ * the public spec — this is a separate contract (`docs/openapi/admin.json`).
+ */
+export const ADMIN_SERVICE_PREFIXES = [
+  '/api/admin/auth',
+  '/api/admin/users',
+  '/api/admin/restaurants',
+  '/api/admin/menus',
+  '/api/admin/cart',
+  '/api/admin/orders',
+  '/api/admin/payments',
+  '/api/admin/deliveries',
+  '/api/admin/drivers',
+  '/api/admin/tracking',
+  '/api/admin/notifications',
+] as const;
+
+export const ADMIN_SERVICE_DEFINITIONS = [
+  {
+    service: 'orders',
+    publicPrefix: '/api/admin/orders',
+    routes: [
+      {
+        method: 'get',
+        path: '',
+        summary: 'List all orders (staff with support.read)',
+        auth: true,
+        statusCode: 200,
+      },
+    ],
+  },
+] as const;
+
 export function extractPathParameters(path: string): string[] {
   const matches = Array.from(path.matchAll(/\/(?:\{([^}]+)\}|:([A-Za-z0-9_]+))/g));
   const names = matches.map((match) => match[1] ?? match[2]).filter((value): value is string => Boolean(value));
@@ -1600,7 +1635,11 @@ export function generatePublicOpenApiDocument() {
   return publicSpec;
 }
 
-export function validatePublicOpenApiDocument(doc: Record<string, any>, servicePrefixes: readonly string[] = SERVICE_PREFIXES): void {
+export function validatePublicOpenApiDocument(
+  doc: Record<string, any>,
+  servicePrefixes: readonly string[] = SERVICE_PREFIXES,
+  options: { forbidAdmin?: boolean } = {},
+): void {
   assert(doc.openapi === '3.0.3', 'OpenAPI version must be 3.0.3');
   assert(doc.servers?.[0]?.url === 'http://localhost:3000', 'Gateway server URL must point to localhost:3000');
   assert(doc.paths && typeof doc.paths === 'object', 'paths must exist');
@@ -1613,6 +1652,8 @@ export function validatePublicOpenApiDocument(doc: Record<string, any>, serviceP
   for (const path of pathNames) {
     assert(path.startsWith('/api/'), `Public path must start with /api/: ${path}`);
     assert(!path.includes('/internal'), `Internal-only route leaked into public OpenAPI: ${path}`);
+    // #212: admin routes are a separate contract (docs/openapi/admin.json), never public.
+    assert(options.forbidAdmin === false || !path.startsWith('/api/admin/'), `Admin route leaked into public OpenAPI: ${path}`);
     assert(!path.toLowerCase().includes('docs-json'), `Docs JSON route leaked into business contract: ${path}`);
     assert(!/\/:[A-Za-z0-9_]+/.test(path), `Express-style path params are not valid in OpenAPI paths: ${path}. Use /{parameter} instead.`);
 
@@ -1654,11 +1695,15 @@ export function validatePublicOpenApiDocument(doc: Record<string, any>, serviceP
     }
   }
 
-  for (const prefix of servicePrefixes) {
-    assert(
-      pathNames.some((path) => path === prefix || path.startsWith(`${prefix}/`)),
-      `Missing public routes for service prefix: ${prefix}`,
-    );
+  // Coverage over every service prefix is a public-spec rule. The admin contract grows
+  // service by service (#212: one example route first), so it only checks what it declares.
+  if (options.forbidAdmin !== false) {
+    for (const prefix of servicePrefixes) {
+      assert(
+        pathNames.some((path) => path === prefix || path.startsWith(`${prefix}/`)),
+        `Missing public routes for service prefix: ${prefix}`,
+      );
+    }
   }
 
   const visit = (node: unknown) => {
@@ -1694,5 +1739,101 @@ export function validatePublicOpenApiDocument(doc: Record<string, any>, serviceP
     }
   }
 
-  assert(Array.isArray(doc.tags) && doc.tags.length >= servicePrefixes.length, 'Public OpenAPI must include service tags');
+  assert(Array.isArray(doc.tags) && doc.tags.length >= (options.forbidAdmin === false ? 1 : servicePrefixes.length), 'Public OpenAPI must include service tags');
+}
+
+
+/**
+ * The admin API contract (#212): `/api/admin/<service>/...` at the gateway,
+ * `/admin/...` inside each service. Staff-only, bearer JWT with role ADMIN and
+ * the `perms` claim; SYSTEM tokens answer 401. Kept out of the public spec.
+ */
+export function generateAdminOpenApiDocument() {
+  const adminSpec = {
+    openapi: '3.0.3',
+    info: {
+      title: 'Delivery Plus Admin API',
+      version: '1.0.0',
+      description:
+        'Staff admin contract for the Delivery Plus platform (#212). Each service owns its own /admin routes; the gateway publishes them under /api/admin/<service>. Requires a staff JWT (role ADMIN) carrying the route\'s permissions; SYSTEM tokens are refused with 401. Every mutation requires a reason and goes through the audit hook (#213).',
+    },
+    servers: [{ url: 'http://localhost:3000' }],
+    tags: ADMIN_SERVICE_DEFINITIONS.map(({ service }) => ({ name: service, description: `${service} admin endpoints` })),
+    paths: {} as Record<string, Record<string, any>>,
+    components: {
+      securitySchemes: {
+        bearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+        },
+      },
+      schemas: {
+        ErrorResponse: {
+          type: 'object',
+          properties: {
+            statusCode: { type: 'integer' },
+            error: { type: 'string' },
+            message: { type: 'string' },
+          },
+        },
+      },
+    },
+  };
+
+  for (const service of ADMIN_SERVICE_DEFINITIONS) {
+    for (const route of service.routes) {
+      const pathKey = joinPublicPath(service.publicPrefix, route.path);
+      const operationId = `admin_${service.service}_${route.method}_${pathKey.replace(/[/:{}-]+/g, '_').replace(/^_+|_+$/g, '')}`;
+
+      const operation: Record<string, any> = {
+        summary: route.summary,
+        tags: [service.service],
+        operationId,
+        security: route.auth ? [{ bearerAuth: [] }] : [],
+        parameters: [
+          { name: 'page', in: 'query', required: false, schema: { type: 'integer', minimum: 1, default: 1 } },
+          { name: 'limit', in: 'query', required: false, schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
+          { name: 'q', in: 'query', required: false, schema: { type: 'string' }, description: 'Free-text search' },
+          { name: 'sort', in: 'query', required: false, schema: { type: 'string', enum: ['createdAt:asc', 'createdAt:desc'], default: 'createdAt:desc' } },
+        ],
+        responses: {
+          [String(route.statusCode || 200)]: {
+            description: 'A PaginatedResult<T>',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    items: { type: 'array', items: { type: 'object' } },
+                    page: { type: 'integer' },
+                    limit: { type: 'integer' },
+                    total: { type: 'integer' },
+                    totalPages: { type: 'integer' },
+                  },
+                },
+              },
+            },
+          },
+          '401': { description: 'Missing or invalid JWT, or a SYSTEM token on an admin route' },
+          '403': { description: 'Staff token without the required permission' },
+        },
+      };
+
+      if (!adminSpec.paths[pathKey]) {
+        adminSpec.paths[pathKey] = {};
+      }
+      adminSpec.paths[pathKey][route.method] = operation;
+    }
+  }
+
+  return adminSpec;
+}
+
+/** Same contract rules as the public spec, plus: every path is an /api/admin path. */
+export function validateAdminOpenApiDocument(doc: Record<string, any>): void {
+  validatePublicOpenApiDocument(doc, ADMIN_SERVICE_PREFIXES, { forbidAdmin: false });
+  for (const path of Object.keys(doc.paths)) {
+    assert(path.startsWith('/api/admin/'), `Admin path must start with /api/admin/: ${path}`);
+  }
 }

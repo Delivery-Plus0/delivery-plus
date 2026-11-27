@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { ORDER_LIST_FILTER_STATUSES, OrderListFilter } from './list-orders-query.dto';
 import { OrderStatus } from '@food-delivery/shared';
@@ -32,7 +32,7 @@ export class AdminListOrdersQueryDto {
   limit: number = 20;
 
   @ApiPropertyOptional({
-    description: 'Free-text search over the order id and the customer id.',
+    description: 'A full order id. Anything else matches nothing: no fuzzy or prefix search over customer data (ADR 002).',
     maxLength: 100,
   })
   @IsOptional()
@@ -42,23 +42,26 @@ export class AdminListOrdersQueryDto {
 
   @ApiPropertyOptional({
     description: 'Order id to filter to a single order.',
+    format: 'uuid',
   })
   @IsOptional()
-  @IsString()
+  @IsUUID()
   id?: string;
 
   @ApiPropertyOptional({
     description: 'Customer id to filter to one customer.',
+    format: 'uuid',
   })
   @IsOptional()
-  @IsString()
+  @IsUUID()
   customerId?: string;
 
   @ApiPropertyOptional({
     description: 'Restaurant id to filter to one restaurant.',
+    format: 'uuid',
   })
   @IsOptional()
-  @IsString()
+  @IsUUID()
   restaurantId?: string;
 
   @ApiPropertyOptional({

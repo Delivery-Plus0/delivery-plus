@@ -44,6 +44,12 @@ describe('AdminListOrdersQueryDto (#212)', () => {
     expect(errors.some((e) => e.property === 'status')).toBe(true);
   });
 
+  it('rejects a filter id that is not a UUID with a 400, instead of an empty page', async () => {
+    const query = plainToInstance(AdminListOrdersQueryDto, { id: 'abc', customerId: 'c1', restaurantId: 'r1' });
+    const properties = (await validate(query)).map((e) => e.property);
+    expect(properties).toEqual(expect.arrayContaining(['id', 'customerId', 'restaurantId']));
+  });
+
   it('maps the status group filter onto concrete statuses', () => {
     const query = plainToInstance(AdminListOrdersQueryDto, { status: 'completed' });
     expect(query.statuses()).toEqual(['DELIVERED']);
@@ -62,7 +68,7 @@ describe('OrdersRepository.findForAdmin (#212)', () => {
     const findAndCount = jest.fn().mockResolvedValue([[], 0]);
     const repository = makeRepo(findAndCount);
 
-    await repository.findForAdmin(3, 50, { statuses: [OrderStatus.DELIVERED], customerId: 'c1', sort: 'ASC' });
+    await repository.findForAdmin(3, 50, { statuses: [OrderStatus.DELIVERED], customerId: 'c1', sort: 'ASC' }); // repository level: ids already validated by the DTO
     expect(findAndCount).toHaveBeenCalledWith(
       expect.objectContaining({ skip: 100, take: 50, order: { createdAt: 'ASC' } }),
     );

@@ -20,6 +20,7 @@
     "/api/admin/orders": {
       "get": {
         "summary": "List all orders (staff with support.read)",
+        "description": "Requires staff permission: support.read.",
         "tags": [
           "orders"
         ],
@@ -29,11 +30,15 @@
             "bearerAuth": []
           }
         ],
+        "x-permissions": [
+          "support.read"
+        ],
         "parameters": [
           {
             "name": "page",
             "in": "query",
             "required": false,
+            "description": "Page number, starting at 1.",
             "schema": {
               "type": "integer",
               "minimum": 1,
@@ -44,6 +49,7 @@
             "name": "limit",
             "in": "query",
             "required": false,
+            "description": "Page size, at most 100.",
             "schema": {
               "type": "integer",
               "minimum": 1,
@@ -55,15 +61,61 @@
             "name": "q",
             "in": "query",
             "required": false,
+            "description": "A full order id; anything else matches nothing.",
             "schema": {
-              "type": "string"
-            },
-            "description": "Free-text search"
+              "type": "string",
+              "maxLength": 100
+            }
+          },
+          {
+            "name": "id",
+            "in": "query",
+            "required": false,
+            "description": "One order.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "customerId",
+            "in": "query",
+            "required": false,
+            "description": "Orders of one customer.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "restaurantId",
+            "in": "query",
+            "required": false,
+            "description": "Orders of one restaurant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "active = not finished, completed = DELIVERED, cancelled = CANCELLED or FAILED.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "active",
+                "completed",
+                "cancelled"
+              ]
+            }
           },
           {
             "name": "sort",
             "in": "query",
             "required": false,
+            "description": "Order by creation time.",
             "schema": {
               "type": "string",
               "enum": [
@@ -81,6 +133,13 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": [
+                    "items",
+                    "page",
+                    "limit",
+                    "total",
+                    "totalPages"
+                  ],
                   "properties": {
                     "items": {
                       "type": "array",
@@ -101,6 +160,16 @@
                       "type": "integer"
                     }
                   }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters or body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }

@@ -21,7 +21,7 @@ export class AdminOrdersController {
   @ApiOperation({
     summary: 'List all orders (staff with support.read)',
     description:
-      'Cursor-page contract: page + limit (max 100), explicit filters (id, customerId, restaurantId, status group) and a free-text q over ids. sort is createdAt:asc | createdAt:desc.',
+      'Page pagination: page + limit (max 100), explicit filters (id, customerId, restaurantId, status group) and q, which matches a full order id only. sort is createdAt:asc | createdAt:desc.',
   })
   list(@Query() query: AdminListOrdersQueryDto) {
     return this.ordersService.listForAdmin(query);

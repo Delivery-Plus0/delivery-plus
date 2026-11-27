@@ -203,7 +203,40 @@ export const ADMIN_SERVICE_PREFIXES = [
   '/api/admin/notifications',
 ] as const;
 
-export const ADMIN_SERVICE_DEFINITIONS = [
+/** A query parameter of an admin route, as it appears in docs/openapi/admin.json. */
+export type AdminQueryParameter = {
+  name: string;
+  description: string;
+  schema: Record<string, unknown>;
+};
+
+/** One admin route. Each route declares its own parameters and body; nothing is shared by default. */
+export type AdminRouteDefinition = {
+  method: 'get' | 'post' | 'patch' | 'put' | 'delete';
+  /** Relative to the service's admin prefix; `{id}` path parameters are documented automatically. */
+  path: string;
+  summary: string;
+  /** Staff permissions the route requires (PermissionsGuard). */
+  permissions: readonly string[];
+  statusCode: number;
+  query?: readonly AdminQueryParameter[];
+  /** JSON body schema for mutations; every mutation carries a `reason` (ADR 002). */
+  requestBody?: Record<string, unknown>;
+  /** `paginated` is a PaginatedResult<T>; `object` a single resource. */
+  response: 'paginated' | 'object';
+};
+
+/** Page pagination shared by every admin list route (ADR 002: limit capped at 100). */
+export const ADMIN_PAGE_QUERY: readonly AdminQueryParameter[] = [
+  { name: 'page', description: 'Page number, starting at 1.', schema: { type: 'integer', minimum: 1, default: 1 } },
+  { name: 'limit', description: 'Page size, at most 100.', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
+];
+
+export const ADMIN_SERVICE_DEFINITIONS: readonly {
+  service: string;
+  publicPrefix: string;
+  routes: readonly AdminRouteDefinition[];
+}[] = [
   {
     service: 'orders',
     publicPrefix: '/api/admin/orders',
@@ -212,12 +245,26 @@ export const ADMIN_SERVICE_DEFINITIONS = [
         method: 'get',
         path: '',
         summary: 'List all orders (staff with support.read)',
-        auth: true,
+        permissions: ['support.read'],
         statusCode: 200,
+        response: 'paginated',
+        query: [
+          ...ADMIN_PAGE_QUERY,
+          { name: 'q', description: 'A full order id; anything else matches nothing.', schema: { type: 'string', maxLength: 100 } },
+          { name: 'id', description: 'One order.', schema: { type: 'string', format: 'uuid' } },
+          { name: 'customerId', description: 'Orders of one customer.', schema: { type: 'string', format: 'uuid' } },
+          { name: 'restaurantId', description: 'Orders of one restaurant.', schema: { type: 'string', format: 'uuid' } },
+          {
+            name: 'status',
+            description: 'active = not finished, completed = DELIVERED, cancelled = CANCELLED or FAILED.',
+            schema: { type: 'string', enum: ['active', 'completed', 'cancelled'] },
+          },
+          { name: 'sort', description: 'Order by creation time.', schema: { type: 'string', enum: ['createdAt:asc', 'createdAt:desc'], default: 'createdAt:desc' } },
+        ],
       },
     ],
   },
-] as const;
+];
 
 export function extractPathParameters(path: string): string[] {
   const matches = Array.from(path.matchAll(/\/(?:\{([^}]+)\}|:([A-Za-z0-9_]+))/g));
@@ -1786,39 +1833,55 @@ export function generateAdminOpenApiDocument() {
       const pathKey = joinPublicPath(service.publicPrefix, route.path);
       const operationId = `admin_${service.service}_${route.method}_${pathKey.replace(/[/:{}-]+/g, '_').replace(/^_+|_+$/g, '')}`;
 
+      const pathParameters = extractPathParameters(pathKey).map((name) => ({
+        name,
+        in: 'path',
+        required: true,
+        schema: { type: 'string', format: 'uuid' },
+      }));
+      const queryParameters = (route.query ?? []).map(({ name, description, schema }) => ({
+        name,
+        in: 'query',
+        required: false,
+        description,
+        schema,
+      }));
+      const okSchema =
+        route.response === 'paginated'
+          ? {
+              type: 'object',
+              required: ['items', 'page', 'limit', 'total', 'totalPages'],
+              properties: {
+                items: { type: 'array', items: { type: 'object' } },
+                page: { type: 'integer' },
+                limit: { type: 'integer' },
+                total: { type: 'integer' },
+                totalPages: { type: 'integer' },
+              },
+            }
+          : { type: 'object' };
+
       const operation: Record<string, any> = {
         summary: route.summary,
+        description: `Requires staff permission: ${route.permissions.join(', ')}.`,
         tags: [service.service],
         operationId,
-        security: route.auth ? [{ bearerAuth: [] }] : [],
-        parameters: [
-          { name: 'page', in: 'query', required: false, schema: { type: 'integer', minimum: 1, default: 1 } },
-          { name: 'limit', in: 'query', required: false, schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
-          { name: 'q', in: 'query', required: false, schema: { type: 'string' }, description: 'Free-text search' },
-          { name: 'sort', in: 'query', required: false, schema: { type: 'string', enum: ['createdAt:asc', 'createdAt:desc'], default: 'createdAt:desc' } },
-        ],
+        security: [{ bearerAuth: [] }],
+        'x-permissions': [...route.permissions],
+        parameters: [...pathParameters, ...queryParameters],
         responses: {
-          [String(route.statusCode || 200)]: {
-            description: 'A PaginatedResult<T>',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    items: { type: 'array', items: { type: 'object' } },
-                    page: { type: 'integer' },
-                    limit: { type: 'integer' },
-                    total: { type: 'integer' },
-                    totalPages: { type: 'integer' },
-                  },
-                },
-              },
-            },
+          [String(route.statusCode)]: {
+            description: route.response === 'paginated' ? 'A PaginatedResult<T>' : 'The resource',
+            content: { 'application/json': { schema: okSchema } },
           },
+          '400': { description: 'Invalid parameters or body', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
           '401': { description: 'Missing or invalid JWT, or a SYSTEM token on an admin route' },
           '403': { description: 'Staff token without the required permission' },
         },
       };
+      if (route.requestBody) {
+        operation.requestBody = { required: true, content: { 'application/json': { schema: route.requestBody } } };
+      }
 
       if (!adminSpec.paths[pathKey]) {
         adminSpec.paths[pathKey] = {};
@@ -1833,7 +1896,20 @@ export function generateAdminOpenApiDocument() {
 /** Same contract rules as the public spec, plus: every path is an /api/admin path. */
 export function validateAdminOpenApiDocument(doc: Record<string, any>): void {
   validatePublicOpenApiDocument(doc, ADMIN_SERVICE_PREFIXES, { forbidAdmin: false });
-  for (const path of Object.keys(doc.paths)) {
+  for (const [path, operations] of Object.entries(doc.paths as Record<string, Record<string, any>>)) {
     assert(path.startsWith('/api/admin/'), `Admin path must start with /api/admin/: ${path}`);
+    for (const [method, operation] of Object.entries(operations)) {
+      assert(
+        Array.isArray(operation['x-permissions']) && operation['x-permissions'].length > 0,
+        `Admin route must declare its staff permissions: ${method.toUpperCase()} ${path}`,
+      );
+      if (method !== 'get') {
+        const body = operation.requestBody?.content?.['application/json']?.schema;
+        assert(
+          Array.isArray(body?.required) && body.required.includes('reason'),
+          `Admin mutation must require a reason (ADR 002): ${method.toUpperCase()} ${path}`,
+        );
+      }
+    }
   }
 }

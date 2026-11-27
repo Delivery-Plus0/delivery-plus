@@ -50,6 +50,35 @@ describe('AdminRestaurantsService (#214)', () => {
     expect(result.items[0]).not.toHaveProperty('taxCardNumber');
   });
 
+  it('passes the approvalStatus and status filters straight through, and no area when it is partial', async () => {
+    const { service, restaurants, lookups } = setup();
+    restaurants.findForAdmin.mockResolvedValue([[], 0]);
+    lookups.names.mockResolvedValue(new Map());
+
+    await service.list(Object.assign(new AdminListRestaurantsQueryDto(), { approvalStatus: 'SUBMITTED' as never, status: 'OPEN' as never, nearLat: 30 }));
+
+    expect(restaurants.findForAdmin).toHaveBeenCalledWith(
+      expect.objectContaining({ approvalStatus: 'SUBMITTED', status: 'OPEN', near: undefined }),
+      1,
+      20,
+    );
+  });
+
+  it('never exposes secret fields: the staff restaurant row has a fixed shape', async () => {
+    const { service, restaurants, lookups } = setup();
+    restaurants.findForAdmin.mockResolvedValue([[restaurant('r1', 'o1')], 1]);
+    lookups.names.mockResolvedValue(new Map());
+
+    const row = (await service.list(Object.assign(new AdminListRestaurantsQueryDto()))).items[0];
+
+    expect(Object.keys(row).sort()).toEqual(
+      ['address', 'approvalStatus', 'approvedAt', 'contactPhone', 'createdAt', 'deliveryRadiusKm', 'id', 'latitude', 'longitude', 'name', 'ownerId', 'ownerName', 'status', 'submittedAt'].sort(),
+    );
+    expect(row).not.toHaveProperty('taxCardNumber');
+    expect(row).not.toHaveProperty('commercialRegistrationNumber');
+    expect(JSON.stringify(row)).not.toContain('123');
+  });
+
   it('searches by the exact phone', async () => {
     const { service, restaurants, lookups } = setup();
     restaurants.findByContactPhone.mockResolvedValue([restaurant('r1', 'o1')]);

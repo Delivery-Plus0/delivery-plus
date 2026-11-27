@@ -54,6 +54,10 @@ export class Credential {
   @Column({ type: 'timestamptz', nullable: true })
   verificationSentAt!: Date | null;
 
+  /** #214: the last successful sign-in (password), for the staff people directory. */
+  @Column({ type: 'timestamptz', nullable: true })
+  lastLoginAt!: Date | null;
+
   @CreateDateColumn()
   createdAt!: Date;
 

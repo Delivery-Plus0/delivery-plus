@@ -40,6 +40,7 @@ const credentials = {
   findByEmail: async (email: string) => [...credentialRows.values()].find((c) => c.email === email) ?? null,
   findById: async (id: string) => credentialRows.get(id) ?? null,
   resetFailureState: async () => undefined,
+  recordLogin: async () => undefined,
   recordFailedLogin: async (id: string) => credentialRows.get(id) ?? null,
   update: async () => null,
   transaction: async (work: (manager: unknown) => Promise<unknown>) => work({}),
@@ -111,6 +112,7 @@ describe('Auth sessions over HTTP (#34)', () => {
       status: 'ACTIVE',
       suspendedAt: null,
       suspendedReason: null,
+      lastLoginAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
@@ -247,7 +249,7 @@ describe('Auth sessions over HTTP (#34)', () => {
       credentialRows.set(id, {
         id, email, passwordHash: await bcrypt.hash(password, 4), role, emailVerified: true, lockedUntil: null, failedLoginCount: 0,
         lastFailedLoginAt: null, verificationTokenHash: null, verificationTokenExpiresAt: null, verificationAttempts: 0, verificationSentAt: null, status: 'ACTIVE', suspendedAt: null,
-        suspendedReason: null, createdAt: new Date(), updatedAt: new Date(),
+        suspendedReason: null, lastLoginAt: null, createdAt: new Date(), updatedAt: new Date(),
       });
       return id;
     };

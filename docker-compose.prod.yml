@@ -76,6 +76,7 @@ services:
         SERVICE_NAME: auth-service
     restart: unless-stopped
     environment:
+      SYSTEM_JWT_SECRET: ${SYSTEM_JWT_SECRET:?SYSTEM_JWT_SECRET must be set (a long random value, different from JWT_SECRET)}
       NODE_ENV: production
       DATABASE_URL: postgres://${POSTGRES_USER_URLENCODED:?POSTGRES_USER_URLENCODED must be set}:${POSTGRES_PASSWORD_URLENCODED:?POSTGRES_PASSWORD_URLENCODED must be set}@postgres:5432/auth_service
       REDIS_URL: redis://redis:6379
@@ -112,6 +113,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER_URLENCODED:?POSTGRES_USER_URLENCODED must be set}:${POSTGRES_PASSWORD_URLENCODED:?POSTGRES_PASSWORD_URLENCODED must be set}@postgres:5432/user_service
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
       SYSTEM_JWT_SECRET: ${SYSTEM_JWT_SECRET:?SYSTEM_JWT_SECRET must be set (a long random value, different from JWT_SECRET)}
+      AUTH_SERVICE_URL: http://auth-service:3001
       REDIS_URL: redis://redis:6379
       INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:?INTERNAL_AUTH_SECRET must be set}
       # Phone verification (#153): off until a real SMS provider and its credentials exist.

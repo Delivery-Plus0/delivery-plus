@@ -16,6 +16,10 @@
       "description": "orders admin endpoints"
     },
     {
+      "name": "users",
+      "description": "users admin endpoints"
+    },
+    {
       "name": "audit",
       "description": "audit admin endpoints"
     }
@@ -164,6 +168,307 @@
                       "type": "integer"
                     }
                   }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters or body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT, or a SYSTEM token on an admin route"
+          },
+          "403": {
+            "description": "Staff token without the required permission"
+          }
+        }
+      }
+    },
+    "/api/admin/users": {
+      "get": {
+        "summary": "List people with their account status (staff with support.read)",
+        "description": "Requires staff permission: support.read.",
+        "tags": [
+          "users"
+        ],
+        "operationId": "admin_users_get_api_admin_users",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-permissions": [
+          "support.read"
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "description": "Page number, starting at 1.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size, at most 100.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "role",
+            "in": "query",
+            "required": false,
+            "description": "Account role.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "CUSTOMER",
+                "DRIVER",
+                "RESTAURANT_OWNER",
+                "ADMIN"
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Account status.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ACTIVE",
+                "SUSPENDED"
+              ]
+            }
+          },
+          {
+            "name": "emailVerified",
+            "in": "query",
+            "required": false,
+            "description": "Email verified or not.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "phoneVerified",
+            "in": "query",
+            "required": false,
+            "description": "Phone verified or not.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "The start of the full name or of a later word, case-insensitive. Phone and email: POST /api/admin/users/search.",
+            "schema": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 60
+            }
+          },
+          {
+            "name": "createdFrom",
+            "in": "query",
+            "required": false,
+            "description": "Accounts created at or after, ISO 8601.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "createdTo",
+            "in": "query",
+            "required": false,
+            "description": "Accounts created before, ISO 8601.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A PaginatedResult<T>",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items",
+                    "page",
+                    "limit",
+                    "total",
+                    "totalPages"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "limit": {
+                      "type": "integer"
+                    },
+                    "total": {
+                      "type": "integer"
+                    },
+                    "totalPages": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters or body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT, or a SYSTEM token on an admin route"
+          },
+          "403": {
+            "description": "Staff token without the required permission"
+          }
+        }
+      }
+    },
+    "/api/admin/users/search": {
+      "post": {
+        "summary": "Find people by an exact phone or email, in the body so it never reaches a URL or log (staff with support.read)",
+        "description": "Requires staff permission: support.read.",
+        "tags": [
+          "users"
+        ],
+        "operationId": "admin_users_post_api_admin_users_search",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-permissions": [
+          "support.read"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "The resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters or body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT, or a SYSTEM token on an admin route"
+          },
+          "403": {
+            "description": "Staff token without the required permission"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "Exactly one of phone (Egyptian mobile, normalized to E.164) or email (lowercased).",
+                "properties": {
+                  "phone": {
+                    "type": "string",
+                    "example": "01012345678"
+                  },
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-read-only": true
+      }
+    },
+    "/api/admin/users/{id}": {
+      "get": {
+        "summary": "One person: profile and account (staff with support.read)",
+        "description": "Requires staff permission: support.read.",
+        "tags": [
+          "users"
+        ],
+        "operationId": "admin_users_get_api_admin_users_id",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-permissions": [
+          "support.read"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
                 }
               }
             }

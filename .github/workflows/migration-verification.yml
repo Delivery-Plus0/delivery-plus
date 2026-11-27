@@ -216,6 +216,16 @@ jobs:
             echo "OK: '$statement' refused"
           done
 
+      # #214: the staff directory's name-prefix match (LIKE wildcards literal), the phone-verified
+      # filter and the exact phone/email search live in SQL.
+      - name: Run user-service Postgres repository test
+        env:
+          PGPASSWORD: postgres
+          USER_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/user_service_repository_test
+        run: |
+          psql -h localhost -U postgres -c "CREATE DATABASE user_service_repository_test"
+          npm test --workspace=services/user-service -- --runInBand
+
       # #213: the audit log's dedup on eventId, its filters and the append-only triggers live in SQL.
       - name: Run audit-service Postgres repository test
         env:

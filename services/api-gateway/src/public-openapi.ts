@@ -225,6 +225,11 @@ export type AdminRouteDefinition = {
   requestBody?: Record<string, unknown>;
   /** The audit action a mutation records with `AdminAudit.record` (#213), e.g. `driver.approve`. */
   auditAction?: string;
+  /**
+   * A POST that only reads, such as a search whose value must stay out of URLs and logs (#214):
+   * it needs no reason and records no audit event.
+   */
+  readOnly?: boolean;
   /** `paginated` is a PaginatedResult<T>; `object` a single resource. */
   response: 'paginated' | 'object';
 };
@@ -264,6 +269,56 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
           },
           { name: 'sort', description: 'Order by creation time.', schema: { type: 'string', enum: ['createdAt:asc', 'createdAt:desc'], default: 'createdAt:desc' } },
         ],
+      },
+    ],
+  },
+  {
+    service: 'users',
+    publicPrefix: '/api/admin/users',
+    routes: [
+      {
+        method: 'get',
+        path: '',
+        summary: 'List people with their account status (staff with support.read)',
+        permissions: ['support.read'],
+        statusCode: 200,
+        response: 'paginated',
+        query: [
+          ...ADMIN_PAGE_QUERY,
+          { name: 'role', description: 'Account role.', schema: { type: 'string', enum: ['CUSTOMER', 'DRIVER', 'RESTAURANT_OWNER', 'ADMIN'] } },
+          { name: 'status', description: 'Account status.', schema: { type: 'string', enum: ['ACTIVE', 'SUSPENDED'] } },
+          { name: 'emailVerified', description: 'Email verified or not.', schema: { type: 'boolean' } },
+          { name: 'phoneVerified', description: 'Phone verified or not.', schema: { type: 'boolean' } },
+          {
+            name: 'q',
+            description: 'The start of the full name or of a later word, case-insensitive. Phone and email: POST /api/admin/users/search.',
+            schema: { type: 'string', minLength: 2, maxLength: 60 },
+          },
+          { name: 'createdFrom', description: 'Accounts created at or after, ISO 8601.', schema: { type: 'string', format: 'date-time' } },
+          { name: 'createdTo', description: 'Accounts created before, ISO 8601.', schema: { type: 'string', format: 'date-time' } },
+        ],
+      },
+      {
+        method: 'post',
+        path: '/search',
+        summary: 'Find people by an exact phone or email, in the body so it never reaches a URL or log (staff with support.read)',
+        permissions: ['support.read'],
+        statusCode: 200,
+        response: 'object',
+        readOnly: true,
+        requestBody: {
+          type: 'object',
+          description: 'Exactly one of phone (Egyptian mobile, normalized to E.164) or email (lowercased).',
+          properties: { phone: { type: 'string', example: '01012345678' }, email: { type: 'string', format: 'email' } },
+        },
+      },
+      {
+        method: 'get',
+        path: '/{id}',
+        summary: 'One person: profile and account (staff with support.read)',
+        permissions: ['support.read'],
+        statusCode: 200,
+        response: 'object',
       },
     ],
   },
@@ -1916,6 +1971,9 @@ export function generateAdminOpenApiDocument() {
       if (route.auditAction) {
         operation['x-audit-action'] = route.auditAction;
       }
+      if (route.readOnly) {
+        operation['x-read-only'] = true;
+      }
 
       if (!adminSpec.paths[pathKey]) {
         adminSpec.paths[pathKey] = {};
@@ -1937,7 +1995,7 @@ export function validateAdminOpenApiDocument(doc: Record<string, any>): void {
         Array.isArray(operation['x-permissions']) && operation['x-permissions'].length > 0,
         `Admin route must declare its staff permissions: ${method.toUpperCase()} ${path}`,
       );
-      if (method !== 'get') {
+      if (method !== 'get' && operation['x-read-only'] !== true) {
         const body = operation.requestBody?.content?.['application/json']?.schema;
         assert(
           Array.isArray(body?.required) && body.required.includes('reason'),

@@ -31,7 +31,7 @@ Nothing lists all orders, users or restaurants, and any ADMIN can call everythin
 - Adding an admin surface is a normal service change: route, `@RequirePermissions`, contract entry, tests — no cross-service scaffolding.
 - The public spec cannot silently grow an admin path; CI rejects it both by the generator's exclusion and the validator's assert.
 - Permissions evolve in one place (`STAFF_PERMISSIONS` in the shared package); services only declare which ones they need.
-- The free-text `q` on list routes must never do fuzzy scans across user data — it matches identifiers only, keeping staff search cheap and leak-free.
+- The free-text `q` on list routes never does fuzzy or substring scans of personal data. It matches identifiers, or a name **prefix** where a directory needs names (#214). Phone numbers and emails are searched only by **exact** match, in a `POST .../search` body so they never reach a URL or a log (#217 decision); the admin contract marks such a POST `x-read-only`.
 
 ## Example
 

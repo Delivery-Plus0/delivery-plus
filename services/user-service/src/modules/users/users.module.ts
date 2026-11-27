@@ -10,6 +10,10 @@ import { Redis } from 'ioredis';
 import { ProfilesRepository } from '../../repositories/profiles.repository';
 import { UsersService } from '../../services/users.service';
 import { UsersController } from '../../controllers/users.controller';
+import { AdminUsersController } from '../../controllers/admin-users.controller';
+import { AdminUsersService } from '../../services/admin-users.service';
+import { AuthServiceClient } from '../../common/auth-service.client';
+import { SystemTokenService } from '../../common/system-token.service';
 import { OrderServiceClient } from '../../common/order-service.client';
 import { APP_CONFIG, AppConfig } from '../../config/app-config';
 import { InternalAuthGuard } from '../../guards/internal-auth.guard';
@@ -23,11 +27,14 @@ import { S3StorageService } from '@food-delivery/shared';
       inject: [APP_CONFIG],
     }),
   ],
-  controllers: [UsersController],
+  controllers: [UsersController, AdminUsersController],
   providers: [
     UsersService,
     ProfilesRepository,
     OrderServiceClient,
+    AdminUsersService,
+    AuthServiceClient,
+    SystemTokenService,
     InternalAuthGuard,
     S3StorageService,
     PhoneVerificationsRepository,

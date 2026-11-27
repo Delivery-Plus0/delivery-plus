@@ -80,7 +80,7 @@ export function loadConfig(): AppConfig {
       .filter(Boolean),
     testAdmin: loadTestAdmin(process.env.NODE_ENV || 'development'),
     // Production has no default: without it, invitations answer 503 rather than mail a wrong link.
-    adminAppUrl: (process.env.ADMIN_APP_URL ?? ((process.env.NODE_ENV || 'development') === 'production' ? '' : 'http://localhost:8085')).replace(/\/+$/, ''),
+    adminAppUrl: (process.env.ADMIN_APP_URL ?? ((process.env.NODE_ENV || 'development') === 'production' ? '' : 'http://localhost:8086')).replace(/\/+$/, ''),
     staffInvitationTtlHours: parsePositiveInt('STAFF_INVITATION_TTL_HOURS', 48),
   };
 }

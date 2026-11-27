@@ -91,7 +91,7 @@ describe('AuthService', () => {
       emailProvider: 'test',
       emailCodeHashSecret: 'local-email-code-development-only',
       ses: null,
-      adminAppUrl: "http://localhost:8085",
+      adminAppUrl: "http://localhost:8086",
       staffInvitationTtlHours: 48,
     }, sessions, staffPermissions, emailSender, rateLimiter);
   });

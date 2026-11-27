@@ -316,6 +316,7 @@ describe('DriverApplicationService (#207)', () => {
         DRIVER_ID,
         { decision: 'REJECTED', note: 'Licence cut off', reviewerUserId: reviewer, submittedAt: SUBMITTED_AT },
         expect.any(Function),
+        undefined, // #215: no audit hook on the old staff route
       );
     });
 

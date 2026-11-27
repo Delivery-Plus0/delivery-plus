@@ -96,6 +96,8 @@ export class DriverApplicationController {
   @ApiOperation({
     summary:
       'Approve (VERIFIED) or reject (REJECTED, with a note) a submitted application (staff with onboarding.review; 409 ApplicationNotInReview, 422 ApplicationIncomplete)',
+    description: 'Deprecated (#215): use POST /api/admin/drivers/:id/review, which is audited and tells the driver. Removed after one release.',
+    deprecated: true,
   })
   review(
     @CurrentUser() user: JwtPayload,

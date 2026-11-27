@@ -13,6 +13,8 @@ import { DRIVER_DOCUMENT_STORAGE, DriverApplicationService } from '../../service
 import { DriversController } from '../../controllers/drivers.controller';
 import { DriverApplicationController } from '../../controllers/driver-application.controller';
 import { InternalDriversController } from '../../controllers/internal-drivers.controller';
+import { AdminDriverActionsController } from '../../controllers/admin-driver-actions.controller';
+import { AdminDriverActionsService } from '../../services/admin-driver-actions.service';
 import { AdminDriversController } from '../../controllers/admin-drivers.controller';
 import { AdminDriversService } from '../../services/admin-drivers.service';
 import { StaffLookupsClient } from '../../common/staff-lookups.client';
@@ -31,12 +33,13 @@ import { LicenceExpiryService } from '../../jobs/licence-expiry.service';
     }),
   ],
   // The application controller first: its `me/…` routes must be matched before any `:id/…` route.
-  controllers: [DriverApplicationController, DriversController, AdminDriversController, InternalDriversController],
+  controllers: [DriverApplicationController, DriversController, AdminDriversController, AdminDriverActionsController, InternalDriversController],
   providers: [
     DriversService,
     DriversRepository,
     UserServiceClient,
     AdminDriversService,
+    AdminDriverActionsService,
     StaffLookupsClient,
     SystemTokenService,
     DriverApplicationService,

@@ -22,6 +22,13 @@ Each notification stores a **message key and its parameters** next to the Englis
 | `order.cancelled` | `orderId`; `cancelledBy` (`RESTAURANT` / `SYSTEM`); `note`, the canceller's own words shown as written, when one was given |
 | `payment.failed` | `orderId` (a declined payment: the order was not placed) |
 | `payment.refunded` | `orderId`; `amount` (two decimals); `currency` (`EGP`) — #56 |
+| `driver.application_approved`, `driver.application_rejected` | `note` (the reviewer's words to the driver, when given) — #215 |
+| `restaurant.application_approved`, `restaurant.application_rejected` | `restaurantName`; `note` when given — #215 |
+| `driver.suspended`, `driver.reactivated` | none — #215 |
+| `restaurant.suspended`, `restaurant.reactivated` | `restaurantName` — #215 |
+| `account.reactivated` | none — #215 (a suspension has no notice: the person can't sign in, and is told when they try) |
+
+The #215 notices have type `ACCOUNT_UPDATE` (migration 006). They come from `admin.actions`: a staff action's audit event (#213) names the person to tell in `payload.notify`, so one action gives exactly one audit row and one notification. The staff's internal `reason` is never in a notice.
 
 Parameters never hold personal data. Migration 004 adds both columns, nullable: `messageKey` (varchar(64)) and `params` (jsonb).
 

@@ -114,6 +114,8 @@ export class RestaurantsController {
   @HttpCode(200)
   @ApiOperation({
     summary: 'Approve or reject a submitted application (staff with onboarding.review; 409 ApplicationNotInReview, 422 ApplicationIncomplete)',
+    description: 'Deprecated (#215): use POST /api/admin/restaurants/:id/review, which is audited and tells the owner. Removed after one release.',
+    deprecated: true,
   })
   review(@Param('id', new ParseUUIDPipe()) id: string, @CurrentUser() user: JwtPayload, @Body() dto: ReviewRestaurantApplicationDto) {
     return this.restaurantsService.review(user.sub, id, dto);
@@ -123,7 +125,11 @@ export class RestaurantsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.RESTAURANT_OWNER, UserRole.ADMIN)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Update restaurant status (owner or admin; an owner opens only an APPROVED restaurant: 409 RestaurantNotApproved)' })
+  @ApiOperation({
+    summary: 'Update restaurant status (owner or admin; an owner opens only an APPROVED restaurant: 409 RestaurantNotApproved)',
+    description:
+      'The admin branch is deprecated (#215): staff use POST /api/admin/restaurants/:id/suspend and /reactivate, which are audited. Removed after one release; owners keep this route.',
+  })
   updateStatus(
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,

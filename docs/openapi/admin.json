@@ -28,6 +28,10 @@
       "description": "restaurants admin endpoints"
     },
     {
+      "name": "auth",
+      "description": "auth admin endpoints"
+    },
+    {
       "name": "audit",
       "description": "audit admin endpoints"
     }
@@ -803,6 +807,262 @@
         }
       }
     },
+    "/api/admin/drivers/{id}/review": {
+      "post": {
+        "summary": "Approve or reject the driver's submitted application (staff with onboarding.review)",
+        "description": "Requires staff permission: onboarding.review.",
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "admin_drivers_post_api_admin_drivers_id_review",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-permissions": [
+          "onboarding.review"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters or body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT, or a SYSTEM token on an admin route"
+          },
+          "403": {
+            "description": "Staff token without the required permission"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reason",
+                  "decision",
+                  "submittedAt"
+                ],
+                "properties": {
+                  "decision": {
+                    "type": "string",
+                    "enum": [
+                      "VERIFIED",
+                      "REJECTED"
+                    ]
+                  },
+                  "note": {
+                    "type": "string",
+                    "maxLength": 300,
+                    "description": "Shown to the person; required to reject."
+                  },
+                  "submittedAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "The submission the reviewer looked at."
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 500,
+                    "description": "Why, for the audit log. Never shown to the person."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-audit-action": "driver.approve"
+      }
+    },
+    "/api/admin/drivers/{id}/suspend": {
+      "post": {
+        "summary": "Suspend a driver; one on a delivery finishes it first (staff with ops.act)",
+        "description": "Requires staff permission: ops.act.",
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "admin_drivers_post_api_admin_drivers_id_suspend",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-permissions": [
+          "ops.act"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters or body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT, or a SYSTEM token on an admin route"
+          },
+          "403": {
+            "description": "Staff token without the required permission"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reason"
+                ],
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 500,
+                    "description": "Why, for the audit log. Never shown to the person."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-audit-action": "driver.suspend"
+      }
+    },
+    "/api/admin/drivers/{id}/reactivate": {
+      "post": {
+        "summary": "Reactivate a suspended driver, or withdraw a pending suspension (staff with ops.act)",
+        "description": "Requires staff permission: ops.act.",
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "admin_drivers_post_api_admin_drivers_id_reactivate",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-permissions": [
+          "ops.act"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters or body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT, or a SYSTEM token on an admin route"
+          },
+          "403": {
+            "description": "Staff token without the required permission"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reason"
+                ],
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 500,
+                    "description": "Why, for the audit log. Never shown to the person."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-audit-action": "driver.reactivate"
+      }
+    },
     "/api/admin/restaurants": {
       "get": {
         "summary": "List restaurants of every approval status: status, name prefix, area (staff with support.read)",
@@ -1195,6 +1455,499 @@
             "description": "Staff token without the required permission"
           }
         }
+      }
+    },
+    "/api/admin/restaurants/{id}/review": {
+      "post": {
+        "summary": "Approve or reject the restaurant's submitted application (staff with onboarding.review)",
+        "description": "Requires staff permission: onboarding.review.",
+        "tags": [
+          "restaurants"
+        ],
+        "operationId": "admin_restaurants_post_api_admin_restaurants_id_review",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-permissions": [
+          "onboarding.review"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters or body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT, or a SYSTEM token on an admin route"
+          },
+          "403": {
+            "description": "Staff token without the required permission"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reason",
+                  "decision",
+                  "submittedAt"
+                ],
+                "properties": {
+                  "decision": {
+                    "type": "string",
+                    "enum": [
+                      "APPROVED",
+                      "REJECTED"
+                    ]
+                  },
+                  "note": {
+                    "type": "string",
+                    "maxLength": 300,
+                    "description": "Shown to the person; required to reject."
+                  },
+                  "submittedAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "The submission the reviewer looked at."
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 500,
+                    "description": "Why, for the audit log. Never shown to the person."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-audit-action": "restaurant.approve"
+      }
+    },
+    "/api/admin/restaurants/{id}/suspend": {
+      "post": {
+        "summary": "Suspend a restaurant: it disappears from customers at once (staff with ops.act)",
+        "description": "Requires staff permission: ops.act.",
+        "tags": [
+          "restaurants"
+        ],
+        "operationId": "admin_restaurants_post_api_admin_restaurants_id_suspend",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-permissions": [
+          "ops.act"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters or body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT, or a SYSTEM token on an admin route"
+          },
+          "403": {
+            "description": "Staff token without the required permission"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reason"
+                ],
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 500,
+                    "description": "Why, for the audit log. Never shown to the person."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-audit-action": "restaurant.suspend"
+      }
+    },
+    "/api/admin/restaurants/{id}/reactivate": {
+      "post": {
+        "summary": "Lift a suspension; the restaurant comes back CLOSED (staff with ops.act)",
+        "description": "Requires staff permission: ops.act.",
+        "tags": [
+          "restaurants"
+        ],
+        "operationId": "admin_restaurants_post_api_admin_restaurants_id_reactivate",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-permissions": [
+          "ops.act"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters or body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT, or a SYSTEM token on an admin route"
+          },
+          "403": {
+            "description": "Staff token without the required permission"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reason"
+                ],
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 500,
+                    "description": "Why, for the audit log. Never shown to the person."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-audit-action": "restaurant.reactivate"
+      }
+    },
+    "/api/admin/auth/users/{id}/suspend": {
+      "post": {
+        "summary": "Suspend an account and end its sessions (staff with users.manage)",
+        "description": "Requires staff permission: users.manage.",
+        "tags": [
+          "auth"
+        ],
+        "operationId": "admin_auth_post_api_admin_auth_users_id_suspend",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-permissions": [
+          "users.manage"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters or body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT, or a SYSTEM token on an admin route"
+          },
+          "403": {
+            "description": "Staff token without the required permission"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reason"
+                ],
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 500,
+                    "description": "Why, for the audit log. Never shown to the person."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-audit-action": "user.suspend"
+      }
+    },
+    "/api/admin/auth/users/{id}/reactivate": {
+      "post": {
+        "summary": "Reactivate a suspended account (staff with users.manage)",
+        "description": "Requires staff permission: users.manage.",
+        "tags": [
+          "auth"
+        ],
+        "operationId": "admin_auth_post_api_admin_auth_users_id_reactivate",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-permissions": [
+          "users.manage"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters or body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT, or a SYSTEM token on an admin route"
+          },
+          "403": {
+            "description": "Staff token without the required permission"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reason"
+                ],
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 500,
+                    "description": "Why, for the audit log. Never shown to the person."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-audit-action": "user.reactivate"
+      }
+    },
+    "/api/admin/auth/users/{id}/revoke-sessions": {
+      "post": {
+        "summary": "Sign the person out everywhere (staff with users.manage)",
+        "description": "Requires staff permission: users.manage.",
+        "tags": [
+          "auth"
+        ],
+        "operationId": "admin_auth_post_api_admin_auth_users_id_revoke_sessions",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-permissions": [
+          "users.manage"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters or body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT, or a SYSTEM token on an admin route"
+          },
+          "403": {
+            "description": "Staff token without the required permission"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reason"
+                ],
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 500,
+                    "description": "Why, for the audit log. Never shown to the person."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-audit-action": "user.revoke_sessions"
       }
     },
     "/api/admin/audit": {

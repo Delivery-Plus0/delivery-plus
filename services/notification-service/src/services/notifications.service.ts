@@ -1,6 +1,21 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { NotificationsRepository } from '../repositories/notifications.repository';
-import { NotFoundError, PaginatedResult, KafkaConsumerService, TOPICS, OrderEventType, OrderEvent, PaymentEventType, PaymentEvent, DeliveryEventType, DeliveryEvent } from '@food-delivery/shared';
+import {
+  ADMIN_ACTION_EVENT_TYPE,
+  AdminActionEvent,
+  AdminActionPayload,
+  NotFoundError,
+  PaginatedResult,
+  KafkaConsumerService,
+  TOPICS,
+  OrderEventType,
+  OrderEvent,
+  PaymentEventType,
+  PaymentEvent,
+  DeliveryEventType,
+  DeliveryEvent,
+} from '@food-delivery/shared';
+import { ADMIN_NOTICES } from './admin-notices';
 import { Notification, NotificationParams, NotificationType } from '../entities/notification.entity';
 
 /**
@@ -93,7 +108,26 @@ export class NotificationsService implements OnModuleInit {
         { messageKey: 'payment.refunded', params: { orderId: event.payload.orderId, amount, currency: 'EGP' } });
     });
 
+    // #215: staff decisions that tell the affected person. The same event is the audit record.
+    await this.kafkaConsumer.subscribe<AdminActionPayload>(TOPICS.ADMIN_ACTIONS, ADMIN_ACTION_EVENT_TYPE, (event) => this.notifyAdminAction(event));
+
     await this.kafkaConsumer.start();
+  }
+
+  /** One notification per staff action that names a person; unknown keys are skipped, never guessed. */
+  async notifyAdminAction(event: AdminActionEvent): Promise<void> {
+    const notice = event.payload.notify;
+    if (!notice) return;
+    const text = ADMIN_NOTICES[notice.messageKey];
+    if (!text) {
+      this.logger.warn(`Not notifying for admin action ${event.eventId}: unknown message key ${notice.messageKey}`);
+      return;
+    }
+    const params = notice.params ?? {};
+    await this.createNotification(notice.userId, NotificationType.ACCOUNT_UPDATE, text.title, text.message(params), {
+      messageKey: notice.messageKey,
+      params,
+    });
   }
 
   /**

@@ -38,6 +38,18 @@ export interface AdminActionPayload {
   /** The service that made the change. */
   service: string;
   occurredAt: string;
+  /**
+   * #215: the person told about the action in the app (notification-service consumes the same event,
+   * so an action gives exactly one audit row and one notification). Params never hold personal data.
+   */
+  notify?: AdminActionNotice;
+}
+
+/** An in-app notice of a staff action, rendered by its message key (#151) in the reader's language. */
+export interface AdminActionNotice {
+  userId: string;
+  messageKey: string;
+  params?: Record<string, string>;
 }
 
 export type AdminActionEvent = BaseEvent<AdminActionPayload>;
@@ -56,6 +68,7 @@ export interface AdminAuditInput {
   /** Pass a deterministic id when the action can be retried; a retry is then one event, not two. */
   eventId?: string;
   occurredAt?: Date;
+  notify?: AdminActionNotice;
 }
 
 export const REDACTED = '[redacted]';
@@ -121,6 +134,7 @@ export function buildAdminActionEvent(input: AdminAuditInput): AdminActionEvent 
       ...auditDiff(input.before, input.after),
       service: input.service,
       occurredAt,
+      ...(input.notify ? { notify: input.notify } : {}),
     },
   };
 }

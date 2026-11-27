@@ -1,3 +1,4 @@
+import { ADMIN_ACTION_EVENT_TYPE, buildAdminActionEvent } from '@food-delivery/shared';
 import { NotificationsService } from './notifications.service';
 import { NotificationsRepository } from '../repositories/notifications.repository';
 import {
@@ -36,7 +37,7 @@ describe('NotificationsService', () => {
     it('subscribes to the order, payment, and delivery events and starts the consumer', async () => {
       await service.onModuleInit();
 
-      expect(kafkaConsumer.subscribe).toHaveBeenCalledTimes(8);
+      expect(kafkaConsumer.subscribe).toHaveBeenCalledTimes(9);
       expect(kafkaConsumer.subscribe).toHaveBeenNthCalledWith(
         1,
         TOPICS.ORDER_EVENTS,
@@ -56,6 +57,7 @@ describe('NotificationsService', () => {
         [TOPICS.ORDER_EVENTS, OrderEventType.CANCELLED],
         [TOPICS.PAYMENT_EVENTS, PaymentEventType.FAILED],
         [TOPICS.PAYMENT_EVENTS, PaymentEventType.REFUNDED],
+        [TOPICS.ADMIN_ACTIONS, ADMIN_ACTION_EVENT_TYPE],
       ]);
       expect(kafkaConsumer.start).toHaveBeenCalledTimes(1);
     });
@@ -289,4 +291,42 @@ describe('NotificationsService', () => {
       expect(repository.markAllAsRead).toHaveBeenCalledWith('customer-4');
     });
   });
+
+  describe('staff decisions (#215)', () => {
+    const adminEvent = (notify?: { userId: string; messageKey: string; params?: Record<string, string> }) =>
+      buildAdminActionEvent({
+        actor: { id: 'staff-1' },
+        permission: 'onboarding.review',
+        action: 'driver.reject',
+        targetType: 'DRIVER',
+        targetId: 'driver-1',
+        reason: 'Blurry licence photo',
+        service: 'driver-service',
+        notify,
+      });
+
+    it('subscribes to admin.actions', async () => {
+      await service.onModuleInit();
+      expect(kafkaConsumer.subscribe).toHaveBeenCalledWith(TOPICS.ADMIN_ACTIONS, ADMIN_ACTION_EVENT_TYPE, expect.any(Function));
+    });
+
+    it("tells the person, with the reviewer's note but never the internal reason", async () => {
+      await service.notifyAdminAction(adminEvent({ userId: 'user-7', messageKey: 'driver.application_rejected', params: { note: 'Retake the licence photo' } }));
+      expect(repository.create).toHaveBeenCalledWith(
+        'user-7',
+        'ACCOUNT_UPDATE',
+        'Application needs changes',
+        expect.stringContaining("Reviewer's note: Retake the licence photo"),
+        { messageKey: 'driver.application_rejected', params: { note: 'Retake the licence photo' } },
+      );
+      expect(JSON.stringify(repository.create.mock.calls)).not.toContain('Blurry licence photo');
+    });
+
+    it('skips actions without a notice, and unknown message keys', async () => {
+      await service.notifyAdminAction(adminEvent());
+      await service.notifyAdminAction(adminEvent({ userId: 'user-7', messageKey: 'driver.made_up' }));
+      expect(repository.create).not.toHaveBeenCalled();
+    });
+  });
 });
+

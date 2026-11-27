@@ -307,6 +307,15 @@ describe('RestaurantsService', () => {
       }
     });
 
+    it('hides a suspended restaurant from the public read, and keeps BUSY and CLOSED ones visible (#215)', async () => {
+      repo.findById.mockResolvedValue({ ...baseRestaurant, approvalStatus: 'APPROVED', status: RestaurantStatus.SUSPENDED });
+      await expect(service.getById('r1')).rejects.toThrow(NotFoundError);
+      for (const status of [RestaurantStatus.BUSY, RestaurantStatus.CLOSED]) {
+        repo.findById.mockResolvedValue({ ...baseRestaurant, approvalStatus: 'APPROVED', status });
+        await expect(service.getById('r1')).resolves.toMatchObject({ id: baseRestaurant.id });
+      }
+    });
+
     it('shows the owner the application, the private details and the latest note', async () => {
       repo.findByOwner.mockResolvedValue([{ ...complete, approvalStatus: 'REJECTED', approvalNote: 'Logo missing' }]);
       repo.reviews.mockResolvedValue([
@@ -433,6 +442,7 @@ describe('RestaurantsService', () => {
           'r1',
           { decision: 'REJECTED', note: 'Logo missing', reviewerUserId: 'staff-1', submittedAt: SUBMITTED_AT },
           expect.any(Function),
+          undefined, // #215: no audit hook on the old staff route
         );
         expect(cache.del).toHaveBeenCalledWith('restaurant:r1');
       });

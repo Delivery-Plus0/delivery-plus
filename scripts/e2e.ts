@@ -531,14 +531,40 @@ async function assertRestaurantApplication(customerAuth: { headers: { Authorizat
   const staleReview = await failure(
     axios.post(`${API_URL}/api/restaurants/${id}/review`, { decision: 'APPROVED', submittedAt: first.submittedAt }, admin),
   );
+  // #215: the staff approval route: audited (#213) and the owner is told (notification-service).
   const approved = (
-    await axios.post(`${API_URL}/api/restaurants/${id}/review`, { decision: 'APPROVED', submittedAt: second.submittedAt }, admin)
+    await axios.post(
+      `${API_URL}/api/admin/restaurants/${id}/review`,
+      { decision: 'APPROVED', submittedAt: second.submittedAt, reason: 'E2E: application complete' },
+      admin,
+    )
   ).data;
   const opened = (await axios.patch(`${API_URL}/api/restaurants/${id}/status`, { status: 'OPEN' }, ownerAuth)).data;
   const publicCard = (await axios.get(`${API_URL}/api/restaurants/${id}`)).data;
   const listed = (await axios.get(`${API_URL}/api/restaurants`, { params: { search: name } })).data.items.length;
-  // Leave it closed so it can't take part in the rest of the run.
-  await axios.patch(`${API_URL}/api/restaurants/${id}/status`, { status: 'CLOSED' }, ownerAuth);
+  const audited = await waitFor(
+    'the approval in the audit log',
+    async () => (await axios.get(`${API_URL}/api/admin/audit`, { ...admin, params: { targetType: 'RESTAURANT', targetId: id } })).data.items,
+    (items: { action: string; reason: string }[]) => items.length > 0,
+  );
+  const notified = await waitFor(
+    "the owner's notice of the approval",
+    async () => (await axios.get(`${API_URL}/api/notifications`, ownerAuth)).data.items,
+    (items: { messageKey?: string }[]) => items.some((item) => item.messageKey === 'restaurant.application_approved'),
+  );
+  // #215 (owner decision): a suspended restaurant disappears from customers at once, and comes back CLOSED.
+  const suspend = { reason: 'E2E: suspension check' };
+  await axios.post(`${API_URL}/api/admin/restaurants/${id}/suspend`, suspend, admin);
+  const repeatSuspend = (await axios.post(`${API_URL}/api/admin/restaurants/${id}/suspend`, suspend, admin)).data.changed;
+  const suspendedCard = await failure(axios.get(`${API_URL}/api/restaurants/${id}`));
+  const suspendedListed = (await axios.get(`${API_URL}/api/restaurants`, { params: { search: name } })).data.items.length;
+  const reactivated = (await axios.post(`${API_URL}/api/admin/restaurants/${id}/reactivate`, { reason: 'E2E: done' }, admin)).data.restaurant.status;
+  const staffActions = await waitFor(
+    'the suspension and reactivation in the audit log',
+    async () => (await axios.get(`${API_URL}/api/admin/audit`, { ...admin, params: { targetType: 'RESTAURANT', targetId: id } })).data.items,
+    (items: { action: string }[]) => items.length >= 3,
+  );
+  // Leave it closed (as reactivated) so it can't take part in the rest of the run.
 
   const got = {
     draft: created.approvalStatus,
@@ -558,6 +584,11 @@ async function assertRestaurantApplication(customerAuth: { headers: { Authorizat
     opened: opened.status,
     publicCard: `${publicCard.approvalStatus} ${publicCard.cuisineTags.join(',')} ${'contactPhone' in publicCard || 'legalName' in publicCard}`,
     listed,
+    audited: `${audited[0].action} ${audited[0].reason}`,
+    notified: notified.some((item: { messageKey?: string }) => item.messageKey === 'restaurant.application_approved'),
+    suspended: `${repeatSuspend} ${suspendedCard.status} ${suspendedListed}`,
+    reactivated,
+    staffActions: staffActions.map((item: { action: string }) => item.action).join(','),
   };
   const want = {
     draft: 'DRAFT',
@@ -577,12 +608,17 @@ async function assertRestaurantApplication(customerAuth: { headers: { Authorizat
     opened: 'OPEN',
     publicCard: 'APPROVED Seafood false',
     listed: 1,
+    audited: 'restaurant.approve E2E: application complete',
+    notified: true,
+    suspended: 'false 404 0',
+    reactivated: 'CLOSED',
+    staffActions: 'restaurant.reactivate,restaurant.suspend,restaurant.approve',
   };
   if (JSON.stringify(got) !== JSON.stringify(want)) {
     throw new Error(`Restaurant application: got ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`);
   }
   console.log(
-    'Restaurant application: a draft is hidden, unorderable and unopenable; one per owner; submit lists what is missing; rejected with a note, resubmitted, a stale review 409, approved, opened and listed',
+    'Restaurant application: a draft is hidden, unorderable and unopenable; one per owner; submit lists what is missing; rejected with a note, resubmitted, a stale review 409, approved by staff (audited, owner notified), opened and listed; suspended (hidden, a repeat no-op) and reactivated',
   );
 }
 

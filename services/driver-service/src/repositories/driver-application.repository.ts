@@ -173,6 +173,8 @@ export class DriverApplicationRepository {
     driverId: string,
     review: ReviewDecision,
     check: (driver: DriverApplicationRow, documents: DriverDocument[]) => void,
+    /** #215: runs in the same transaction after a new decision (not on a repeat), e.g. the audit event. */
+    onDecided?: (manager: EntityManager, driver: DriverApplicationRow) => Promise<void>,
   ): Promise<'decided' | 'repeat'> {
     return this.dataSource.transaction(async (manager) => {
       const driver = await this.lockRow(manager, driverId);
@@ -201,6 +203,7 @@ export class DriverApplicationRepository {
           applicationSubmittedAt: driver.submittedAt,
           documentIds: documents.map((document) => document.id).sort(),
         });
+        if (onDecided) await onDecided(manager, driver);
         return 'decided';
       }
 

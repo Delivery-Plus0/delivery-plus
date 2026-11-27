@@ -185,6 +185,20 @@ export class CredentialsRepository {
     return this.findById(id);
   }
 
+  /**
+   * #215: compare-and-set of the account status in the caller's transaction. False when the account
+   * already had that status (the staff action is then a no-op).
+   */
+  async setStatusIfChanged(manager: EntityManager, id: string, status: AccountStatus, reason: string | null, now = new Date()): Promise<boolean> {
+    const from: AccountStatus = status === 'SUSPENDED' ? 'ACTIVE' : 'SUSPENDED';
+    const result = await manager.update(
+      Credential,
+      { id, status: from },
+      status === 'SUSPENDED' ? { status, suspendedAt: now, suspendedReason: reason } : { status, suspendedAt: null, suspendedReason: null },
+    );
+    return (result.affected ?? 0) > 0;
+  }
+
   async deleteById(id: string): Promise<void> {
     await this.repo.delete({ id });
   }

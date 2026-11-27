@@ -143,6 +143,17 @@ Login and register accept an optional `appId` (`customer`, `driver`, `restaurant
 - **Password policy:** same as registration (minimum 8 characters), for change and reset.
 - Raw codes, phone numbers and passwords never appear in logs. As elsewhere, access tokens already issued stay valid until they expire.
 
+## Staff actions on accounts (#215)
+auth-service owns credentials and sessions, so the staff account actions live here, published as `/api/admin/auth/users/:id/...` (ADR 002: each service owns its admin routes; the gateway's `/api/admin/users` is user-service's directory). All need `users.manage` and a `reason`, and each stages one audit event with the change in one transaction. Repeats are no-ops. Staff accounts are refused (managed with the staff tools, #216), and so is the actor's own account.
+
+| Route | Effect |
+| --- | --- |
+| `POST :id/suspend` | `ACTIVE` → `SUSPENDED` (the reason is stored on the account, #202) and every refresh session ends, in one transaction. No notice: the person can't sign in and is told why when they try. |
+| `POST :id/reactivate` | `SUSPENDED` → `ACTIVE`; the person is told (`account.reactivated`). |
+| `POST :id/revoke-sessions` | Ends every refresh session ("sign out everywhere"). Access tokens already issued last until they expire (`JWT_EXPIRES_IN`). With no session open, nothing is recorded. |
+
+`PATCH /auth/users/:id/status` (#202) stays for one release, then goes.
+
 ## Account directory for staff (#214)
 `POST /internal/auth/accounts/query` (internal; SYSTEM token, and only `system:user-service`) returns the staff-safe account fields (`id`, `email`, `role`, `status`, `emailVerified`, `suspendedAt`, `suspendedReason`, `lastLoginAt`, `createdAt`) for user-service's `/admin/users`. Filters: `ids` (at most 1000), `roles`, `status`, `emailVerified`, `createdFrom`/`createdTo`; newest first.
 

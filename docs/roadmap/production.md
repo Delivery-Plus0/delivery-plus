@@ -91,6 +91,7 @@ done
 - **Contact during a delivery (#211):** direct phone numbers for the pilot, shown only to the delivery's participants and only while it is active; masked calling can replace them later.
 - **Partial refunds (#219):** not in M4. Staff refunds are full refunds only; partial refunds come with the real payment gateway in M6 (#224).
 - **Finance read APIs (#220):** order-service owns `/admin/finance/*` and gets payment and ledger aggregates from payment- and delivery-service over internal routes (ADR 001). No money math in the admin app.
+- **Suspended restaurants (#215):** disappear from customers at once (left out of the list, 404 by id); `BUSY` and `CLOSED` stay visible. `docs/business/restaurant-availability.md`.
 - **Search by phone or email (#217, #214):** a `POST .../search` with the value in the body, never in the URL or a log; exact match after normalising (E.164 phone, lowercased email).
 
 **Still needed, before the milestone shown**

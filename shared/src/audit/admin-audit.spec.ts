@@ -47,6 +47,12 @@ describe('AdminAudit (#213)', () => {
     expect(() => buildAdminActionEvent({ ...input, actor: { id: '' } })).toThrow('needs the staff actor');
   });
 
+  it('carries the notice for the affected person when there is one (#215)', () => {
+    const notify = { userId: 'user-9', messageKey: 'driver.application_approved' };
+    expect(buildAdminActionEvent({ ...input, notify }).payload.notify).toEqual(notify);
+    expect(buildAdminActionEvent(input).payload).not.toHaveProperty('notify');
+  });
+
   it('uses the given eventId, so a retried action is one event', () => {
     expect(buildAdminActionEvent({ ...input, eventId: 'e-1' }).eventId).toBe('e-1');
   });

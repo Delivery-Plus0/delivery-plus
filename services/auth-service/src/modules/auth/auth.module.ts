@@ -12,6 +12,8 @@ import { Redis } from 'ioredis';
 import { SessionsRepository } from '../../repositories/sessions.repository';
 import { SessionsService } from '../../services/sessions.service';
 import { SessionCleanupService } from '../../services/session-cleanup.service';
+import { AdminAccountsController } from '../../controllers/admin-accounts.controller';
+import { AdminAccountsService } from '../../services/admin-accounts.service';
 import { InternalAccountsController } from '../../controllers/internal-accounts.controller';
 import { InternalSessionsController } from '../../controllers/internal-sessions.controller';
 import { InternalAuthGuard } from '../../guards/internal-auth.guard';
@@ -32,13 +34,14 @@ import { APP_CONFIG, AppConfig } from '../../config/app-config';
       inject: [APP_CONFIG],
     }),
   ],
-  controllers: [AuthController, InternalSessionsController, InternalAccountsController],
+  controllers: [AuthController, InternalSessionsController, InternalAccountsController, AdminAccountsController],
   providers: [
     AuthService,
     CredentialsRepository,
     UserServiceClient,
     SessionsRepository,
     SessionsService,
+    AdminAccountsService,
     SessionCleanupService,
     StaffPermissionsRepository,
     TestAdminService,

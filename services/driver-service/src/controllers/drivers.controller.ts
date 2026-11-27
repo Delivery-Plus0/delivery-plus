@@ -43,7 +43,11 @@ export class DriversController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   @ApiBearerAuth()
-  @ApiOperation({ summary: "Set a driver's verification status (ADMIN only, #147; a decision is kept in the review history, #207)" })
+  @ApiOperation({
+    summary: "Set a driver's verification status (ADMIN only, #147; a decision is kept in the review history, #207)",
+    description: 'Deprecated (#215): use POST /api/admin/drivers/:id/review, which is audited and tells the driver. Removed after one release.',
+    deprecated: true,
+  })
   setVerification(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() dto: UpdateVerificationDto) {
     return this.driversService.setVerification(id, dto, new Date(), user.sub);
   }

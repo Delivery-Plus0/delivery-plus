@@ -20,6 +20,7 @@ describe('DriversService', () => {
     // Verified, so the status tests below are about status rules; the #206 gate has its own tests.
     verificationStatus: 'VERIFIED' as 'PENDING' | 'VERIFIED' | 'REJECTED',
     availableSince: null as Date | null,
+    suspensionRequestedAt: null as Date | null,
     verificationNote: null,
     verifiedAt: new Date('2026-10-01T00:00:00Z') as Date | null,
     submittedAt: null as Date | null,
@@ -35,6 +36,7 @@ describe('DriversService', () => {
       findByUserId: jest.fn(),
       create: jest.fn(),
       transitionStatus: jest.fn(),
+      releaseFromBusy: jest.fn(),
       findAvailable: jest.fn(),
       updateVehicleWhileOffline: jest.fn(),
       updateVerification: jest.fn(),
@@ -253,9 +255,10 @@ describe('DriversService', () => {
 
     it('releases a BUSY driver (BUSY -> AVAILABLE)', async () => {
       drivers.findById.mockResolvedValue({ ...baseDriver, status: DriverStatus.BUSY });
-      drivers.transitionStatus.mockResolvedValue({ ...baseDriver, status: DriverStatus.AVAILABLE });
+      drivers.releaseFromBusy.mockResolvedValue({ ...baseDriver, status: DriverStatus.AVAILABLE });
 
       const result = await service.updateStatusById('driver-1', UserRole.SYSTEM, { status: DriverStatus.AVAILABLE });
+      expect(drivers.releaseFromBusy).toHaveBeenCalledWith('driver-1', DriverStatus.AVAILABLE);
       expect(result.status).toBe(DriverStatus.AVAILABLE);
     });
 
@@ -272,7 +275,7 @@ describe('DriversService', () => {
       drivers.findById
         .mockResolvedValueOnce({ ...baseDriver, status: DriverStatus.BUSY })
         .mockResolvedValueOnce({ ...baseDriver, status: DriverStatus.AVAILABLE });
-      drivers.transitionStatus.mockResolvedValue(null);
+      drivers.releaseFromBusy.mockResolvedValue(null);
 
       const result = await service.updateStatusById('driver-1', UserRole.SYSTEM, { status: DriverStatus.AVAILABLE });
       expect(result.status).toBe(DriverStatus.AVAILABLE);
@@ -438,11 +441,11 @@ describe('DriversService', () => {
 
     it('releases a BUSY driver who lost verification to OFFLINE, not AVAILABLE', async () => {
       drivers.findById.mockResolvedValue({ ...rejected, status: DriverStatus.BUSY });
-      drivers.transitionStatus.mockResolvedValue({ ...rejected, status: DriverStatus.OFFLINE });
+      drivers.releaseFromBusy.mockResolvedValue({ ...rejected, status: DriverStatus.OFFLINE });
 
       const result = await service.updateStatusById('driver-1', UserRole.SYSTEM, { status: DriverStatus.AVAILABLE });
 
-      expect(drivers.transitionStatus).toHaveBeenCalledWith('driver-1', DriverStatus.BUSY, DriverStatus.OFFLINE);
+      expect(drivers.releaseFromBusy).toHaveBeenCalledWith('driver-1', DriverStatus.OFFLINE);
       expect(result.status).toBe(DriverStatus.OFFLINE);
     });
 
@@ -450,13 +453,13 @@ describe('DriversService', () => {
       drivers.findById
         .mockResolvedValueOnce({ ...baseDriver, status: DriverStatus.BUSY })
         .mockResolvedValueOnce({ ...rejected, status: DriverStatus.BUSY });
-      drivers.transitionStatus
+      drivers.releaseFromBusy
         .mockResolvedValueOnce(null) // BUSY -> AVAILABLE needs VERIFIED
         .mockResolvedValueOnce({ ...rejected, status: DriverStatus.OFFLINE });
 
       const result = await service.updateStatusById('driver-1', UserRole.SYSTEM, { status: DriverStatus.AVAILABLE });
 
-      expect(drivers.transitionStatus).toHaveBeenLastCalledWith('driver-1', DriverStatus.BUSY, DriverStatus.OFFLINE);
+      expect(drivers.releaseFromBusy).toHaveBeenLastCalledWith('driver-1', DriverStatus.OFFLINE);
       expect(result.status).toBe(DriverStatus.OFFLINE);
     });
   });

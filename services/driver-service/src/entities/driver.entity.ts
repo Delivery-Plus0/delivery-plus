@@ -30,6 +30,10 @@ export class Driver {
   @Column({ type: 'timestamptz', nullable: true })
   availableSince!: Date | null;
 
+  /** #215: staff suspended this driver during a delivery; the release at its end suspends them. */
+  @Column({ type: 'timestamptz', nullable: true })
+  suspensionRequestedAt!: Date | null;
+
   /**
    * Admin review of the driver (#147). With the application (#207): PENDING without `submittedAt` is a
    * draft the driver is still filling in; PENDING with it is waiting in the review queue.

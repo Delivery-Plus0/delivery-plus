@@ -7,7 +7,9 @@ Snapshot of `dev` after per-stage customer notifications (#129, 2026-10-06). Mer
 - All of Phase 3 (automatic dispatch + driver contracts).
 - All of Phase 4 (driver and restaurant clients, in their own private repos).
 - The Phase 6 core (#5).
-- Production 3, #212: admin API conventions. The shared `@RequirePermissions`/`PermissionsGuard` (a SYSTEM token gets 401), gateway routing `/api/admin/<service>` → the service's `/admin/<service>`, the separate `docs/openapi/admin.json` contract, and `GET /admin/orders` in order-service. See [ADR 002](../docs/adr/002-admin-api.md). When code and this file disagree, the code wins; update this file in the same PR that changes the behavior.
+- Production 3, #212: admin API conventions. The shared `@RequirePermissions`/`PermissionsGuard` (a SYSTEM token gets 401), gateway routing `/api/admin/<service>` → the service's `/admin/<service>`, the separate `docs/openapi/admin.json` contract, and `GET /admin/orders` in order-service. See [ADR 002](../docs/adr/002-admin-api.md).
+
+When code and this file disagree, the code wins; update this file in the same PR that changes the behavior.
 
 ## Platform at a glance
 

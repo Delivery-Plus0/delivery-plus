@@ -1,7 +1,44 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, EntityManager } from 'typeorm';
+import { UserRole } from '@food-delivery/shared';
 import { AccountStatus, Credential } from '../entities/credential.entity';
+
+export interface AccountQuery {
+  ids?: string[];
+  roles?: UserRole[];
+  status?: AccountStatus;
+  emailVerified?: boolean;
+  createdFrom?: Date;
+  createdTo?: Date;
+  page: number;
+  limit: number;
+}
+
+/** The account fields staff may see: never hashes, codes, tokens or lockout counters. */
+export interface AccountSummary {
+  id: string;
+  email: string;
+  role: UserRole;
+  status: AccountStatus;
+  emailVerified: boolean;
+  suspendedAt: Date | null;
+  suspendedReason: string | null;
+  lastLoginAt: Date | null;
+  createdAt: Date;
+}
+
+export const toAccountSummary = (c: Credential): AccountSummary => ({
+  id: c.id,
+  email: c.email,
+  role: c.role,
+  status: c.status,
+  emailVerified: c.emailVerified,
+  suspendedAt: c.suspendedAt ?? null,
+  suspendedReason: c.suspendedReason ?? null,
+  lastLoginAt: c.lastLoginAt ?? null,
+  createdAt: c.createdAt,
+});
 
 @Injectable()
 export class CredentialsRepository {
@@ -76,6 +113,30 @@ export class CredentialsRepository {
         lastFailedLoginAt: null,
       },
     );
+  }
+
+  /** #214: a successful password sign-in. */
+  async recordLogin(id: string, at = new Date()): Promise<void> {
+    await this.repo.update({ id }, { lastLoginAt: at });
+  }
+
+  /**
+   * #214: the staff people directory's account side, for user-service (SYSTEM). Explicit filters
+   * only; `ids` narrows to a set user-service already matched on profile fields.
+   */
+  async queryAccounts(filter: AccountQuery): Promise<[AccountSummary[], number]> {
+    const qb = this.repo
+      .createQueryBuilder('c')
+      .select(['c.id', 'c.email', 'c.role', 'c.status', 'c.emailVerified', 'c.suspendedAt', 'c.suspendedReason', 'c.lastLoginAt', 'c.createdAt']);
+    if (filter.ids) qb.andWhere('c.id IN (:...ids)', { ids: filter.ids.length ? filter.ids : ['00000000-0000-0000-0000-000000000000'] });
+    if (filter.roles?.length) qb.andWhere('c.role IN (:...roles)', { roles: filter.roles });
+    if (filter.status) qb.andWhere('c.status = :status', { status: filter.status });
+    if (filter.emailVerified !== undefined) qb.andWhere('c.emailVerified = :emailVerified', { emailVerified: filter.emailVerified });
+    if (filter.createdFrom) qb.andWhere('c.createdAt >= :createdFrom', { createdFrom: filter.createdFrom });
+    if (filter.createdTo) qb.andWhere('c.createdAt < :createdTo', { createdTo: filter.createdTo });
+    qb.orderBy('c.createdAt', 'DESC').addOrderBy('c.id', 'DESC').skip((filter.page - 1) * filter.limit).take(filter.limit);
+    const [rows, total] = await qb.getManyAndCount();
+    return [rows.map(toAccountSummary), total];
   }
 
   /** #203: a new code replaces any earlier one and resets the attempt counter. */

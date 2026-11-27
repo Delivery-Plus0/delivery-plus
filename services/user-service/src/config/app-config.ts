@@ -10,6 +10,8 @@ export interface AppConfig {
   /** #202: signs/verifies service-to-service SYSTEM tokens; required in production (see loadSystemJwtSecret). */
   systemJwtSecret: string;
   orderServiceUrl: string;
+  /** #214: the account side of the staff people directory. */
+  authServiceUrl: string;
   redisUrl: string;
   internalAuthSecret: string;
   internalAuthAllowedService: string;
@@ -36,6 +38,7 @@ export function loadConfig(): AppConfig {
     jwtSecret: process.env.JWT_SECRET as string,
     systemJwtSecret: loadSystemJwtSecret(process.env.NODE_ENV || 'development'),
     orderServiceUrl: process.env.ORDER_SERVICE_URL || 'http://localhost:3006',
+    authServiceUrl: process.env.AUTH_SERVICE_URL || 'http://localhost:3001',
     redisUrl: process.env.REDIS_URL || 'redis://localhost:6379',
     internalAuthSecret: requireInternalAuthSecret(),
     internalAuthAllowedService: process.env.INTERNAL_AUTH_ALLOWED_SERVICE || 'auth-service',

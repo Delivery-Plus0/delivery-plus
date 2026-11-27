@@ -161,6 +161,7 @@ export class AuthService {
     }
 
     await this.credentials.resetFailureState(credential.id);
+    await this.credentials.recordLogin(credential.id);
 
     return this.signIn(credential, { ...context, appId: dto.appId ?? context.appId });
   }

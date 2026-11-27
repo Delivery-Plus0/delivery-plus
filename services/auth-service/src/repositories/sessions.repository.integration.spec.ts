@@ -25,6 +25,8 @@ import { AuthSecurityFields1700000000002 } from '../database/migrations/003-auth
 import { AuthSessions1700000000003 } from '../database/migrations/004-auth-sessions';
 import { AccountStatusStaffPermissions1700000000004 } from '../database/migrations/005-account-status-staff-permissions';
 import { EmailVerificationCodes1700000000005 } from '../database/migrations/006-email-verification-codes';
+import { OutboxEvents1700000000006 } from '../database/migrations/007-outbox-events';
+import { CredentialLastLogin1700000000007 } from '../database/migrations/008-credential-last-login';
 import { StaffPermission } from '../entities/staff-permission.entity';
 
 const DATABASE_URL = process.env.AUTH_TEST_DATABASE_URL;

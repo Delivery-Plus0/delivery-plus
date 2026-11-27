@@ -308,6 +308,10 @@ describe('admin OpenAPI contract (#212)', () => {
     expect(() => validateAdminOpenApiDocument(unaudited)).toThrow('name the audit action');
     unaudited.paths['/api/admin/orders/{id}/cancel'].post['x-audit-action'] = 'order.cancel';
     expect(() => validateAdminOpenApiDocument(unaudited)).not.toThrow();
+
+    // #214: a read-only POST (a search with the value in the body) needs neither.
+    expect(doc.paths['/api/admin/users/search'].post['x-read-only']).toBe(true);
+    expect(doc.paths['/api/admin/users/search'].post.requestBody.content['application/json'].schema.required).toBeUndefined();
   });
 
   it('keeps admin paths out of the public contract', () => {

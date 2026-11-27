@@ -143,6 +143,11 @@ Login and register accept an optional `appId` (`customer`, `driver`, `restaurant
 - **Password policy:** same as registration (minimum 8 characters), for change and reset.
 - Raw codes, phone numbers and passwords never appear in logs. As elsewhere, access tokens already issued stay valid until they expire.
 
+## Account directory for staff (#214)
+`POST /internal/auth/accounts/query` (internal; SYSTEM token, and only `system:user-service`) returns the staff-safe account fields (`id`, `email`, `role`, `status`, `emailVerified`, `suspendedAt`, `suspendedReason`, `lastLoginAt`, `createdAt`) for user-service's `/admin/users`. Filters: `ids` (at most 1000), `roles`, `status`, `emailVerified`, `createdFrom`/`createdTo`; newest first.
+
+`lastLoginAt` (migration 008) is set on every successful password sign-in.
+
 ## Dependencies
 - Calls `user-service` internally for user profile creation via `src/common/user-service.client.ts`, signing the request with the internal HMAC contract, and for password reset codes (`POST /internal/users/password-reset/send` and `/verify`, same HMAC contract)
 - Requires `DATABASE_URL` and `JWT_SECRET`

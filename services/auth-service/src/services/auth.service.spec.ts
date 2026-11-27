@@ -36,6 +36,7 @@ describe('AuthService', () => {
       update: jest.fn(),
       recordFailedLogin: jest.fn(),
       resetFailureState: jest.fn(),
+      recordLogin: jest.fn().mockResolvedValue(undefined),
       transaction: jest.fn(async (work: (m: unknown) => Promise<unknown>) => work(manager)),   
       deleteById: jest.fn(),
       setVerificationCode: jest.fn(),
@@ -444,6 +445,7 @@ describe('AuthService', () => {
 
       const result = await service.login({ email: 'e@e.com', password: 'correct-password' });
       expect(credentials.resetFailureState).toHaveBeenCalledWith('u1');
+      expect(credentials.recordLogin).toHaveBeenCalledWith('u1'); // #214: last sign-in for the people directory
       expect(result.accessToken).toBe('signed.jwt.token');
       expect(result.role).toBe(UserRole.ADMIN);
     });

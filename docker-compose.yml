@@ -149,6 +149,7 @@ services:
         SERVICE_NAME: auth-service
     restart: unless-stopped
     environment:
+      - SYSTEM_JWT_SECRET=${SYSTEM_JWT_SECRET:?SYSTEM_JWT_SECRET must be set, this stack runs with NODE_ENV=production}
       - NODE_ENV=production
       - DATABASE_URL=postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/auth_service
       - REDIS_URL=redis://redis:6379
@@ -178,6 +179,7 @@ services:
       - DATABASE_URL=postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/user_service
       - JWT_SECRET=${JWT_SECRET:-local-development-only}
       - SYSTEM_JWT_SECRET=${SYSTEM_JWT_SECRET:?SYSTEM_JWT_SECRET must be set, this stack runs with NODE_ENV=production}
+      - AUTH_SERVICE_URL=http://auth-service:3001
       - REDIS_URL=redis://redis:6379
       - INTERNAL_AUTH_SECRET=${INTERNAL_AUTH_SECRET:-local-internal-auth-development-only}
       - ORDER_SERVICE_URL=http://order-service:3006

@@ -60,6 +60,22 @@ auth-service's forgot and reset flow reuses the phone verification mechanics (HM
 
 **Purpose.** `phone_verifications.purpose` (migration 006, default `phone_verification`) is `phone_verification` or `password_reset`. Code lookup, attempt counting, consumption, cooldowns and hourly limits are all scoped by purpose, so a reset code can't verify a phone, a phone code can't reset a password, and neither flow blocks or counts against the other.
 
+## Staff people directory (#214)
+Published as `/api/admin/users`, `support.read` on every route (ADR 002):
+
+| Route | What it does |
+| --- | --- |
+| `GET /admin/users` | Page of people: `role`, `status`, `emailVerified`, `phoneVerified`, `q` (the start of the full name or of a later word, case-insensitive, at least 2 characters; LIKE wildcards are literal), `createdFrom`/`createdTo`. Newest first, `limit` ≤ 100. |
+| `POST /admin/users/search` | Exactly one of `phone` (normalized to E.164) or `email` (lowercased), **exact match**. A POST so the value never reaches a URL or an access log (#217 decision). |
+| `GET /admin/users/:id` | One person: profile, account, address, and where the status history is (the audit log: `targetType=USER`). |
+
+Profiles live here; the account side (role, status, email verified, suspension, last sign-in) lives in auth-service, which shares it only through `POST /internal/auth/accounts/query` (SYSTEM token from `system:user-service`). Nothing reads the other service's database:
+- account filters only: auth-service pages and user-service adds the profiles;
+- profile filters only, or none: user-service pages and auth-service adds the accounts;
+- both: the profile filters give an id set (at most 1000; more is a 400 asking staff to narrow it), and auth-service pages within it.
+
+The staff view may carry phone, email and address (the admin app masks them by default) and never hashes, codes or tokens (snapshot-tested).
+
 ## Dependencies
 - Calls `order-service` to fetch order history via `src/common/order-service.client.ts`
 - Depends on PostgreSQL for the user profile table
@@ -70,6 +86,7 @@ auth-service's forgot and reset flow reuses the phone verification mechanics (HM
 - No Kafka event producer/consumer is implemented in this service.
 
 ## Required env vars
+- `AUTH_SERVICE_URL` (default `http://localhost:3001`): the account side of the staff directory (#214).
 From `services/user-service/src/config/app-config.ts`:
 
 - `DATABASE_URL`

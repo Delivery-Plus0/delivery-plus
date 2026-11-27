@@ -252,6 +252,47 @@ export class RestaurantsRepository {
     return this.repo.find({ where: { contactPhone: phone }, order: { createdAt: 'DESC' }, take: 20 });
   }
 
+  /**
+   * #318: withdraws the reviewer's latest decision within `windowSeconds` (database clock), in one
+   * transaction: back to SUBMITTED (same submission) and CLOSED, a `WITHDRAWN` history row, and
+   * `onUndone` (the audit event). A second undo is a repeat. Errors: 'not-allowed' | 'window-closed'.
+   */
+  async undoDecision(
+    id: string,
+    reviewerUserId: string,
+    windowSeconds: number,
+    onUndone?: (manager: EntityManager, restaurant: Restaurant, withdrawn: 'APPROVED' | 'REJECTED') => Promise<void>,
+  ): Promise<'undone' | 'repeat' | 'not-allowed' | 'window-closed'> {
+    return this.repo.manager.transaction(async (manager) => {
+      const restaurant = await this.lock(manager, id);
+      if (!restaurant) return 'not-allowed';
+      const [latest]: (RestaurantReview & { ageSeconds: number })[] = await manager.query(
+        `SELECT *, extract(epoch FROM clock_timestamp() - "reviewedAt")::float AS "ageSeconds"
+           FROM "restaurant_reviews" WHERE "restaurantId" = $1 ORDER BY "reviewedAt" DESC, "id" DESC LIMIT 1`,
+        [id],
+      );
+      if (latest?.decision === 'WITHDRAWN' && latest.reviewerUserId === reviewerUserId) return 'repeat';
+      if (!latest || latest.decision === 'WITHDRAWN' || latest.reviewerUserId !== reviewerUserId || restaurant.approvalStatus !== latest.decision) {
+        return 'not-allowed';
+      }
+      if (latest.ageSeconds > windowSeconds) return 'window-closed';
+      await manager.update(
+        Restaurant,
+        { id, approvalStatus: latest.decision },
+        { approvalStatus: 'SUBMITTED', approvalNote: null, approvedAt: null, status: RestaurantStatus.CLOSED },
+      );
+      await manager.insert(RestaurantReview, {
+        restaurantId: id,
+        reviewerUserId,
+        decision: 'WITHDRAWN',
+        note: null,
+        applicationSubmittedAt: latest.applicationSubmittedAt,
+      });
+      if (onUndone) await onUndone(manager, restaurant, latest.decision as 'APPROVED' | 'REJECTED');
+      return 'undone';
+    });
+  }
+
   /** #215: runs staff actions in one transaction with their audit event. */
   transaction<T>(work: (manager: EntityManager) => Promise<T>): Promise<T> {
     return this.repo.manager.transaction(work);

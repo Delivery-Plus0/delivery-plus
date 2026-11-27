@@ -22,6 +22,14 @@ export class AdminDriverActionsController {
     return this.actions.review(actorOf(user), id, dto);
   }
 
+  @Post(':id/review/undo')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions('onboarding.review')
+  @ApiOperation({ summary: 'Undo your own review decision within 10 seconds; audited, the driver is told (onboarding.review)' })
+  undoReview(@Param('id', new ParseUUIDPipe()) id: string, @Body() dto: AdminReasonDto, @CurrentUser() user: JwtPayload) {
+    return this.actions.undoReview(actorOf(user), id, dto.reason);
+  }
+
   @Post(':id/suspend')
   @HttpCode(HttpStatus.OK)
   @RequirePermissions('ops.act')

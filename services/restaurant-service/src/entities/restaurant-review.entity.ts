@@ -1,6 +1,7 @@
 import { Column, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 
-export type RestaurantReviewDecision = 'APPROVED' | 'REJECTED';
+/** `WITHDRAWN` (#318): the reviewer undid their decision within the undo window. */
+export type RestaurantReviewDecision = 'APPROVED' | 'REJECTED' | 'WITHDRAWN';
 
 /**
  * One staff decision on a restaurant application (#208): who decided what, with which note, on which

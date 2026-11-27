@@ -113,6 +113,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER_URLENCODED:?POSTGRES_USER_URLENCODED must be set}:${POSTGRES_PASSWORD_URLENCODED:?POSTGRES_PASSWORD_URLENCODED must be set}@postgres:5432/user_service
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
       SYSTEM_JWT_SECRET: ${SYSTEM_JWT_SECRET:?SYSTEM_JWT_SECRET must be set (a long random value, different from JWT_SECRET)}
+      DRIVER_SERVICE_URL: http://driver-service:3009
       AUTH_SERVICE_URL: http://auth-service:3001
       REDIS_URL: redis://redis:6379
       INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:?INTERNAL_AUTH_SECRET must be set}
@@ -342,6 +343,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER_URLENCODED:?POSTGRES_USER_URLENCODED must be set}:${POSTGRES_PASSWORD_URLENCODED:?POSTGRES_PASSWORD_URLENCODED must be set}@postgres:5432/driver_service
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
       SYSTEM_JWT_SECRET: ${SYSTEM_JWT_SECRET:?SYSTEM_JWT_SECRET must be set (a long random value, different from JWT_SECRET)}
+      DELIVERY_SERVICE_URL: http://delivery-service:3008
       USER_SERVICE_URL: http://user-service:3002
       # Phone verification gate (#153): on only together with a real SMS provider.
       PHONE_VERIFICATION_REQUIRED: ${PHONE_VERIFICATION_REQUIRED:-false}

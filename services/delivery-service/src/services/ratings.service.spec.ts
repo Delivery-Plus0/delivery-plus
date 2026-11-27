@@ -185,6 +185,20 @@ describe('RatingsService', () => {
     });
   });
 
+  describe('summaryForStaff (#214)', () => {
+    it('averages by driver id, with no comments and no customer identity', async () => {
+      ratings.findSummary.mockResolvedValue({ driverId: 'driver-9', ratingCount: 3, ratingSum: 14 });
+      await expect(service.summaryForStaff('driver-9')).resolves.toEqual({ average: 4.7, count: 3 });
+      expect(ratings.findSummary).toHaveBeenCalledWith('driver-9');
+      expect(driverClient.getOwnProfile).not.toHaveBeenCalled();
+    });
+
+    it('has no average before the first rating', async () => {
+      ratings.findSummary.mockResolvedValue(null);
+      await expect(service.summaryForStaff('driver-9')).resolves.toEqual({ average: null, count: 0 });
+    });
+  });
+
   describe('getSummaryForDriver', () => {
     it('averages to one decimal and lists recent comments without customer identity', async () => {
       ratings.findSummary.mockResolvedValue({ driverId: 'driver-1', ratingCount: 3, ratingSum: 14 });

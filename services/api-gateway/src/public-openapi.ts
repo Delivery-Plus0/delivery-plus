@@ -323,6 +323,48 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
     ],
   },
   {
+    service: 'drivers',
+    publicPrefix: '/api/admin/drivers',
+    routes: [
+      {
+        method: 'get',
+        path: '',
+        summary: 'List drivers: status, verification, licences expiring, plate prefix (staff with support.read)',
+        permissions: ['support.read'],
+        statusCode: 200,
+        response: 'paginated',
+        query: [
+          ...ADMIN_PAGE_QUERY,
+          { name: 'status', description: 'Work status.', schema: { type: 'string', enum: ['OFFLINE', 'AVAILABLE', 'BUSY', 'SUSPENDED'] } },
+          { name: 'verificationStatus', description: 'Application status.', schema: { type: 'string', enum: ['PENDING', 'VERIFIED', 'REJECTED'] } },
+          {
+            name: 'licenceExpiringWithinDays',
+            description: 'Driving or vehicle licence ends within this many days (Cairo dates).',
+            schema: { type: 'integer', minimum: 0, maximum: 365 },
+          },
+          { name: 'q', description: 'The start of the licence plate, any case.', schema: { type: 'string', maxLength: 20 } },
+        ],
+      },
+      {
+        method: 'get',
+        path: '/queue',
+        summary: 'Submitted applications waiting for a decision, oldest first (staff with onboarding.review)',
+        permissions: ['onboarding.review'],
+        statusCode: 200,
+        response: 'paginated',
+        query: [...ADMIN_PAGE_QUERY],
+      },
+      {
+        method: 'get',
+        path: '/{id}',
+        summary: 'One driver: application, reviews, documents, ledger balance and rating (staff with support.read)',
+        permissions: ['support.read'],
+        statusCode: 200,
+        response: 'object',
+      },
+    ],
+  },
+  {
     service: 'audit',
     publicPrefix: '/api/admin/audit',
     routes: [

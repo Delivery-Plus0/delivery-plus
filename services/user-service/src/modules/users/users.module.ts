@@ -10,10 +10,12 @@ import { Redis } from 'ioredis';
 import { ProfilesRepository } from '../../repositories/profiles.repository';
 import { UsersService } from '../../services/users.service';
 import { UsersController } from '../../controllers/users.controller';
+import { InternalNamesController } from '../../controllers/internal-names.controller';
 import { AdminUsersController } from '../../controllers/admin-users.controller';
 import { AdminUsersService } from '../../services/admin-users.service';
 import { AuthServiceClient } from '../../common/auth-service.client';
 import { SystemTokenService } from '../../common/system-token.service';
+import { LinkedRecordsClient } from '../../common/linked-records.client';
 import { OrderServiceClient } from '../../common/order-service.client';
 import { APP_CONFIG, AppConfig } from '../../config/app-config';
 import { InternalAuthGuard } from '../../guards/internal-auth.guard';
@@ -27,7 +29,7 @@ import { S3StorageService } from '@food-delivery/shared';
       inject: [APP_CONFIG],
     }),
   ],
-  controllers: [UsersController, AdminUsersController],
+  controllers: [UsersController, AdminUsersController, InternalNamesController],
   providers: [
     UsersService,
     ProfilesRepository,
@@ -35,6 +37,7 @@ import { S3StorageService } from '@food-delivery/shared';
     AdminUsersService,
     AuthServiceClient,
     SystemTokenService,
+    LinkedRecordsClient,
     InternalAuthGuard,
     S3StorageService,
     PhoneVerificationsRepository,

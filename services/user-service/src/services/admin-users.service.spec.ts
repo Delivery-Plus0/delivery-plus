@@ -35,7 +35,8 @@ const setup = () => {
     findById: jest.fn(),
   };
   const accounts = { queryAccounts: jest.fn() };
-  return { service: new AdminUsersService(profiles as never, accounts as never), profiles, accounts };
+  const linked = { driverIdFor: jest.fn() };
+  return { service: new AdminUsersService(profiles as never, accounts as never, linked as never), profiles, accounts, linked };
 };
 const query = (extra: Partial<AdminListUsersQueryDto> = {}) => Object.assign(new AdminListUsersQueryDto(), extra);
 
@@ -128,6 +129,7 @@ describe('AdminUsersService (#214)', () => {
   "fullName",
   "id",
   "lastLoginAt",
+  "linked",
   "phone",
   "phoneVerified",
   "role",
@@ -137,5 +139,23 @@ describe('AdminUsersService (#214)', () => {
 ]
 `);
     expect(JSON.stringify(view)).not.toContain('leak');
+  });
+
+  it("links a DRIVER account to its driver record, and says so when driver-service doesn't answer", async () => {
+    const { service, profiles, accounts, linked } = setup();
+    profiles.findById.mockResolvedValue(profile('d'));
+    accounts.queryAccounts.mockResolvedValue({ items: [account('d', { role: UserRole.DRIVER })], total: 1 });
+    linked.driverIdFor.mockResolvedValueOnce('driver-1');
+    await expect(service.detail('d')).resolves.toMatchObject({ linked: { driverId: 'driver-1' } });
+    linked.driverIdFor.mockResolvedValueOnce(undefined);
+    await expect(service.detail('d')).resolves.toMatchObject({ linked: { driverId: 'unavailable' } });
+  });
+
+  it('does not look up a driver for a customer', async () => {
+    const { service, profiles, accounts, linked } = setup();
+    profiles.findById.mockResolvedValue(profile('a'));
+    accounts.queryAccounts.mockResolvedValue({ items: [account('a')], total: 1 });
+    await expect(service.detail('a')).resolves.toMatchObject({ linked: { driverId: null } });
+    expect(linked.driverIdFor).not.toHaveBeenCalled();
   });
 });

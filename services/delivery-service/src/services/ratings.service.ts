@@ -109,6 +109,13 @@ export class RatingsService {
     return { average, count, recentComments: recent.map(view) };
   }
 
+  /** #214: a driver's rating for the staff console: average and count, by driver id. */
+  async summaryForStaff(driverId: string): Promise<{ average: number | null; count: number }> {
+    const summary = await this.ratings.findSummary(driverId);
+    const count = summary?.ratingCount ?? 0;
+    return { average: summary && count > 0 ? Math.round((summary.ratingSum / count) * 10) / 10 : null, count };
+  }
+
   /** Why this delivery can't be rated now, or null when it can. */
   private ineligibility(delivery: Delivery, now: Date): string | null {
     if (delivery.status !== DeliveryStatus.DELIVERED || !delivery.driverId) {

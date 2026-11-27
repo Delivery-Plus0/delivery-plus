@@ -4,6 +4,7 @@ import { ProfilesRepository } from '../repositories/profiles.repository';
 import { UserProfile } from '../entities/user-profile.entity';
 import { AccountQuery, AccountSummary, AuthServiceClient } from '../common/auth-service.client';
 import { AdminListUsersQueryDto, AdminSearchUsersDto } from '../dto/admin-users.dto';
+import { LinkedRecordsClient } from '../common/linked-records.client';
 
 /** Profile matches a combined (account + profile) filter may narrow to before staff must refine it. */
 export const DIRECTORY_MATCH_CAP = 1000;
@@ -32,6 +33,11 @@ export interface StaffUserDetail extends StaffUserView {
   address: string | null;
   /** Status changes are in the audit log: GET /api/admin/audit?targetType=USER&targetId=<id>. */
   auditTrail: { targetType: 'USER'; targetId: string };
+  /**
+   * The driver record of a DRIVER account: an id, null when there is none, or `unavailable` when
+   * driver-service didn't answer. The restaurant of an owner follows with the restaurant directory.
+   */
+  linked: { driverId: string | null | 'unavailable' };
 }
 
 export class DirectoryFilterTooBroadError extends BadRequestError {
@@ -64,6 +70,7 @@ export class AdminUsersService {
   constructor(
     private readonly profiles: ProfilesRepository,
     private readonly accounts: AuthServiceClient,
+    private readonly linkedRecords: LinkedRecordsClient,
   ) {}
 
   /**
@@ -114,7 +121,17 @@ export class AdminUsersService {
     const accounts = await this.accountsFor([id], correlationId);
     const account = accounts.get(id);
     if (!profile && !account) throw new NotFoundError('User not found');
-    return { ...toView(profile ?? undefined, account), address: profile?.address ?? null, auditTrail: { targetType: 'USER', targetId: id } };
+    let driverId: string | null | 'unavailable' = null;
+    if (account?.role === UserRole.DRIVER) {
+      const found = await this.linkedRecords.driverIdFor(id);
+      driverId = found === undefined ? 'unavailable' : found;
+    }
+    return {
+      ...toView(profile ?? undefined, account),
+      address: profile?.address ?? null,
+      auditTrail: { targetType: 'USER', targetId: id },
+      linked: { driverId },
+    };
   }
 
   private async accountsFor(ids: string[], correlationId?: string): Promise<Map<string, AccountSummary>> {

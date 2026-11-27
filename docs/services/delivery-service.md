@@ -61,6 +61,9 @@ Owner decision: direct numbers for the pilot, only between the delivery's partic
 - A number that can't be read (the other service is down, no phone on the profile) is null and never fails the delivery read.
 - The phone comes from the profile, whether or not it was confirmed by a code. Phone verification is off until a real SMS provider is live (#228).
 
+## Staff driver summary (#214)
+`GET /internal/deliveries/drivers/:driverId/summary` (internal; SYSTEM, driver-service only): the driver's ledger totals (`pending`, `available`, `balance`, EGP, after settling due entries) and rating (`average` to one decimal, `count`; no comments and no customer identity). The staff driver page shows them.
+
 ## Required env vars
 From `services/delivery-service/src/config/app-config.ts`:
 

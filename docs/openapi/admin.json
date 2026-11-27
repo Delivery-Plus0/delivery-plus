@@ -701,7 +701,7 @@
                     "items": {
                       "type": "array",
                       "items": {
-                        "type": "object"
+                        "$ref": "#/components/schemas/StaffDriverRow"
                       }
                     },
                     "page": {
@@ -799,7 +799,7 @@
                     "items": {
                       "type": "array",
                       "items": {
-                        "type": "object"
+                        "$ref": "#/components/schemas/StaffDriverRow"
                       }
                     },
                     "page": {
@@ -871,7 +871,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/StaffDriverDetail"
                 }
               }
             }
@@ -893,6 +893,79 @@
             "description": "Staff token without the required permission"
           }
         }
+      }
+    },
+    "/api/admin/drivers/{id}/documents/{type}/read-url": {
+      "post": {
+        "summary": "A 5-minute URL to view one of the driver's documents; every read is recorded (staff with onboarding.review)",
+        "description": "Requires staff permission: onboarding.review.",
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "admin_drivers_post_api_admin_drivers_id_documents_type_read_url",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-permissions": [
+          "onboarding.review"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "type",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "national-id-front",
+                "national-id-back",
+                "driving-licence",
+                "vehicle-licence",
+                "selfie"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DriverDocumentReadUrl"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters or body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT, or a SYSTEM token on an admin route"
+          },
+          "403": {
+            "description": "Staff token without the required permission"
+          }
+        },
+        "x-read-only": true
       }
     },
     "/api/admin/drivers/{id}/review": {
@@ -928,7 +1001,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/StaffDriverApplication"
                 }
               }
             }
@@ -1026,7 +1099,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/DriverActionResult"
                 }
               }
             }
@@ -1105,7 +1178,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/DriverActionResult"
                 }
               }
             }
@@ -1184,7 +1257,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/DriverReviewUndoResult"
                 }
               }
             }
@@ -1363,7 +1436,7 @@
                     "items": {
                       "type": "array",
                       "items": {
-                        "type": "object"
+                        "$ref": "#/components/schemas/StaffRestaurantRow"
                       }
                     },
                     "page": {
@@ -1461,7 +1534,7 @@
                     "items": {
                       "type": "array",
                       "items": {
-                        "type": "object"
+                        "$ref": "#/components/schemas/StaffRestaurantRow"
                       }
                     },
                     "page": {
@@ -1523,7 +1596,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/StaffRestaurantSearchResult"
                 }
               }
             }
@@ -1600,7 +1673,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/StaffRestaurantDetail"
                 }
               }
             }
@@ -1657,7 +1730,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/StaffRestaurantApplication"
                 }
               }
             }
@@ -1755,7 +1828,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RestaurantActionResult"
                 }
               }
             }
@@ -1834,7 +1907,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RestaurantActionResult"
                 }
               }
             }
@@ -1913,7 +1986,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RevealedField"
                 }
               }
             }
@@ -1992,7 +2065,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RestaurantReviewUndoResult"
                 }
               }
             }
@@ -2910,6 +2983,939 @@
             "type": "string"
           }
         }
+      },
+      "StaffDriverRow": {
+        "type": "object",
+        "description": "One driver in the staff lists and the review queue (#214).",
+        "required": [
+          "id",
+          "userId",
+          "fullName",
+          "vehicleType",
+          "licensePlate",
+          "status",
+          "verificationStatus",
+          "submittedAt",
+          "verifiedAt",
+          "drivingLicenceExpiresOn",
+          "vehicleLicenceExpiresOn",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "fullName": {
+            "type": "string",
+            "nullable": true,
+            "description": "Null when user-service doesn't answer."
+          },
+          "vehicleType": {
+            "type": "string"
+          },
+          "licensePlate": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "OFFLINE",
+              "AVAILABLE",
+              "BUSY",
+              "SUSPENDED"
+            ]
+          },
+          "verificationStatus": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "VERIFIED",
+              "REJECTED"
+            ]
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "verifiedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "drivingLicenceExpiresOn": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "vehicleLicenceExpiresOn": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "StaffDriverApplication": {
+        "type": "object",
+        "description": "The driver's application as staff see it (#207, #214).",
+        "required": [
+          "driverId",
+          "status",
+          "submittedAt",
+          "verificationNote",
+          "lastReview",
+          "nationalIdLast4",
+          "drivingLicenceExpiresOn",
+          "vehicleLicenceExpiresOn",
+          "documents",
+          "missingDocuments",
+          "canSubmit",
+          "expiringLicences",
+          "reviews"
+        ],
+        "properties": {
+          "driverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "SUBMITTED",
+              "VERIFIED",
+              "REJECTED"
+            ]
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "verificationNote": {
+            "type": "string",
+            "nullable": true
+          },
+          "lastReview": {
+            "type": "object",
+            "description": "The latest decision, or null before the first one.",
+            "nullable": true,
+            "required": [
+              "decision",
+              "note",
+              "reviewedAt"
+            ],
+            "properties": {
+              "decision": {
+                "type": "string",
+                "enum": [
+                  "VERIFIED",
+                  "REJECTED",
+                  "WITHDRAWN"
+                ]
+              },
+              "note": {
+                "type": "string",
+                "nullable": true
+              },
+              "reviewedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "additionalProperties": false
+          },
+          "nationalIdLast4": {
+            "type": "string",
+            "nullable": true
+          },
+          "drivingLicenceExpiresOn": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "vehicleLicenceExpiresOn": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "documents": {
+            "type": "array",
+            "description": "The current version of each uploaded document. Read one with POST /api/admin/drivers/{id}/documents/{type}/read-url.",
+            "items": {
+              "type": "object",
+              "required": [
+                "type",
+                "version",
+                "contentType",
+                "sizeBytes",
+                "uploadedAt"
+              ],
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "national-id-front",
+                    "national-id-back",
+                    "driving-licence",
+                    "vehicle-licence",
+                    "selfie"
+                  ]
+                },
+                "version": {
+                  "type": "integer"
+                },
+                "contentType": {
+                  "type": "string",
+                  "enum": [
+                    "image/jpeg",
+                    "image/png",
+                    "application/pdf"
+                  ]
+                },
+                "sizeBytes": {
+                  "type": "integer"
+                },
+                "uploadedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "missingDocuments": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "national-id-front",
+                "national-id-back",
+                "driving-licence",
+                "vehicle-licence",
+                "selfie"
+              ]
+            }
+          },
+          "canSubmit": {
+            "type": "boolean"
+          },
+          "expiringLicences": {
+            "type": "array",
+            "description": "Licences valid today that expire within 14 days (Cairo), soonest first.",
+            "items": {
+              "type": "object",
+              "required": [
+                "field",
+                "expiresOn"
+              ],
+              "properties": {
+                "field": {
+                  "type": "string",
+                  "enum": [
+                    "drivingLicenceExpiresOn",
+                    "vehicleLicenceExpiresOn"
+                  ]
+                },
+                "expiresOn": {
+                  "type": "string",
+                  "format": "date"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "reviews": {
+            "type": "array",
+            "description": "Every decision, newest first, with the document versions it looked at.",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "decision",
+                "note",
+                "reviewedAt",
+                "reviewerUserId",
+                "applicationSubmittedAt",
+                "documents"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "decision": {
+                  "type": "string",
+                  "enum": [
+                    "VERIFIED",
+                    "REJECTED",
+                    "WITHDRAWN"
+                  ]
+                },
+                "note": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "reviewedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "reviewerUserId": {
+                  "type": "string"
+                },
+                "applicationSubmittedAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "nullable": true
+                },
+                "documents": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "type",
+                      "version"
+                    ],
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "national-id-front",
+                          "national-id-back",
+                          "driving-licence",
+                          "vehicle-licence",
+                          "selfie"
+                        ]
+                      },
+                      "version": {
+                        "type": "integer"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "StaffDriverDetail": {
+        "type": "object",
+        "description": "The staff driver page (#214).",
+        "required": [
+          "driver",
+          "application",
+          "summary"
+        ],
+        "properties": {
+          "driver": {
+            "$ref": "#/components/schemas/StaffDriverRow"
+          },
+          "application": {
+            "$ref": "#/components/schemas/StaffDriverApplication"
+          },
+          "summary": {
+            "type": "object",
+            "description": "Ledger balance and rating from delivery-service; null when it doesn't answer.",
+            "nullable": true,
+            "required": [
+              "earnings",
+              "rating"
+            ],
+            "properties": {
+              "earnings": {
+                "type": "object",
+                "required": [
+                  "currency",
+                  "pending",
+                  "available",
+                  "balance"
+                ],
+                "properties": {
+                  "currency": {
+                    "type": "string",
+                    "enum": [
+                      "EGP"
+                    ]
+                  },
+                  "pending": {
+                    "type": "string",
+                    "description": "Decimal string."
+                  },
+                  "available": {
+                    "type": "string",
+                    "description": "Decimal string."
+                  },
+                  "balance": {
+                    "type": "string",
+                    "description": "Decimal string."
+                  }
+                },
+                "additionalProperties": false
+              },
+              "rating": {
+                "type": "object",
+                "required": [
+                  "average",
+                  "count"
+                ],
+                "properties": {
+                  "average": {
+                    "type": "number",
+                    "nullable": true
+                  },
+                  "count": {
+                    "type": "integer"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "DriverDocumentReadUrl": {
+        "type": "object",
+        "description": "A short-lived URL to one document (#207, #323); the read is recorded.",
+        "required": [
+          "type",
+          "version",
+          "contentType",
+          "url",
+          "expiresIn"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "national-id-front",
+              "national-id-back",
+              "driving-licence",
+              "vehicle-licence",
+              "selfie"
+            ]
+          },
+          "version": {
+            "type": "integer"
+          },
+          "contentType": {
+            "type": "string",
+            "enum": [
+              "image/jpeg",
+              "image/png",
+              "application/pdf"
+            ]
+          },
+          "url": {
+            "type": "string",
+            "description": "Valid for expiresIn seconds. Never store or log it."
+          },
+          "expiresIn": {
+            "type": "integer",
+            "description": "Seconds."
+          }
+        },
+        "additionalProperties": false
+      },
+      "DriverReviewUndoResult": {
+        "type": "object",
+        "required": [
+          "driverId",
+          "undone"
+        ],
+        "properties": {
+          "driverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "undone": {
+            "type": "boolean",
+            "description": "False when there was nothing to undo."
+          }
+        },
+        "additionalProperties": false
+      },
+      "DriverActionResult": {
+        "type": "object",
+        "description": "The result of a suspend or reactivate (#215).",
+        "required": [
+          "driver",
+          "changed"
+        ],
+        "properties": {
+          "driver": {
+            "type": "object",
+            "required": [
+              "id",
+              "status",
+              "suspensionRequestedAt"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "OFFLINE",
+                  "AVAILABLE",
+                  "BUSY",
+                  "SUSPENDED"
+                ]
+              },
+              "suspensionRequestedAt": {
+                "type": "string",
+                "format": "date-time",
+                "nullable": true,
+                "description": "Set while a driver on a delivery waits to be suspended."
+              }
+            },
+            "additionalProperties": false
+          },
+          "changed": {
+            "type": "boolean",
+            "description": "False when the driver was already in that state."
+          }
+        },
+        "additionalProperties": false
+      },
+      "StaffRestaurantRow": {
+        "type": "object",
+        "description": "One restaurant in the staff lists and the review queue (#214).",
+        "required": [
+          "id",
+          "name",
+          "ownerId",
+          "ownerName",
+          "status",
+          "approvalStatus",
+          "address",
+          "latitude",
+          "longitude",
+          "deliveryRadiusKm",
+          "contactPhone",
+          "submittedAt",
+          "approvedAt",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "ownerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ownerName": {
+            "type": "string",
+            "nullable": true,
+            "description": "Null when user-service doesn't answer."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "OPEN",
+              "CLOSED",
+              "BUSY",
+              "SUSPENDED"
+            ]
+          },
+          "approvalStatus": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "SUBMITTED",
+              "APPROVED",
+              "REJECTED"
+            ]
+          },
+          "address": {
+            "type": "string"
+          },
+          "latitude": {
+            "type": "number",
+            "nullable": true
+          },
+          "longitude": {
+            "type": "number",
+            "nullable": true
+          },
+          "deliveryRadiusKm": {
+            "type": "string",
+            "nullable": true,
+            "description": "This restaurant's own radius in km as a decimal string; null uses the platform default."
+          },
+          "contactPhone": {
+            "type": "string",
+            "nullable": true,
+            "description": "Masked (#317); reveal it with POST /api/admin/restaurants/{id}/reveal."
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "approvedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "StaffRestaurantApplication": {
+        "type": "object",
+        "description": "The restaurant's application as staff see it (#208, #214).",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "coverImageUrl",
+          "logoUrl",
+          "address",
+          "latitude",
+          "longitude",
+          "deliveryRadiusKm",
+          "status",
+          "approvalStatus",
+          "cuisineTags",
+          "submittedAt",
+          "approvedAt",
+          "approvalNote",
+          "legalName",
+          "commercialRegistrationNumber",
+          "taxCardNumber",
+          "contactPhone",
+          "lastReview",
+          "ownerId",
+          "reviews"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "coverImageUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "logoUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "address": {
+            "type": "string"
+          },
+          "latitude": {
+            "type": "number",
+            "nullable": true
+          },
+          "longitude": {
+            "type": "number",
+            "nullable": true
+          },
+          "deliveryRadiusKm": {
+            "type": "number",
+            "description": "The radius in effect, in km."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "OPEN",
+              "CLOSED",
+              "BUSY",
+              "SUSPENDED"
+            ]
+          },
+          "approvalStatus": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "SUBMITTED",
+              "APPROVED",
+              "REJECTED"
+            ]
+          },
+          "cuisineTags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "approvedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "approvalNote": {
+            "type": "string",
+            "nullable": true
+          },
+          "legalName": {
+            "type": "string",
+            "nullable": true
+          },
+          "commercialRegistrationNumber": {
+            "type": "string",
+            "nullable": true
+          },
+          "taxCardNumber": {
+            "type": "string",
+            "nullable": true
+          },
+          "contactPhone": {
+            "type": "string",
+            "nullable": true,
+            "description": "Masked (#317)."
+          },
+          "lastReview": {
+            "type": "object",
+            "description": "The latest decision, or null before the first one.",
+            "nullable": true,
+            "required": [
+              "decision",
+              "note",
+              "reviewedAt"
+            ],
+            "properties": {
+              "decision": {
+                "type": "string",
+                "enum": [
+                  "APPROVED",
+                  "REJECTED",
+                  "WITHDRAWN"
+                ]
+              },
+              "note": {
+                "type": "string",
+                "nullable": true
+              },
+              "reviewedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "additionalProperties": false
+          },
+          "ownerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reviews": {
+            "type": "array",
+            "description": "Every decision, newest first.",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "decision",
+                "note",
+                "reviewerUserId",
+                "applicationSubmittedAt",
+                "reviewedAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "decision": {
+                  "type": "string",
+                  "enum": [
+                    "APPROVED",
+                    "REJECTED",
+                    "WITHDRAWN"
+                  ]
+                },
+                "note": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "reviewerUserId": {
+                  "type": "string"
+                },
+                "applicationSubmittedAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "nullable": true
+                },
+                "reviewedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "StaffRestaurantDetail": {
+        "type": "object",
+        "description": "The staff restaurant page (#214).",
+        "required": [
+          "restaurant",
+          "application",
+          "menu",
+          "ordersToday"
+        ],
+        "properties": {
+          "restaurant": {
+            "$ref": "#/components/schemas/StaffRestaurantRow"
+          },
+          "application": {
+            "$ref": "#/components/schemas/StaffRestaurantApplication"
+          },
+          "menu": {
+            "type": "object",
+            "description": "Counts from the public menu; null when menu-service doesn't answer.",
+            "nullable": true,
+            "required": [
+              "categories",
+              "availableItems"
+            ],
+            "properties": {
+              "categories": {
+                "type": "integer"
+              },
+              "availableItems": {
+                "type": "integer"
+              }
+            },
+            "additionalProperties": false
+          },
+          "ordersToday": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Orders since midnight Cairo time; null when order-service doesn't answer."
+          }
+        },
+        "additionalProperties": false
+      },
+      "StaffRestaurantSearchResult": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StaffRestaurantRow"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "RestaurantReviewUndoResult": {
+        "type": "object",
+        "required": [
+          "restaurantId",
+          "undone"
+        ],
+        "properties": {
+          "restaurantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "undone": {
+            "type": "boolean",
+            "description": "False when there was nothing to undo."
+          }
+        },
+        "additionalProperties": false
+      },
+      "RestaurantActionResult": {
+        "type": "object",
+        "description": "The result of a suspend or reactivate (#215).",
+        "required": [
+          "restaurant",
+          "changed"
+        ],
+        "properties": {
+          "restaurant": {
+            "type": "object",
+            "required": [
+              "id",
+              "status"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "OPEN",
+                  "CLOSED",
+                  "BUSY",
+                  "SUSPENDED"
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "changed": {
+            "type": "boolean",
+            "description": "False when the restaurant was already in that state."
+          }
+        },
+        "additionalProperties": false
+      },
+      "RevealedField": {
+        "type": "object",
+        "description": "One revealed personal field (#317), recorded as a pii.reveal audit event.",
+        "required": [
+          "field",
+          "value"
+        ],
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string",
+            "nullable": true,
+            "description": "The unmasked value, or null when there is none. Never store or log it."
+          }
+        },
+        "additionalProperties": false
       }
     }
   }

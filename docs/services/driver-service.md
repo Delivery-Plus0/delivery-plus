@@ -35,9 +35,11 @@ Published as `/api/admin/drivers`:
 | `GET /admin/drivers` | `support.read` | Drivers newest first: `status`, `verificationStatus`, `licenceExpiringWithinDays` (driving or vehicle licence ends by that Cairo date), `q` (plate prefix, any case, LIKE wildcards refused). |
 | `GET /admin/drivers/queue` | `onboarding.review` | Submitted applications still `PENDING`, oldest submission first. |
 | `GET /admin/drivers/:id` | `support.read` | The staff application view (fields, current documents, review history), the driver row, and the ledger balance and rating from delivery-service. |
+| `POST /admin/drivers/:id/documents/:type/read-url` | `onboarding.review` | A 5-minute URL to one current document for the console's viewer (#323): the same recorded read as `POST /drivers/:id/documents/:type/read-url`, `Cache-Control: no-store`, 60 a minute, no reason (it changes nothing). |
 
 - Rows carry the driver's full name from user-service (`POST /internal/users/names`, names only). When user-service doesn't answer, `fullName` is null; when delivery-service doesn't, `summary` is null. Nothing is made up.
-- The page lists document metadata, not URLs. A document is opened through `POST /drivers/:id/documents/:type/read-url` (`onboarding.review`), which records the read (#207).
+- The page lists document metadata, not URLs. A document is opened through `POST /admin/drivers/:id/documents/:type/read-url` (`onboarding.review`, #323), or the older `POST /drivers/:id/documents/:type/read-url`; both record the read (#207).
+- The response shapes are named schemas in `docs/openapi/admin.json` (`StaffDriverRow`, `StaffDriverDetail`, …, #323). They allow no other fields, and the backend E2E checks real responses against them.
 - No row carries the national-ID hash.
 - `GET /internal/drivers/by-user/:userId` (SYSTEM, user-service only) gives the driver id of a person for the staff person page.
 

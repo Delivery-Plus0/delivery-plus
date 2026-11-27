@@ -1,4 +1,7 @@
 import axios from 'axios';
+import Ajv from 'ajv';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { createHmac } from 'node:crypto';
 import { Redis } from 'ioredis';
 import { uploadImage } from './lib/gateway-seed';
@@ -35,6 +38,29 @@ const SYSTEM_JWT_SECRET = process.env.SYSTEM_JWT_SECRET || 'local-system-jwt-dev
 // mostly through direct, synchronous HTTP calls (see payments.service.ts's
 // completeSideEffects and deliveries.service.ts), not only through Kafka, so
 // this polls with a short timeout instead of trusting a fixed sleep().
+
+/**
+ * #323: the staff console builds on docs/openapi/admin.json, so the admin responses this run fetches are
+ * checked against it. A field added, renamed or left out in code without the contract fails here.
+ */
+const adminContract = (() => {
+  const doc = JSON.parse(readFileSync(resolve(__dirname, '..', 'docs', 'openapi', 'admin.json'), 'utf8'));
+  const ajv = new Ajv({ strict: false, validateFormats: false, allErrors: true });
+  ajv.addSchema({ components: doc.components }, 'admin');
+  return ajv;
+})();
+
+function matchesAdminContract<T>(schema: string, data: T, what: string): T {
+  const validate = adminContract.getSchema(`admin#/components/schemas/${schema}`);
+  if (!validate) throw new Error(`No ${schema} schema in docs/openapi/admin.json`);
+  if (!validate(data)) throw new Error(`${what} does not match ${schema} in docs/openapi/admin.json: ${adminContract.errorsText(validate.errors)}`);
+  return data;
+}
+
+function matchesAdminPage<T>(schema: string, page: { items: T[] }, what: string): { items: T[] } {
+  page.items.forEach((item, index) => matchesAdminContract(schema, item, `${what} item ${index}`));
+  return page;
+}
 
 async function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -517,6 +543,35 @@ async function assertEmailVerification() {
 }
 
 /**
+ * #323: the staff driver pages and the documents viewer URL, checked against docs/openapi/admin.json. The
+ * seeded driver has no documents, so the viewer URL is a 404 for staff and a 403 for the driver.
+ */
+async function assertStaffDriverPages(driverAuth: { headers: { Authorization: string } }) {
+  await clearRateLimits();
+  const admin = { headers: { Authorization: `Bearer ${(await axios.post(`${API_URL}/api/auth/login`, { email: ADMIN_EMAIL, password: ADMIN_PASSWORD })).data.accessToken}` } };
+  const me = (await axios.get(`${API_URL}/api/drivers/me`, driverAuth)).data as { id: string };
+
+  const list = matchesAdminPage('StaffDriverRow', (await axios.get(`${API_URL}/api/admin/drivers`, { ...admin, params: { limit: 100 } })).data, 'The staff driver list');
+  matchesAdminPage('StaffDriverRow', (await axios.get(`${API_URL}/api/admin/drivers/queue`, admin)).data, 'The driver queue');
+  const page = matchesAdminContract('StaffDriverDetail', (await axios.get(`${API_URL}/api/admin/drivers/${me.id}`, admin)).data, 'The staff driver page');
+  const documentUrl = `${API_URL}/api/admin/drivers/${me.id}/documents/selfie/read-url`;
+  const staffRead = await outcomeOf(axios.post(documentUrl, {}, admin));
+  const driverRead = await outcomeOf(axios.post(documentUrl, {}, driverAuth));
+  const badType = await outcomeOf(axios.post(`${API_URL}/api/admin/drivers/${me.id}/documents/passport/read-url`, {}, admin));
+
+  const got = {
+    listed: list.items.some((row: { id: string }) => row.id === me.id),
+    page: `${page.driver.id === me.id} ${page.application.driverId === me.id}`,
+    staffRead: staffRead.status,
+    driverRead: driverRead.status,
+    badType: badType.status,
+  };
+  const want = { listed: true, page: 'true true', staffRead: 404, driverRead: 403, badType: 400 };
+  if (JSON.stringify(got) !== JSON.stringify(want)) throw new Error(`Staff driver pages: got ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`);
+  console.log('Staff driver pages: list, queue and page match the admin contract; the documents URL is staff-only (404 without a document, 403 for the driver)');
+}
+
+/**
  * Restaurant applications (#208), end to end on the real stack: a new owner's restaurant is a draft that
  * customers can't see, order from or have opened; submit lists what is missing; a reviewer with
  * onboarding.review rejects with a note, the owner fixes and resubmits, a decision on the stale
@@ -589,14 +644,18 @@ async function assertRestaurantApplication(customerAuth: { headers: { Authorizat
   const staleReview = await failure(
     axios.post(`${API_URL}/api/restaurants/${id}/review`, { decision: 'APPROVED', submittedAt: first.submittedAt }, admin),
   );
+  // #323: the console's queue and restaurant page, as the contract describes them.
+  const queue = matchesAdminPage('StaffRestaurantRow', (await axios.get(`${API_URL}/api/admin/restaurants/queue`, { ...admin, params: { limit: 100 } })).data, 'The restaurant queue');
+  const inQueue = queue.items.some((row: { id: string }) => row.id === id);
+  const staffPage = matchesAdminContract('StaffRestaurantDetail', (await axios.get(`${API_URL}/api/admin/restaurants/${id}`, admin)).data, 'The staff restaurant page');
   // #215: the staff approval route: audited (#213) and the owner is told (notification-service).
-  const approved = (
+  const approved = matchesAdminContract('StaffRestaurantApplication', (
     await axios.post(
       `${API_URL}/api/admin/restaurants/${id}/review`,
       { decision: 'APPROVED', submittedAt: second.submittedAt, reason: 'E2E: application complete' },
       admin,
     )
-  ).data;
+  ).data, 'The approval');
   const opened = (await axios.patch(`${API_URL}/api/restaurants/${id}/status`, { status: 'OPEN' }, ownerAuth)).data;
   const publicCard = (await axios.get(`${API_URL}/api/restaurants/${id}`)).data;
   const listed = (await axios.get(`${API_URL}/api/restaurants`, { params: { search: name } })).data.items.length;
@@ -612,11 +671,15 @@ async function assertRestaurantApplication(customerAuth: { headers: { Authorizat
   );
   // #215 (owner decision): a suspended restaurant disappears from customers at once, and comes back CLOSED.
   const suspend = { reason: 'E2E: suspension check' };
-  await axios.post(`${API_URL}/api/admin/restaurants/${id}/suspend`, suspend, admin);
+  matchesAdminContract('RestaurantActionResult', (await axios.post(`${API_URL}/api/admin/restaurants/${id}/suspend`, suspend, admin)).data, 'The suspension');
   const repeatSuspend = (await axios.post(`${API_URL}/api/admin/restaurants/${id}/suspend`, suspend, admin)).data.changed;
   const suspendedCard = await failure(axios.get(`${API_URL}/api/restaurants/${id}`));
   const suspendedListed = (await axios.get(`${API_URL}/api/restaurants`, { params: { search: name } })).data.items.length;
-  const reactivated = (await axios.post(`${API_URL}/api/admin/restaurants/${id}/reactivate`, { reason: 'E2E: done' }, admin)).data.restaurant.status;
+  const reactivated = matchesAdminContract(
+    'RestaurantActionResult',
+    (await axios.post(`${API_URL}/api/admin/restaurants/${id}/reactivate`, { reason: 'E2E: done' }, admin)).data,
+    'The reactivation',
+  ).restaurant.status;
   const staffActions = await waitFor(
     'the suspension and reactivation in the audit log',
     async () => (await axios.get(`${API_URL}/api/admin/audit`, { ...admin, params: { targetType: 'RESTAURANT', targetId: id } })).data.items,
@@ -647,6 +710,7 @@ async function assertRestaurantApplication(customerAuth: { headers: { Authorizat
     suspended: `${repeatSuspend} ${suspendedCard.status} ${suspendedListed}`,
     reactivated,
     staffActions: staffActions.map((item: { action: string }) => item.action).join(','),
+    staffQueue: `${inQueue} ${staffPage.application.approvalStatus} ${staffPage.restaurant.contactPhone?.includes('•')}`,
   };
   const want = {
     draft: 'DRAFT',
@@ -671,6 +735,7 @@ async function assertRestaurantApplication(customerAuth: { headers: { Authorizat
     suspended: 'false 404 0',
     reactivated: 'CLOSED',
     staffActions: 'restaurant.reactivate,restaurant.suspend,restaurant.approve',
+    staffQueue: 'true SUBMITTED true',
   };
   if (JSON.stringify(got) !== JSON.stringify(want)) {
     throw new Error(`Restaurant application: got ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`);
@@ -716,6 +781,7 @@ async function runE2E() {
     await assertStaffInvitation();
     await assertEmailVerification();
     await assertRestaurantApplication(customerAuth);
+    await assertStaffDriverPages(driverAuth);
 
     // 1. Get Restaurants
     const restaurantsRes = await axios.get(`${API_URL}/api/restaurants`, customerAuth);

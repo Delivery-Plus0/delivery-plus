@@ -221,8 +221,6 @@ describeDb('PaymentsRepository (PostgreSQL integration)', () => {
   });
 
   describe('processing claims (#18)', () => {
-    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
     it('a claim records when and by whom; a fresh claim cannot be taken over', async () => {
       const p = await repo.create({ orderId: newOrderId(), customerId: 'c1', amount: '10.00' });
 
@@ -237,10 +235,13 @@ describeDb('PaymentsRepository (PostgreSQL integration)', () => {
       const p = await repo.create({ orderId: newOrderId(), customerId: 'c1', amount: '10.00' });
       const oldToken = randomUUID();
       await repo.claimProcessing(p.id, oldToken);
-      await sleep(20);
+      // #325: the old claim is an hour old and the timeout a minute. With a timeout of a few milliseconds,
+      // a takeover that starts that long after the winner rightly finds the winner's claim expired too, so
+      // the test failed on slow runners while the code was right.
+      await ds.query(`UPDATE payments SET "processingClaimedAt" = now() - interval '1 hour' WHERE id = $1`, [p.id]);
 
       const tokens = Array.from({ length: 10 }, () => randomUUID());
-      const won = await Promise.all(tokens.map((token) => repo.reclaimExpiredProcessing(p.id, token, 10)));
+      const won = await Promise.all(tokens.map((token) => repo.reclaimExpiredProcessing(p.id, token, 60_000)));
       expect(won.filter(Boolean)).toHaveLength(1);
 
       expect(await repo.settleProcessing(p.id, oldToken, PaymentStatus.COMPLETED)).toBe(false);

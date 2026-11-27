@@ -74,7 +74,7 @@ Profiles live here; the account side (role, status, email verified, suspension, 
 - profile filters only, or none: user-service pages and auth-service adds the accounts;
 - both: the profile filters give an id set (at most 1000; more is a 400 asking staff to narrow it), and auth-service pages within it.
 
-The staff view may carry phone, email and address (the admin app masks them by default) and never hashes, codes or tokens (snapshot-tested).
+The staff view never carries hashes, codes or tokens (snapshot-tested). **Personal data is masked** (#317, owner decision): the phone as `+20 10•• ••• 123`, the email as `m•••@example.com`, and the address withheld (`hasAddress`). `POST /admin/users/:id/reveal` `{field: phone|email|address, reason}` (`support.read`) returns one value and records a `pii.reveal` audit event: who saw which field of whom, never the value. Search still matches the full value; its results come back masked.
 
 ## Dependencies
 - Calls `order-service` to fetch order history via `src/common/order-service.client.ts`

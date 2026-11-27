@@ -42,6 +42,7 @@ Published as `/api/admin/restaurants`:
 | `GET /admin/restaurants/:id` | `support.read` | The staff application view with its reviews, the row with the owner's name, the menu counts (`categories`, `availableItems`, from the public menu) and today's orders (order-service, Cairo day). |
 
 - Owners' names come from user-service's names-only internal route. A part whose service doesn't answer is null.
+- The contact phone is masked in every staff view (#317); `POST /admin/restaurants/:id/reveal` `{reason}` (`support.read`) returns it and records `pii.reveal`. The owner's own view keeps it.
 - `GET /internal/restaurants/by-owner/:ownerId` (SYSTEM, user-service only) links an owner account to its restaurants on the staff person page.
 - Needs `USER_SERVICE_URL` and `ORDER_SERVICE_URL`.
 

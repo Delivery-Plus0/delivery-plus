@@ -36,7 +36,16 @@ const setup = () => {
   };
   const accounts = { queryAccounts: jest.fn() };
   const linked = { driverIdFor: jest.fn(), restaurantIdsFor: jest.fn() };
-  return { service: new AdminUsersService(profiles as never, accounts as never, linked as never), profiles, accounts, linked };
+  const manager = { query: jest.fn().mockResolvedValue([]) };
+  const dataSource = { transaction: jest.fn((work: (m: unknown) => unknown) => work(manager)) };
+  const outbox = { kick: jest.fn() };
+  return {
+    service: new AdminUsersService(profiles as never, accounts as never, linked as never, dataSource as never, outbox as never),
+    profiles,
+    accounts,
+    linked,
+    manager,
+  };
 };
 const query = (extra: Partial<AdminListUsersQueryDto> = {}) => Object.assign(new AdminListUsersQueryDto(), extra);
 
@@ -106,7 +115,7 @@ describe('AdminUsersService (#214)', () => {
     const { service, profiles, accounts } = setup();
     profiles.findById.mockResolvedValueOnce(profile('a'));
     accounts.queryAccounts.mockResolvedValueOnce({ items: [account('a')], total: 1 });
-    await expect(service.detail('a')).resolves.toMatchObject({ id: 'a', address: 'Zamalek', auditTrail: { targetType: 'USER', targetId: 'a' } });
+    await expect(service.detail('a')).resolves.toMatchObject({ id: 'a', hasAddress: true, auditTrail: { targetType: 'USER', targetId: 'a' } });
 
     profiles.findById.mockResolvedValueOnce(null);
     accounts.queryAccounts.mockResolvedValueOnce({ items: [], total: 0 });
@@ -120,13 +129,13 @@ describe('AdminUsersService (#214)', () => {
     const view = await service.detail('a');
     expect(Object.keys(view).sort()).toMatchInlineSnapshot(`
 [
-  "address",
   "auditTrail",
   "avatarUrl",
   "createdAt",
   "email",
   "emailVerified",
   "fullName",
+  "hasAddress",
   "id",
   "lastLoginAt",
   "linked",
@@ -169,4 +178,31 @@ describe('AdminUsersService (#214)', () => {
     linked.restaurantIdsFor.mockResolvedValueOnce(undefined);
     await expect(service.detail('o')).resolves.toMatchObject({ linked: { restaurantIds: 'unavailable' } });
   });
+
+  it('masks phone and email and withholds the address on every staff view (#317)', async () => {
+    const { service, profiles, accounts } = setup();
+    profiles.findById.mockResolvedValue(profile('a', { phone: '+201012345123' }));
+    accounts.queryAccounts.mockResolvedValue({ items: [account('a', { email: 'mona.ali@example.com' })], total: 1 });
+    const view = await service.detail('a');
+    expect(view).toMatchObject({ phone: '+20 10•• ••• 123', email: 'm•••@example.com', hasAddress: true });
+    expect(JSON.stringify(view)).not.toMatch(/Zamalek|012345|mona\.ali/);
+  });
+
+  it('reveals one value and records who saw which field, never the value (#317)', async () => {
+    const { service, profiles, manager } = setup();
+    profiles.findById.mockResolvedValue(profile('a', { phone: '+201012345123' }));
+    await expect(service.reveal({ id: 'staff-1' }, 'a', 'phone', 'Calling about an order')).resolves.toEqual({ field: 'phone', value: '+201012345123' });
+    const [, params] = manager.query.mock.calls[0];
+    const event = JSON.parse(params[2]);
+    expect(event.payload).toMatchObject({ action: 'pii.reveal', permission: 'support.read', targetType: 'USER', targetId: 'a', after: { field: 'phone' } });
+    expect(params[2]).not.toContain('012345');
+  });
+
+  it('404s a reveal for an unknown person', async () => {
+    const { service, profiles, accounts } = setup();
+    profiles.findById.mockResolvedValue(null);
+    accounts.queryAccounts.mockResolvedValue({ items: [], total: 0 });
+    await expect(service.reveal({ id: 'staff-1' }, 'x', 'address', 'Check')).rejects.toThrow('User not found');
+  });
 });
+

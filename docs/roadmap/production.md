@@ -92,6 +92,8 @@ done
 - **Partial refunds (#219):** not in M4. Staff refunds are full refunds only; partial refunds come with the real payment gateway in M6 (#224).
 - **Finance read APIs (#220):** order-service owns `/admin/finance/*` and gets payment and ledger aggregates from payment- and delivery-service over internal routes (ADR 001). No money math in the admin app.
 - **Suspended restaurants (#215):** disappear from customers at once (left out of the list, 404 by id); `BUSY` and `CLOSED` stay visible. `docs/business/restaurant-availability.md`.
+- **Personal data for staff (#317):** masked by default; each reveal is its own call and is audited (`pii.reveal`).
+- **Undo in the review queues (#318):** a second, audited action within 10 seconds, never a delete.
 - **Search by phone or email (#217, #214):** a `POST .../search` with the value in the body, never in the URL or a log; exact match after normalising (E.164 phone, lowercased email).
 
 **Still needed, before the milestone shown**

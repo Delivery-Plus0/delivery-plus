@@ -336,6 +336,8 @@ describe('admin OpenAPI contract (#212)', () => {
         'POST /api/admin/restaurants/{id}/reactivate -> restaurant.reactivate',
         'POST /api/admin/restaurants/{id}/review -> restaurant.approve',
         'POST /api/admin/restaurants/{id}/suspend -> restaurant.suspend',
+        'POST /api/admin/restaurants/{id}/reveal -> pii.reveal',
+        'POST /api/admin/users/{id}/reveal -> pii.reveal',
       ].sort(),
     );
   });

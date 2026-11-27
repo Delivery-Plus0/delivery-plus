@@ -20,12 +20,14 @@ const restaurant = (id: string, ownerId: string) => ({
 });
 
 const setup = () => {
-  const restaurants = { findForAdmin: jest.fn(), findByContactPhone: jest.fn(), findById: jest.fn() };
+  const manager = { query: jest.fn().mockResolvedValue([]) };
+  const restaurants = { findForAdmin: jest.fn(), findByContactPhone: jest.fn(), findById: jest.fn(), transaction: jest.fn((work: (m: unknown) => unknown) => work(manager)), manager };
   const restaurantsService = { getApplicationForStaff: jest.fn() };
   const menu = { menuReadiness: jest.fn() };
   const lookups = { names: jest.fn(), ordersToday: jest.fn() };
+  const outbox = { kick: jest.fn() };
   return {
-    service: new AdminRestaurantsService(restaurants as never, restaurantsService as never, menu as never, lookups as never),
+    service: new AdminRestaurantsService(restaurants as never, restaurantsService as never, menu as never, lookups as never, outbox as never),
     restaurants,
     restaurantsService,
     menu,
@@ -73,4 +75,18 @@ describe('AdminRestaurantsService (#214)', () => {
     lookups.ordersToday.mockResolvedValueOnce(null);
     await expect(service.detail('r1')).resolves.toMatchObject({ menu: null, ordersToday: null });
   });
+
+  it('masks the contact phone in staff rows, and reveals it with one audit event (#317)', async () => {
+    const { service, restaurants, lookups } = setup();
+    restaurants.findByContactPhone.mockResolvedValue([restaurant('r1', 'o1')]);
+    lookups.names.mockResolvedValue(new Map());
+    expect((await service.search('+201011111111')).items[0].contactPhone).toBe('+20 10•• ••• 111');
+
+    restaurants.findById.mockResolvedValue(restaurant('r1', 'o1'));
+    await expect(service.revealContactPhone({ id: 'staff-1' }, 'r1', 'Calling the owner')).resolves.toEqual({ field: 'contactPhone', value: '+201011111111' });
+    const [, params] = restaurants.manager.query.mock.calls[0];
+    expect(JSON.parse(params[2]).payload).toMatchObject({ action: 'pii.reveal', targetType: 'RESTAURANT', after: { field: 'contactPhone' } });
+    expect(params[2]).not.toContain('1011111111');
+  });
 });
+

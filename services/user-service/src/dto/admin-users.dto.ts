@@ -1,7 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import { IsEmail, IsIn, IsInt, IsISO8601, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
-import { EgyptianMobile } from '@food-delivery/shared';
+import { EgyptianMobile, REVEALABLE_FIELDS, RevealableField } from '@food-delivery/shared';
 
 const toBoolean = ({ value }: { value: unknown }) => (value === 'true' || value === true ? true : value === 'false' || value === false ? false : value);
 
@@ -81,4 +81,18 @@ export class AdminSearchUsersDto {
   @IsEmail()
   @MaxLength(320)
   email?: string;
+}
+
+/** `POST /admin/users/:id/reveal` (#317): one field, and why, for the audit log. */
+export class AdminRevealDto {
+  @ApiPropertyOptional({ enum: REVEALABLE_FIELDS })
+  @IsIn(REVEALABLE_FIELDS)
+  field!: RevealableField;
+
+  @ApiPropertyOptional({ minLength: 3, maxLength: 300, description: 'Why, for the audit log, e.g. "Calling about order 4f2c".' })
+  @IsString()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @MinLength(3)
+  @MaxLength(300)
+  reason!: string;
 }

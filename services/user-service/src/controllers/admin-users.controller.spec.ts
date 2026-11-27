@@ -7,7 +7,7 @@ import { AdminListUsersQueryDto, AdminSearchUsersDto } from '../dto/admin-users.
 
 describe('AdminUsersController (#214)', () => {
   it('requires support.read on every route', () => {
-    for (const route of ['list', 'search', 'detail'] as const) {
+    for (const route of ['list', 'search', 'detail', 'reveal'] as const) {
       expect(new Reflector().get(PERMISSIONS_KEY, AdminUsersController.prototype[route])).toEqual(['support.read']);
     }
   });

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { PaginatedResult } from '@food-delivery/shared';
+import { AdminAudit, AuditActor, maskPhone, NotFoundError, PaginatedResult } from '@food-delivery/shared';
+import { OutboxRelayService } from '../common/outbox.module';
 import { RestaurantsRepository } from '../repositories/restaurants.repository';
 import { Restaurant } from '../entities/restaurant.entity';
 import { MenuReadiness, MenuServiceClient } from '../common/menu-service.client';
@@ -44,7 +45,28 @@ export class AdminRestaurantsService {
     private readonly restaurantsService: RestaurantsService,
     private readonly menu: MenuServiceClient,
     private readonly lookups: StaffLookupsClient,
+    private readonly outbox: OutboxRelayService,
   ) {}
+
+  /** #317: the contact phone of one restaurant, recorded as a `pii.reveal` audit event (never the value). */
+  async revealContactPhone(actor: AuditActor, id: string, reason: string): Promise<{ field: 'contactPhone'; value: string | null }> {
+    const restaurant = await this.restaurants.findById(id);
+    if (!restaurant) throw new NotFoundError(`Restaurant ${id} not found`);
+    await this.restaurants.transaction((manager) =>
+      AdminAudit.record(manager, {
+        actor,
+        permission: 'support.read',
+        action: 'pii.reveal',
+        targetType: 'RESTAURANT',
+        targetId: id,
+        reason,
+        after: { field: 'contactPhone' },
+        service: 'restaurant-service',
+      }),
+    );
+    this.outbox.kick();
+    return { field: 'contactPhone', value: restaurant.contactPhone ?? null };
+  }
 
   async list(query: AdminListRestaurantsQueryDto): Promise<PaginatedResult<StaffRestaurantRow>> {
     const near =
@@ -98,7 +120,8 @@ const toRow = (restaurant: Restaurant, names: Map<string, string> | null): Staff
   latitude: restaurant.latitude,
   longitude: restaurant.longitude,
   deliveryRadiusKm: restaurant.deliveryRadiusKm,
-  contactPhone: restaurant.contactPhone ?? null,
+  // #317 (owner decision): masked; POST /admin/restaurants/:id/reveal shows it, audited.
+  contactPhone: maskPhone(restaurant.contactPhone),
   submittedAt: restaurant.submittedAt,
   approvedAt: restaurant.approvedAt,
   createdAt: restaurant.createdAt,

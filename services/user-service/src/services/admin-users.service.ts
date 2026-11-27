@@ -1,5 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { BadRequestError, NotFoundError, PaginatedResult, UserRole } from '@food-delivery/shared';
+import { AdminAudit, AuditActor, BadRequestError, maskEmail, maskPhone, NotFoundError, PaginatedResult, RevealableField, UserRole } from '@food-delivery/shared';
+import { DataSource } from 'typeorm';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { OutboxRelayService } from '../common/outbox.module';
 import { ProfilesRepository } from '../repositories/profiles.repository';
 import { UserProfile } from '../entities/user-profile.entity';
 import { AccountQuery, AccountSummary, AuthServiceClient } from '../common/auth-service.client';
@@ -30,7 +33,8 @@ export interface StaffUserView {
 }
 
 export interface StaffUserDetail extends StaffUserView {
-  address: string | null;
+  /** #317: never the address itself; whether there is one to reveal. */
+  hasAddress: boolean;
   /** Status changes are in the audit log: GET /api/admin/audit?targetType=USER&targetId=<id>. */
   auditTrail: { targetType: 'USER'; targetId: string };
   /**
@@ -51,8 +55,9 @@ const toView = (profile: UserProfile | undefined, account: AccountSummary | unde
   return {
     id,
     fullName: profile?.fullName ?? null,
-    email: account?.email ?? profile?.email ?? '',
-    phone: profile?.phone ?? null,
+    // #317 (owner decision): masked by default; POST /admin/users/:id/reveal shows one value, audited.
+    email: maskEmail(account?.email ?? profile?.email) ?? '',
+    phone: maskPhone(profile?.phone),
     phoneVerified: Boolean(profile?.phoneVerifiedAt),
     avatarUrl: profile?.avatarUrl ?? null,
     role: account?.role ?? null,
@@ -71,7 +76,40 @@ export class AdminUsersService {
     private readonly profiles: ProfilesRepository,
     private readonly accounts: AuthServiceClient,
     private readonly linkedRecords: LinkedRecordsClient,
+    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly outbox: OutboxRelayService,
   ) {}
+
+  /**
+   * #317: one personal value of one person, for staff with support.read. Each reveal records a
+   * `pii.reveal` audit event (who saw which field of whom, never the value) before the value is returned.
+   */
+  async reveal(actor: AuditActor, id: string, field: RevealableField, reason: string, correlationId?: string): Promise<{ field: RevealableField; value: string | null }> {
+    const profile = await this.profiles.findById(id);
+    let value: string | null;
+    if (field === 'email') {
+      value = (await this.accountsFor([id], correlationId)).get(id)?.email ?? profile?.email ?? null;
+      if (!profile && value === null) throw new NotFoundError('User not found');
+    } else {
+      if (!profile) throw new NotFoundError('User not found');
+      value = (field === 'phone' ? profile.phone : profile.address) ?? null;
+    }
+    await this.dataSource.transaction((manager) =>
+      AdminAudit.record(manager, {
+        actor,
+        permission: 'support.read',
+        action: 'pii.reveal',
+        targetType: 'USER',
+        targetId: id,
+        reason,
+        after: { field },
+        service: 'user-service',
+        correlationId,
+      }),
+    );
+    this.outbox.kick();
+    return { field, value };
+  }
 
   /**
    * One paginated list across two services without reading auth-service's database (ADR 002):
@@ -132,7 +170,7 @@ export class AdminUsersService {
     }
     return {
       ...toView(profile ?? undefined, account),
-      address: profile?.address ?? null,
+      hasAddress: Boolean(profile?.address),
       auditTrail: { targetType: 'USER', targetId: id },
       linked: { driverId, restaurantIds },
     };

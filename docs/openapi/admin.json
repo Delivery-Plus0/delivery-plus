@@ -504,6 +504,94 @@
         }
       }
     },
+    "/api/admin/users/{id}/reveal": {
+      "post": {
+        "summary": "Reveal one of a person's masked values; audited as pii.reveal (staff with support.read)",
+        "description": "Requires staff permission: support.read.",
+        "tags": [
+          "users"
+        ],
+        "operationId": "admin_users_post_api_admin_users_id_reveal",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-permissions": [
+          "support.read"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters or body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT, or a SYSTEM token on an admin route"
+          },
+          "403": {
+            "description": "Staff token without the required permission"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "field",
+                  "reason"
+                ],
+                "properties": {
+                  "field": {
+                    "type": "string",
+                    "enum": [
+                      "phone",
+                      "email",
+                      "address"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 300,
+                    "description": "Why, for the audit log."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-audit-action": "pii.reveal"
+      }
+    },
     "/api/admin/drivers": {
       "get": {
         "summary": "List drivers: status, verification, licences expiring, plate prefix (staff with support.read)",
@@ -1711,6 +1799,85 @@
           }
         },
         "x-audit-action": "restaurant.reactivate"
+      }
+    },
+    "/api/admin/restaurants/{id}/reveal": {
+      "post": {
+        "summary": "Reveal a restaurant's masked contact phone; audited as pii.reveal (staff with support.read)",
+        "description": "Requires staff permission: support.read.",
+        "tags": [
+          "restaurants"
+        ],
+        "operationId": "admin_restaurants_post_api_admin_restaurants_id_reveal",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-permissions": [
+          "support.read"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters or body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT, or a SYSTEM token on an admin route"
+          },
+          "403": {
+            "description": "Staff token without the required permission"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reason"
+                ],
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 300,
+                    "description": "Why, for the audit log."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-audit-action": "pii.reveal"
       }
     },
     "/api/admin/auth/users/{id}/suspend": {

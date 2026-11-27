@@ -226,6 +226,15 @@ jobs:
           psql -h localhost -U postgres -c "CREATE DATABASE user_service_repository_test"
           npm test --workspace=services/user-service -- --runInBand
 
+      # #214: today's orders of a restaurant by the Cairo day (summer time included) is SQL.
+      - name: Run order-service Postgres repository test
+        env:
+          PGPASSWORD: postgres
+          ORDER_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/order_service_repository_test
+        run: |
+          psql -h localhost -U postgres -c "CREATE DATABASE order_service_repository_test"
+          npm test --workspace=services/order-service -- --runInBand
+
       # #213: the audit log's dedup on eventId, its filters and the append-only triggers live in SQL.
       - name: Run audit-service Postgres repository test
         env:

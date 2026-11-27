@@ -67,7 +67,7 @@ Published as `/api/admin/users`, `support.read` on every route (ADR 002):
 | --- | --- |
 | `GET /admin/users` | Page of people: `role`, `status`, `emailVerified`, `phoneVerified`, `q` (the start of the full name or of a later word, case-insensitive, at least 2 characters; LIKE wildcards are literal), `createdFrom`/`createdTo`. Newest first, `limit` ≤ 100. |
 | `POST /admin/users/search` | Exactly one of `phone` (normalized to E.164) or `email` (lowercased), **exact match**. A POST so the value never reaches a URL or an access log (#217 decision). |
-| `GET /admin/users/:id` | One person: profile, account, address, where the status history is (the audit log: `targetType=USER`), and `linked.driverId` for a DRIVER account (from driver-service; `unavailable` when it doesn't answer). |
+| `GET /admin/users/:id` | One person: profile, account, address, where the status history is (the audit log: `targetType=USER`), `linked.driverId` for a DRIVER account and `linked.restaurantIds` for a RESTAURANT_OWNER (from driver- and restaurant-service; `unavailable` when one doesn't answer). |
 
 Profiles live here; the account side (role, status, email verified, suspension, last sign-in) lives in auth-service, which shares it only through `POST /internal/auth/accounts/query` (SYSTEM token from `system:user-service`). Nothing reads the other service's database:
 - account filters only: auth-service pages and user-service adds the profiles;
@@ -87,7 +87,7 @@ The staff view may carry phone, email and address (the admin app masks them by d
 
 ## Required env vars
 - `AUTH_SERVICE_URL` (default `http://localhost:3001`): the account side of the staff directory (#214).
-- `DRIVER_SERVICE_URL` (default `http://localhost:3009`): the driver linked to a person (#214).
+- `DRIVER_SERVICE_URL` (default `http://localhost:3009`) and `RESTAURANT_SERVICE_URL` (default `http://localhost:3003`): the driver or restaurants linked to a person (#214).
 
 `POST /internal/users/names` (internal; SYSTEM, driver-service and restaurant-service only) returns full names for up to 100 user ids, for their staff lists. Names only: no email, phone or address.
 From `services/user-service/src/config/app-config.ts`:

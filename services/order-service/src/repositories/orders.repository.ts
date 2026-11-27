@@ -218,4 +218,20 @@ export class OrdersRepository {
       take: limit,
     });
   }
+
+  /**
+   * #214: orders a restaurant received today, by the Cairo calendar day (the platform's day,
+   * whatever the server's time zone). Cancelled and failed orders count: staff see the demand.
+   */
+  async countTodayForRestaurant(restaurantId: string, now = new Date()): Promise<number> {
+    const [row] = (await this.repo.query(
+      `SELECT count(*)::int AS "count" FROM "orders"
+        WHERE "restaurantId" = $1
+          AND "createdAt" >= (date_trunc('day', $2::timestamptz AT TIME ZONE 'Africa/Cairo') AT TIME ZONE 'Africa/Cairo')
+          AND "createdAt" <  (date_trunc('day', $2::timestamptz AT TIME ZONE 'Africa/Cairo') AT TIME ZONE 'Africa/Cairo') + interval '1 day'`,
+      [restaurantId, now.toISOString()],
+    )) as { count: number }[];
+    return row?.count ?? 0;
+  }
 }
+

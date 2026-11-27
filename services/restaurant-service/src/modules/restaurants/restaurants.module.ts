@@ -1,3 +1,8 @@
+import { AdminRestaurantsController } from '../../controllers/admin-restaurants.controller';
+import { InternalRestaurantsController } from '../../controllers/internal-restaurants.controller';
+import { AdminRestaurantsService } from '../../services/admin-restaurants.service';
+import { StaffLookupsClient } from '../../common/staff-lookups.client';
+import { SystemTokenService } from '../../common/system-token.service';
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -19,7 +24,16 @@ import { MenuServiceClient } from '../../common/menu-service.client';
       inject: [APP_CONFIG],
     }),
   ],
-  controllers: [RestaurantsController],
-  providers: [RestaurantsService, RestaurantsRepository, S3StorageService, InternalAuthGuard, MenuServiceClient],
+  controllers: [RestaurantsController, AdminRestaurantsController, InternalRestaurantsController],
+  providers: [
+    RestaurantsService,
+    RestaurantsRepository,
+    S3StorageService,
+    InternalAuthGuard,
+    MenuServiceClient,
+    AdminRestaurantsService,
+    StaffLookupsClient,
+    SystemTokenService,
+  ],
 })
 export class RestaurantsModule {}

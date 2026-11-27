@@ -213,4 +213,48 @@ export class RestaurantsRepository {
   findOpenById(id: string): Promise<Restaurant | null> {
     return this.repo.findOne({ where: { id, status: RestaurantStatus.OPEN, approvalStatus: 'APPROVED' } });
   }
+
+  /**
+   * #214: the staff restaurant list, every approval status. `namePrefix` is the start of the name or
+   * of a later word (LIKE wildcards literal); `near` keeps restaurants within `withinKm` of a point,
+   * nearest first; the review queue (`queue`) is SUBMITTED applications, oldest submission first.
+   */
+  async findForAdmin(filter: AdminRestaurantFilter, page: number, limit: number): Promise<[Restaurant[], number]> {
+    const qb = this.repo.createQueryBuilder('r');
+    if (filter.approvalStatus) qb.andWhere('r.approvalStatus = :approvalStatus', { approvalStatus: filter.approvalStatus });
+    if (filter.status) qb.andWhere('r.status = :status', { status: filter.status });
+    if (filter.queue) qb.andWhere(`r.approvalStatus = 'SUBMITTED'`);
+    if (filter.namePrefix) {
+      const escaped = filter.namePrefix.replace(/[\\%_]/g, (c) => `\\${c}`);
+      qb.andWhere(`(r.name ILIKE :start ESCAPE '\\' OR r.name ILIKE :word ESCAPE '\\')`, { start: `${escaped}%`, word: `% ${escaped}%` });
+    }
+    if (filter.near) {
+      const distance = `6371 * 2 * ASIN(SQRT(LEAST(1,
+          POWER(SIN(RADIANS(r.latitude - :nearLat) / 2), 2)
+          + COS(RADIANS(:nearLat)) * COS(RADIANS(r.latitude)) * POWER(SIN(RADIANS(r.longitude - :nearLng) / 2), 2))))`;
+      qb.andWhere('r.latitude IS NOT NULL AND r.longitude IS NOT NULL')
+        .andWhere(`${distance} <= :withinKm`, { nearLat: filter.near.latitude, nearLng: filter.near.longitude, withinKm: filter.near.withinKm })
+        .addSelect(distance, 'distance_km')
+        .orderBy('distance_km', 'ASC');
+    } else if (filter.queue) {
+      qb.orderBy('r.submittedAt', 'ASC');
+    } else {
+      qb.orderBy('r.createdAt', 'DESC');
+    }
+    return qb.addOrderBy('r.id', 'ASC').skip((page - 1) * limit).take(limit).getManyAndCount();
+  }
+
+  /** #214: exact E.164 contact phone, for the staff search (POST body). */
+  findByContactPhone(phone: string): Promise<Restaurant[]> {
+    return this.repo.find({ where: { contactPhone: phone }, order: { createdAt: 'DESC' }, take: 20 });
+  }
 }
+
+export interface AdminRestaurantFilter {
+  approvalStatus?: string;
+  status?: string;
+  queue?: boolean;
+  namePrefix?: string;
+  near?: { latitude: number; longitude: number; withinKm: number };
+}
+

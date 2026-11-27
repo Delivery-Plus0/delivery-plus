@@ -35,9 +35,9 @@ export interface StaffUserDetail extends StaffUserView {
   auditTrail: { targetType: 'USER'; targetId: string };
   /**
    * The driver record of a DRIVER account: an id, null when there is none, or `unavailable` when
-   * driver-service didn't answer. The restaurant of an owner follows with the restaurant directory.
+   * driver-service didn't answer; the restaurants of a RESTAURANT_OWNER account the same way.
    */
-  linked: { driverId: string | null | 'unavailable' };
+  linked: { driverId: string | null | 'unavailable'; restaurantIds: string[] | 'unavailable' };
 }
 
 export class DirectoryFilterTooBroadError extends BadRequestError {
@@ -126,11 +126,15 @@ export class AdminUsersService {
       const found = await this.linkedRecords.driverIdFor(id);
       driverId = found === undefined ? 'unavailable' : found;
     }
+    let restaurantIds: string[] | 'unavailable' = [];
+    if (account?.role === UserRole.RESTAURANT_OWNER) {
+      restaurantIds = (await this.linkedRecords.restaurantIdsFor(id)) ?? 'unavailable';
+    }
     return {
       ...toView(profile ?? undefined, account),
       address: profile?.address ?? null,
       auditTrail: { targetType: 'USER', targetId: id },
-      linked: { driverId },
+      linked: { driverId, restaurantIds },
     };
   }
 

@@ -179,6 +179,7 @@ services:
       - DATABASE_URL=postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/user_service
       - JWT_SECRET=${JWT_SECRET:-local-development-only}
       - SYSTEM_JWT_SECRET=${SYSTEM_JWT_SECRET:?SYSTEM_JWT_SECRET must be set, this stack runs with NODE_ENV=production}
+      - RESTAURANT_SERVICE_URL=http://restaurant-service:3003
       - DRIVER_SERVICE_URL=http://driver-service:3009
       - AUTH_SERVICE_URL=http://auth-service:3001
       - REDIS_URL=redis://redis:6379
@@ -214,6 +215,8 @@ services:
       - DEFAULT_DELIVERY_RADIUS_KM=${DEFAULT_DELIVERY_RADIUS_KM:-5}
       - MENU_SERVICE_URL=http://menu-service:3004
       - SYSTEM_JWT_SECRET=${SYSTEM_JWT_SECRET:?SYSTEM_JWT_SECRET must be set, this stack runs with NODE_ENV=production}
+      - ORDER_SERVICE_URL=http://order-service:3006
+      - USER_SERVICE_URL=http://user-service:3002
       - KAFKA_BROKER=kafka:29092
     healthcheck:
       test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3003/health/ready']

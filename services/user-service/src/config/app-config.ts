@@ -14,6 +14,8 @@ export interface AppConfig {
   authServiceUrl: string;
   /** #214: links a DRIVER account to its driver record on the staff person page. */
   driverServiceUrl: string;
+  /** #214: links a RESTAURANT_OWNER account to its restaurants. */
+  restaurantServiceUrl: string;
   redisUrl: string;
   internalAuthSecret: string;
   internalAuthAllowedService: string;
@@ -42,6 +44,7 @@ export function loadConfig(): AppConfig {
     orderServiceUrl: process.env.ORDER_SERVICE_URL || 'http://localhost:3006',
     authServiceUrl: process.env.AUTH_SERVICE_URL || 'http://localhost:3001',
     driverServiceUrl: process.env.DRIVER_SERVICE_URL || 'http://localhost:3009',
+    restaurantServiceUrl: process.env.RESTAURANT_SERVICE_URL || 'http://localhost:3003',
     redisUrl: process.env.REDIS_URL || 'redis://localhost:6379',
     internalAuthSecret: requireInternalAuthSecret(),
     internalAuthAllowedService: process.env.INTERNAL_AUTH_ALLOWED_SERVICE || 'auth-service',

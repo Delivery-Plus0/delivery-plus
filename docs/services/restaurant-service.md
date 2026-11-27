@@ -31,6 +31,20 @@ From `services/restaurant-service/src/controllers/restaurants.controller.ts`:
 ## Events published/consumed
 - No Kafka events are published or consumed by this service.
 
+## Staff restaurant lists and page (#214)
+Published as `/api/admin/restaurants`:
+
+| Route | Permission | What it does |
+| --- | --- | --- |
+| `GET /admin/restaurants` | `support.read` | Every approval status, newest first: `approvalStatus`, `status`, `q` (the start of the name or of a later word, LIKE wildcards literal), and an area (`nearLat`, `nearLng`, `withinKm` ≤ 50, all three or none; nearest first). |
+| `GET /admin/restaurants/queue` | `onboarding.review` | `SUBMITTED` applications, oldest submission first. |
+| `POST /admin/restaurants/search` | `support.read` | The exact contact phone (normalized to E.164), in the body (#217 decision). |
+| `GET /admin/restaurants/:id` | `support.read` | The staff application view with its reviews, the row with the owner's name, the menu counts (`categories`, `availableItems`, from the public menu) and today's orders (order-service, Cairo day). |
+
+- Owners' names come from user-service's names-only internal route. A part whose service doesn't answer is null.
+- `GET /internal/restaurants/by-owner/:ownerId` (SYSTEM, user-service only) links an owner account to its restaurants on the staff person page.
+- Needs `USER_SERVICE_URL` and `ORDER_SERVICE_URL`.
+
 ## Required env vars
 From `services/restaurant-service/src/config/app-config.ts`:
 

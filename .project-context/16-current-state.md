@@ -105,6 +105,7 @@ No workflow collects test coverage.
 | #127 | Driver-release reconciliation sweep in delivery-service (`DRIVER_RECONCILE_SWEEP_MS`, `DRIVER_RECONCILE_GRACE_MS`) (#98) |
 | #126 | Transactional outbox for order and delivery events (`outbox_events`, `OutboxRelay`) (#98) |
 | #124 | Gateway dev CORS allows the restaurant app E2E origin (:8085) |
+| #321 | The admin app E2E origin is :8086: gateway dev CORS allows it, and `ADMIN_APP_URL` defaults to it outside production |
 | #123 | Restaurant ownership boundaries (#59): `GET /restaurants/me`, public restaurant DTOs, HMAC-protected ownership verification, signed menu/order internal clients, restaurant-order role guard, gateway blocking of public ownership probes |
 | #111 | Gateway dev CORS allows the driver app E2E origin (:8084) |
 | #110 | Automatic dispatch on `order.ready_for_pickup` with a waiting-delivery sweep; Redis + durable idempotency in delivery-service; concurrent create maps to 409; seeds and `npm run e2e` no longer dispatch by hand; seed-e2e drops scenario S3 (closes #97) |

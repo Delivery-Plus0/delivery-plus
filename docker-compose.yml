@@ -156,7 +156,7 @@ services:
       - JWT_SECRET=${JWT_SECRET:-local-development-only}
       - INTERNAL_AUTH_SECRET=${INTERNAL_AUTH_SECRET:-local-internal-auth-development-only}
       - USER_SERVICE_URL=http://user-service:3002
-      - ADMIN_APP_URL=${ADMIN_APP_URL:-http://localhost:8085}
+      - ADMIN_APP_URL=${ADMIN_APP_URL:-http://localhost:8086}
       - KAFKA_BROKER=kafka:29092
     healthcheck:
       test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3001/health/ready']

@@ -89,13 +89,15 @@ done
 - **Busy restaurants (#286):** a BUSY restaurant takes no new orders; customers can browse and keep a cart and are told to try again in a few minutes. `docs/business/restaurant-availability.md`.
 - **Restaurant registration (#208):** only the legal name is mandatory among the legal details (commercial registration and tax card are optional), and one restaurant per owner account for now. `docs/business/restaurant-onboarding.md`.
 - **Contact during a delivery (#211):** direct phone numbers for the pilot, shown only to the delivery's participants and only while it is active; masked calling can replace them later.
+- **Partial refunds (#219):** not in M4. Staff refunds are full refunds only; partial refunds come with the real payment gateway in M6 (#224).
+- **Finance read APIs (#220):** order-service owns `/admin/finance/*` and gets payment and ledger aggregates from payment- and delivery-service over internal routes (ADR 001). No money math in the admin app.
+- **Search by phone or email (#217, #214):** a `POST .../search` with the value in the body, never in the URL or a log; exact match after normalising (E.164 phone, lowercased email).
 
 **Still needed, before the milestone shown**
 
 | Before | Decision |
 | --- | --- |
 | M2 | Default delivery radius and pilot area; driver document retention (90 days after a final rejection is the working default, to confirm) |
-| M4 | Partial refunds: yes or no |
 | M5 | Hosting, region and domains; crash-reporting tool; admin app IP restriction |
 | M6 | Payment gateway (Paymob assumed; merchant onboarding takes weeks); restaurant commission and settlement period; who carries the cost of a rejected order; driver payout method and cadence |
 | M7 | SMS provider and sender ID; iOS at the pilot or later |
@@ -187,7 +189,9 @@ _Snapshot of GitHub on 2026-10-22. Issue numbers without a prefix are in this re
 
 ### Production 4 · Admin console II: operations, support & finance views
 
-0 of 8 closed.
+0 of 9 closed.
+
+**Start with #217's `order_status_history`:** it can't be backfilled, so every day without it is a day of orders with no history.
 
 | Issue | Repo | Title | Depends on | State |
 | --- | --- | --- | --- | --- |
@@ -195,10 +199,11 @@ _Snapshot of GitHub on 2026-10-22. Issue numbers without a prefix are in this re
 | #218 | backend | feat: live operations API (queues, stuck orders, online drivers) | #212, #217 | open |
 | #219 | backend | feat: support actions (cancel, refund, re-dispatch, internal notes) | #217, #213 | open |
 | #220 | backend | feat: finance read APIs (daily totals, refunds, driver ledgers) | #212 | open |
+| #307 | backend | feat: admin restaurant management APIs (radius, stats, menu browser) | #212, #213, #217 | open |
 | admin#5 | admin | feat: live operations board | #218, admin#1 | open |
 | admin#6 | admin | feat: order search and order 360 with support actions | #217, #219, admin#1 | open |
 | admin#7 | admin | feat: finance views and CSV export | #220, admin#1 | open |
-| admin#8 | admin | feat: restaurant and menu management | #214, #215, admin#1 | open |
+| admin#8 | admin | feat: restaurant and menu management | #214, #215, #307, admin#1 | open |
 
 ### Production 5 · Platform hardening & staging
 

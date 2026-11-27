@@ -38,6 +38,30 @@ describe('AdminDriversService (#214)', () => {
     expect(result.items[0]).not.toHaveProperty('nationalIdHash');
   });
 
+  it('passes the status and verificationStatus filters straight through to the repository', async () => {
+    const { service, drivers, lookups } = setup();
+    drivers.findForAdmin.mockResolvedValue([[], 0]);
+    lookups.names.mockResolvedValue(new Map());
+
+    await service.list(listQuery({ status: 'OFFLINE' as never, verificationStatus: 'PENDING' as never }));
+
+    expect(drivers.findForAdmin).toHaveBeenCalledWith(expect.objectContaining({ status: 'OFFLINE', verificationStatus: 'PENDING' }), 1, 20);
+  });
+
+  it('never exposes secret fields: the staff driver row has a fixed shape', async () => {
+    const { service, drivers, lookups } = setup();
+    drivers.findForAdmin.mockResolvedValue([[driver('d1', 'u1')], 1]);
+    lookups.names.mockResolvedValue(new Map());
+
+    const row = (await service.list(listQuery())).items[0];
+
+    expect(Object.keys(row).sort()).toEqual(
+      ['createdAt', 'drivingLicenceExpiresOn', 'fullName', 'id', 'licensePlate', 'status', 'submittedAt', 'userId', 'vehicleLicenceExpiresOn', 'vehicleType', 'verificationStatus', 'verifiedAt'].sort(),
+    );
+    expect(row).not.toHaveProperty('nationalIdHash');
+    expect(JSON.stringify(row)).not.toContain('secret-hash');
+  });
+
   it('shows names as null, never made up, when user-service does not answer', async () => {
     const { service, drivers, lookups } = setup();
     drivers.findForAdmin.mockResolvedValue([[driver('d1', 'u1')], 1]);

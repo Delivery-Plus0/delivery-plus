@@ -20,6 +20,8 @@ import { DriverAvailableSince1700000000004 } from '../database/migrations/005-dr
 import { DriverEffectiveIdleIndex1700000000005 } from '../database/migrations/006-driver-effective-idle-index';
 import { DriverApplicationDocuments1700000000006 } from '../database/migrations/007-driver-application-documents';
 import { DriverReviews1700000000007 } from '../database/migrations/008-driver-reviews';
+import { OutboxEvents1700000000008 } from '../database/migrations/009-outbox-events';
+import { DriverSuspensionRequest1700000000009 } from '../database/migrations/010-driver-suspension-request';
 import { DriverReview } from '../entities/driver-review.entity';
 import {
   ApplicationLockedError,
@@ -42,7 +44,13 @@ const BEFORE_207 = [
   DriverAvailableSince1700000000004,
   DriverEffectiveIdleIndex1700000000005,
 ];
-const ALL_MIGRATIONS = [...BEFORE_207, DriverApplicationDocuments1700000000006, DriverReviews1700000000007];
+const ALL_MIGRATIONS = [
+  ...BEFORE_207,
+  DriverApplicationDocuments1700000000006,
+  DriverReviews1700000000007,
+  OutboxEvents1700000000008,
+  DriverSuspensionRequest1700000000009,
+];
 const ENTITIES = [Driver, DriverDocument, DriverDocumentAccess, DriverReview];
 
 const FIELDS = {
@@ -105,14 +113,14 @@ describeDb('DriverApplicationRepository (PostgreSQL integration, #207)', () => {
       await before.destroy();
 
       await open();
-      expect(await ds.runMigrations()).toHaveLength(2);
+      const after207 = ALL_MIGRATIONS.length - BEFORE_207.length;
+      expect(await ds.runMigrations()).toHaveLength(after207);
 
       expect(await repo.findApplication(verified)).toMatchObject({ verificationStatus: 'VERIFIED', submittedAt: null, nationalIdLast4: null });
       expect(await repo.findApplication(pending)).toMatchObject({ verificationStatus: 'PENDING', submittedAt: null });
 
-      await ds.undoLastMigration();
-      await ds.undoLastMigration();
-      expect(await ds.runMigrations()).toHaveLength(2);
+      for (let i = 0; i < after207; i++) await ds.undoLastMigration();
+      expect(await ds.runMigrations()).toHaveLength(after207);
     });
 
     it('enforces the value rules in the database too', async () => {

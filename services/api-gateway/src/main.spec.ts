@@ -1,3 +1,4 @@
+import Ajv from 'ajv';
 // http-proxy-middleware v4 ships ESM only. Node loads it from the compiled
 // CommonJS gateway (require(esm)), but Jest's own CommonJS module runtime
 // cannot parse it. These tests cover main.ts's pure helpers and never start the
@@ -314,6 +315,41 @@ describe('admin OpenAPI contract (#212)', () => {
     // #214: a read-only POST (a search with the value in the body) needs neither.
     expect(doc.paths['/api/admin/users/search'].post['x-read-only']).toBe(true);
     expect(doc.paths['/api/admin/users/search'].post.requestBody.content['application/json'].schema.required).toBeUndefined();
+  });
+
+  it('types every drivers and restaurants admin response, and every schema compiles (#323)', () => {
+    const doc = generateAdminOpenApiDocument() as { paths: Record<string, Record<string, any>>; components: { schemas: Record<string, unknown> } };
+    const untyped: string[] = [];
+    for (const [path, operations] of Object.entries(doc.paths as Record<string, Record<string, any>>)) {
+      if (!/^\/api\/admin\/(drivers|restaurants)(\/|$)/.test(path)) continue;
+      for (const [method, operation] of Object.entries(operations)) {
+        const schema = Object.values(operation.responses as Record<string, any>).find((r) => r.content)?.content['application/json'].schema;
+        const ref = schema?.$ref ?? schema?.properties?.items?.items?.$ref;
+        if (!ref || !doc.components.schemas[ref.split('/').pop()]) untyped.push(`${method.toUpperCase()} ${path}`);
+      }
+    }
+    expect(untyped).toEqual([]);
+
+    // Strict Ajv: unknown keywords, nullable without a type or a broken $ref fail here, not in the E2E.
+    const ajv = new Ajv({ strict: true, validateFormats: false });
+    ajv.addVocabulary(['components']);
+    ajv.addSchema({ components: doc.components }, 'admin');
+    for (const name of Object.keys(doc.components.schemas)) {
+      expect(() => ajv.getSchema(`admin#/components/schemas/${name}`)).not.toThrow();
+    }
+    const validate = ajv.getSchema('admin#/components/schemas/DriverReviewUndoResult')!;
+    expect(validate({ driverId: '00000000-0000-4000-8000-000000000000', undone: true })).toBe(true);
+    expect(validate({ driverId: '00000000-0000-4000-8000-000000000000' })).toBe(false);
+  });
+
+  it('publishes the documents viewer URL under /api/admin, read-only, with the document type as its parameter (#323)', () => {
+    const operation = generateAdminOpenApiDocument().paths['/api/admin/drivers/{id}/documents/{type}/read-url'].post;
+    expect(operation['x-permissions']).toEqual(['onboarding.review']);
+    expect(operation['x-read-only']).toBe(true);
+    expect(operation.parameters.map((p: { name: string; schema: { format?: string; enum?: string[] } }) => [p.name, p.schema.format ?? p.schema.enum?.length])).toEqual([
+      ['id', 'uuid'],
+      ['type', 5],
+    ]);
   });
 
   it('lists every admin mutation with the audit action it records (#213, #215)', () => {

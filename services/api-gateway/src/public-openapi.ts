@@ -239,7 +239,225 @@ export type AdminRouteDefinition = {
   readOnly?: boolean;
   /** `paginated` is a PaginatedResult<T>; `object` a single resource. */
   response: 'paginated' | 'object';
+  /**
+   * #323: the named schema (ADMIN_RESPONSE_SCHEMAS) of the success body, or of each item when paginated.
+   * Without it the contract can only say "an object".
+   */
+  responseSchema?: keyof typeof ADMIN_RESPONSE_SCHEMAS;
+  /** Path parameters that are not uuids, e.g. a document type. Every other `{name}` is a uuid. */
+  pathParameters?: Record<string, Record<string, unknown>>;
 };
+
+const dateTime = { type: 'string', format: 'date-time' } as const;
+const nullableDateTime = { type: 'string', format: 'date-time', nullable: true } as const;
+const nullableDate = { type: 'string', format: 'date', nullable: true } as const;
+const nullableString = { type: 'string', nullable: true } as const;
+const uuid = { type: 'string', format: 'uuid' } as const;
+/**
+ * Every property is required (a missing value is null, never absent, unless listed in `optional`), and
+ * nothing else may appear: a field added in code but not here, such as unmasked personal data, fails the
+ * contract check in the backend E2E instead of reaching the console unnoticed.
+ */
+const record = (properties: Record<string, unknown>, extra: { optional?: readonly string[]; nullable?: boolean; description?: string } = {}) => ({
+  type: 'object',
+  ...(extra.description ? { description: extra.description } : {}),
+  ...(extra.nullable ? { nullable: true } : {}),
+  required: Object.keys(properties).filter((name) => !extra.optional?.includes(name)),
+  properties,
+  additionalProperties: false,
+});
+
+const DRIVER_DOCUMENT_TYPE = { type: 'string', enum: ['national-id-front', 'national-id-back', 'driving-licence', 'vehicle-licence', 'selfie'] } as const;
+const DOCUMENT_CONTENT_TYPE = { type: 'string', enum: ['image/jpeg', 'image/png', 'application/pdf'] } as const;
+const DRIVER_STATUS = { type: 'string', enum: ['OFFLINE', 'AVAILABLE', 'BUSY', 'SUSPENDED'] } as const;
+const RESTAURANT_STATUS = { type: 'string', enum: ['OPEN', 'CLOSED', 'BUSY', 'SUSPENDED'] } as const;
+const RESTAURANT_APPROVAL_STATUS = { type: 'string', enum: ['DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED'] } as const;
+const restaurantLastReview = record(
+  { decision: { type: 'string', enum: ['APPROVED', 'REJECTED', 'WITHDRAWN'] }, note: nullableString, reviewedAt: dateTime },
+  { nullable: true, description: 'The latest decision, or null before the first one.' },
+);
+
+/**
+ * #323: the response bodies of the admin routes, named in `components.schemas` of docs/openapi/admin.json.
+ * They mirror the services' view types (driver-service AdminDriversService, restaurant-service
+ * AdminRestaurantsService, ...); the backend E2E validates real responses against them, so a drift fails CI.
+ */
+export const ADMIN_RESPONSE_SCHEMAS = {
+  StaffDriverRow: record(
+    {
+      id: uuid,
+      userId: uuid,
+      fullName: { ...nullableString, description: "Null when user-service doesn't answer." },
+      vehicleType: { type: 'string' },
+      licensePlate: { type: 'string' },
+      status: DRIVER_STATUS,
+      verificationStatus: { type: 'string', enum: ['PENDING', 'VERIFIED', 'REJECTED'] },
+      submittedAt: nullableDateTime,
+      verifiedAt: nullableDateTime,
+      drivingLicenceExpiresOn: nullableDate,
+      vehicleLicenceExpiresOn: nullableDate,
+      createdAt: dateTime,
+    },
+    { description: 'One driver in the staff lists and the review queue (#214).' },
+  ),
+  StaffDriverApplication: record(
+    {
+      driverId: uuid,
+      status: { type: 'string', enum: ['DRAFT', 'SUBMITTED', 'VERIFIED', 'REJECTED'] },
+      submittedAt: nullableDateTime,
+      verificationNote: nullableString,
+      lastReview: record(
+        { decision: { type: 'string', enum: ['VERIFIED', 'REJECTED', 'WITHDRAWN'] }, note: nullableString, reviewedAt: dateTime },
+        { nullable: true, description: 'The latest decision, or null before the first one.' },
+      ),
+      nationalIdLast4: nullableString,
+      drivingLicenceExpiresOn: nullableDate,
+      vehicleLicenceExpiresOn: nullableDate,
+      documents: {
+        type: 'array',
+        description: 'The current version of each uploaded document. Read one with POST /api/admin/drivers/{id}/documents/{type}/read-url.',
+        items: record({ type: DRIVER_DOCUMENT_TYPE, version: { type: 'integer' }, contentType: DOCUMENT_CONTENT_TYPE, sizeBytes: { type: 'integer' }, uploadedAt: dateTime }),
+      },
+      missingDocuments: { type: 'array', items: DRIVER_DOCUMENT_TYPE },
+      canSubmit: { type: 'boolean' },
+      expiringLicences: {
+        type: 'array',
+        description: 'Licences valid today that expire within 14 days (Cairo), soonest first.',
+        items: record({ field: { type: 'string', enum: ['drivingLicenceExpiresOn', 'vehicleLicenceExpiresOn'] }, expiresOn: { type: 'string', format: 'date' } }),
+      },
+      reviews: {
+        type: 'array',
+        description: 'Every decision, newest first, with the document versions it looked at.',
+        items: record({
+          id: uuid,
+          decision: { type: 'string', enum: ['VERIFIED', 'REJECTED', 'WITHDRAWN'] },
+          note: nullableString,
+          reviewedAt: dateTime,
+          reviewerUserId: { type: 'string' },
+          applicationSubmittedAt: nullableDateTime,
+          documents: { type: 'array', items: record({ type: DRIVER_DOCUMENT_TYPE, version: { type: 'integer' } }) },
+        }),
+      },
+    },
+    { description: "The driver's application as staff see it (#207, #214)." },
+  ),
+  StaffDriverDetail: record(
+    {
+      driver: { $ref: '#/components/schemas/StaffDriverRow' },
+      application: { $ref: '#/components/schemas/StaffDriverApplication' },
+      summary: record(
+        {
+          earnings: record({
+            currency: { type: 'string', enum: ['EGP'] },
+            pending: { type: 'string', description: 'Decimal string.' },
+            available: { type: 'string', description: 'Decimal string.' },
+            balance: { type: 'string', description: 'Decimal string.' },
+          }),
+          rating: record({ average: { type: 'number', nullable: true }, count: { type: 'integer' } }),
+        },
+        { nullable: true, description: "Ledger balance and rating from delivery-service; null when it doesn't answer." },
+      ),
+    },
+    { description: 'The staff driver page (#214).' },
+  ),
+  DriverDocumentReadUrl: record(
+    {
+      type: DRIVER_DOCUMENT_TYPE,
+      version: { type: 'integer' },
+      contentType: DOCUMENT_CONTENT_TYPE,
+      url: { type: 'string', description: 'Valid for expiresIn seconds. Never store or log it.' },
+      expiresIn: { type: 'integer', description: 'Seconds.' },
+    },
+    { description: 'A short-lived URL to one document (#207, #323); the read is recorded.' },
+  ),
+  DriverReviewUndoResult: record({ driverId: uuid, undone: { type: 'boolean', description: 'False when there was nothing to undo.' } }),
+  DriverActionResult: record(
+    {
+      driver: record({ id: uuid, status: DRIVER_STATUS, suspensionRequestedAt: { ...nullableDateTime, description: 'Set while a driver on a delivery waits to be suspended.' } }),
+      changed: { type: 'boolean', description: 'False when the driver was already in that state.' },
+    },
+    { description: 'The result of a suspend or reactivate (#215).' },
+  ),
+  StaffRestaurantRow: record(
+    {
+      id: uuid,
+      name: { type: 'string' },
+      ownerId: uuid,
+      ownerName: { ...nullableString, description: "Null when user-service doesn't answer." },
+      status: RESTAURANT_STATUS,
+      approvalStatus: RESTAURANT_APPROVAL_STATUS,
+      address: { type: 'string' },
+      latitude: { type: 'number', nullable: true },
+      longitude: { type: 'number', nullable: true },
+      deliveryRadiusKm: { ...nullableString, description: "This restaurant's own radius in km as a decimal string; null uses the platform default." },
+      contactPhone: { ...nullableString, description: 'Masked (#317); reveal it with POST /api/admin/restaurants/{id}/reveal.' },
+      submittedAt: nullableDateTime,
+      approvedAt: nullableDateTime,
+      createdAt: dateTime,
+    },
+    { description: 'One restaurant in the staff lists and the review queue (#214).' },
+  ),
+  StaffRestaurantApplication: record(
+    {
+      id: uuid,
+      name: { type: 'string' },
+      description: nullableString,
+      coverImageUrl: nullableString,
+      logoUrl: nullableString,
+      address: { type: 'string' },
+      latitude: { type: 'number', nullable: true },
+      longitude: { type: 'number', nullable: true },
+      deliveryRadiusKm: { type: 'number', description: 'The radius in effect, in km.' },
+      status: RESTAURANT_STATUS,
+      approvalStatus: RESTAURANT_APPROVAL_STATUS,
+      cuisineTags: { type: 'array', items: { type: 'string' } },
+      submittedAt: nullableDateTime,
+      approvedAt: nullableDateTime,
+      approvalNote: nullableString,
+      legalName: nullableString,
+      commercialRegistrationNumber: nullableString,
+      taxCardNumber: nullableString,
+      contactPhone: { ...nullableString, description: 'Masked (#317).' },
+      lastReview: restaurantLastReview,
+      ownerId: uuid,
+      reviews: {
+        type: 'array',
+        description: 'Every decision, newest first.',
+        items: record({
+          id: uuid,
+          decision: { type: 'string', enum: ['APPROVED', 'REJECTED', 'WITHDRAWN'] },
+          note: nullableString,
+          reviewerUserId: { type: 'string' },
+          applicationSubmittedAt: nullableDateTime,
+          reviewedAt: dateTime,
+        }),
+      },
+    },
+    { description: "The restaurant's application as staff see it (#208, #214)." },
+  ),
+  StaffRestaurantDetail: record(
+    {
+      restaurant: { $ref: '#/components/schemas/StaffRestaurantRow' },
+      application: { $ref: '#/components/schemas/StaffRestaurantApplication' },
+      menu: record(
+        { categories: { type: 'integer' }, availableItems: { type: 'integer' } },
+        { nullable: true, description: "Counts from the public menu; null when menu-service doesn't answer." },
+      ),
+      ordersToday: { type: 'integer', nullable: true, description: "Orders since midnight Cairo time; null when order-service doesn't answer." },
+    },
+    { description: 'The staff restaurant page (#214).' },
+  ),
+  StaffRestaurantSearchResult: record({ items: { type: 'array', items: { $ref: '#/components/schemas/StaffRestaurantRow' } } }),
+  RestaurantReviewUndoResult: record({ restaurantId: uuid, undone: { type: 'boolean', description: 'False when there was nothing to undo.' } }),
+  RestaurantActionResult: record(
+    { restaurant: record({ id: uuid, status: RESTAURANT_STATUS }), changed: { type: 'boolean', description: 'False when the restaurant was already in that state.' } },
+    { description: 'The result of a suspend or reactivate (#215).' },
+  ),
+  RevealedField: record(
+    { field: { type: 'string' }, value: { ...nullableString, description: 'The unmasked value, or null when there is none. Never store or log it.' } },
+    { description: 'One revealed personal field (#317), recorded as a pii.reveal audit event.' },
+  ),
+} as const;
 
 /** Page pagination shared by every admin list route (ADR 002: limit capped at 100). */
 /** The staff permissions (shared STAFF_PERMISSIONS), for the admin contract's enums. */
@@ -371,6 +589,7 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
         permissions: ['support.read'],
         statusCode: 200,
         response: 'paginated',
+        responseSchema: 'StaffDriverRow',
         query: [
           ...ADMIN_PAGE_QUERY,
           { name: 'status', description: 'Work status.', schema: { type: 'string', enum: ['OFFLINE', 'AVAILABLE', 'BUSY', 'SUSPENDED'] } },
@@ -390,6 +609,7 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
         permissions: ['onboarding.review'],
         statusCode: 200,
         response: 'paginated',
+        responseSchema: 'StaffDriverRow',
         query: [...ADMIN_PAGE_QUERY],
       },
       {
@@ -399,6 +619,18 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
         permissions: ['support.read'],
         statusCode: 200,
         response: 'object',
+        responseSchema: 'StaffDriverDetail',
+      },
+      {
+        method: 'post',
+        path: '/{id}/documents/{type}/read-url',
+        summary: "A 5-minute URL to view one of the driver's documents; every read is recorded (staff with onboarding.review)",
+        permissions: ['onboarding.review'],
+        statusCode: 200,
+        response: 'object',
+        responseSchema: 'DriverDocumentReadUrl',
+        readOnly: true,
+        pathParameters: { type: { type: 'string', enum: ['national-id-front', 'national-id-back', 'driving-licence', 'vehicle-licence', 'selfie'] } },
       },
       {
         method: 'post',
@@ -407,6 +639,7 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
         permissions: ['onboarding.review'],
         statusCode: 200,
         response: 'object',
+        responseSchema: 'StaffDriverApplication',
         auditAction: 'driver.approve',
         requestBody: {
           type: 'object',
@@ -426,6 +659,7 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
         permissions: ['ops.act'],
         statusCode: 200,
         response: 'object',
+        responseSchema: 'DriverActionResult',
         auditAction: 'driver.suspend',
         requestBody: {
           type: 'object',
@@ -442,6 +676,7 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
         permissions: ['ops.act'],
         statusCode: 200,
         response: 'object',
+        responseSchema: 'DriverActionResult',
         auditAction: 'driver.reactivate',
         requestBody: {
           type: 'object',
@@ -458,6 +693,7 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
         permissions: ['onboarding.review'],
         statusCode: 200,
         response: 'object',
+        responseSchema: 'DriverReviewUndoResult',
         auditAction: 'driver.review_undo',
         requestBody: {
           type: 'object',
@@ -478,6 +714,7 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
         permissions: ['support.read'],
         statusCode: 200,
         response: 'paginated',
+        responseSchema: 'StaffRestaurantRow',
         query: [
           ...ADMIN_PAGE_QUERY,
           { name: 'approvalStatus', description: 'Application status.', schema: { type: 'string', enum: ['DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED'] } },
@@ -495,6 +732,7 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
         permissions: ['onboarding.review'],
         statusCode: 200,
         response: 'paginated',
+        responseSchema: 'StaffRestaurantRow',
         query: [...ADMIN_PAGE_QUERY],
       },
       {
@@ -504,6 +742,7 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
         permissions: ['support.read'],
         statusCode: 200,
         response: 'object',
+        responseSchema: 'StaffRestaurantSearchResult',
         readOnly: true,
         requestBody: { type: 'object', required: ['phone'], properties: { phone: { type: 'string', example: '01012345678' } } },
       },
@@ -514,6 +753,7 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
         permissions: ['support.read'],
         statusCode: 200,
         response: 'object',
+        responseSchema: 'StaffRestaurantDetail',
       },
       {
         method: 'post',
@@ -522,6 +762,7 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
         permissions: ['onboarding.review'],
         statusCode: 200,
         response: 'object',
+        responseSchema: 'StaffRestaurantApplication',
         auditAction: 'restaurant.approve',
         requestBody: {
           type: 'object',
@@ -541,6 +782,7 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
         permissions: ['ops.act'],
         statusCode: 200,
         response: 'object',
+        responseSchema: 'RestaurantActionResult',
         auditAction: 'restaurant.suspend',
         requestBody: {
           type: 'object',
@@ -557,6 +799,7 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
         permissions: ['ops.act'],
         statusCode: 200,
         response: 'object',
+        responseSchema: 'RestaurantActionResult',
         auditAction: 'restaurant.reactivate',
         requestBody: {
           type: 'object',
@@ -573,6 +816,7 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
         permissions: ['support.read'],
         statusCode: 200,
         response: 'object',
+        responseSchema: 'RevealedField',
         auditAction: 'pii.reveal',
         requestBody: {
           type: 'object',
@@ -589,6 +833,7 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
         permissions: ['onboarding.review'],
         statusCode: 200,
         response: 'object',
+        responseSchema: 'RestaurantReviewUndoResult',
         auditAction: 'restaurant.review_undo',
         requestBody: {
           type: 'object',
@@ -2300,6 +2545,7 @@ export function generateAdminOpenApiDocument() {
             message: { type: 'string' },
           },
         },
+        ...(ADMIN_RESPONSE_SCHEMAS as Record<string, unknown>),
       },
     },
   };
@@ -2313,7 +2559,7 @@ export function generateAdminOpenApiDocument() {
         name,
         in: 'path',
         required: true,
-        schema: { type: 'string', format: 'uuid' },
+        schema: route.pathParameters?.[name] ?? { type: 'string', format: 'uuid' },
       }));
       const queryParameters = (route.query ?? []).map(({ name, description, schema }) => ({
         name,
@@ -2322,20 +2568,21 @@ export function generateAdminOpenApiDocument() {
         description,
         schema,
       }));
+      const bodySchema = route.responseSchema ? { $ref: `#/components/schemas/${route.responseSchema}` } : { type: 'object' };
       const okSchema =
         route.response === 'paginated'
           ? {
               type: 'object',
               required: ['items', 'page', 'limit', 'total', 'totalPages'],
               properties: {
-                items: { type: 'array', items: { type: 'object' } },
+                items: { type: 'array', items: bodySchema },
                 page: { type: 'integer' },
                 limit: { type: 'integer' },
                 total: { type: 'integer' },
                 totalPages: { type: 'integer' },
               },
             }
-          : { type: 'object' };
+          : bodySchema;
 
       const operation: Record<string, any> = {
         summary: route.summary,

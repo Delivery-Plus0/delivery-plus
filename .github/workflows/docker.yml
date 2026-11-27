@@ -58,6 +58,7 @@ jobs:
           - driver-service
           - tracking-service
           - notification-service
+          - audit-service
     steps:
       - uses: actions/checkout@v4
 

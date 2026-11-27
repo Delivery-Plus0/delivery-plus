@@ -1,8 +1,9 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { CorrelationIdMiddleware, RedisModule } from '@food-delivery/shared';
+import { CorrelationIdMiddleware, KafkaModule, RedisModule } from '@food-delivery/shared';
 import { DriversModule } from './modules/drivers/drivers.module';
 import { HealthController } from './controllers/health.controller';
+import { OutboxModule } from './common/outbox.module';
 import { ConfigModule } from './config/config.module';
 import { loadConfig } from './config/app-config';
 import { Driver } from './entities/driver.entity';
@@ -20,6 +21,13 @@ const config = loadConfig();
     // #207: rate limits on document uploads and staff document reads.
     RedisModule.register({ url: config.redisUrl }),
     DriversModule,
+    // #213: publishes this service's outbox (staff audit events); it consumes nothing.
+    KafkaModule.register({
+      clientId: 'driver-service',
+      brokers: [process.env.KAFKA_BROKER || 'localhost:9092'],
+      producerOnly: true,
+    }),
+    OutboxModule,
   ],
   controllers: [HealthController],
 })

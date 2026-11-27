@@ -52,6 +52,7 @@ Typical consumers include:
 
 - order-service for state updates
 - notification-service for user notifications
+- audit-service for the staff audit log: `admin.actions`, staged through the outbox of the service that made the change (`AdminAudit.record`, #213)
 
 Delivery semantics (payment-service):
 

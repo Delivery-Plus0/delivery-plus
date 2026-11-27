@@ -1,8 +1,9 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { CorrelationIdMiddleware } from '@food-delivery/shared';
+import { CorrelationIdMiddleware, KafkaModule } from '@food-delivery/shared';
 import { UsersModule } from './modules/users/users.module';
 import { HealthController } from './controllers/health.controller';
+import { OutboxModule } from './common/outbox.module';
 import { ConfigModule } from './config/config.module';
 import { loadConfig } from './config/app-config';
 import { UserProfile } from './entities/user-profile.entity';
@@ -18,6 +19,13 @@ const config = loadConfig();
     RedisModule.register({ url: config.redisUrl }),
     TypeOrmModule.forRoot(buildTypeOrmConfig(config.databaseUrl, [UserProfile, PhoneVerification])),
     UsersModule,
+    // #213: publishes this service's outbox (staff audit events); it consumes nothing.
+    KafkaModule.register({
+      clientId: 'user-service',
+      brokers: [process.env.KAFKA_BROKER || 'localhost:9092'],
+      producerOnly: true,
+    }),
+    OutboxModule,
   ],
   controllers: [HealthController],
 })

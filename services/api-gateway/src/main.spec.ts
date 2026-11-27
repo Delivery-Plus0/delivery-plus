@@ -174,7 +174,7 @@ describe('gateway internal route exposure', () => {
     expect(rewriteProxyPath('/api/admin/orders', '/')).toBe('/admin/orders/');
     expect(rewriteProxyPath('/api/admin/orders', '/?page=2&limit=50')).toBe('/admin/orders/?page=2&limit=50');
     expect(rewriteProxyPath('/api/admin/orders', '/abc')).toBe('/admin/orders/abc');
-    expect(Object.keys(PROXIES).filter((p) => p.startsWith('/api/admin/')).length).toBe(11);
+    expect(Object.keys(PROXIES).filter((p) => p.startsWith('/api/admin/')).length).toBe(12);
   });
 
   it('preserves menu-service root routes and swagger-json rewrite behavior', () => {
@@ -298,6 +298,16 @@ describe('admin OpenAPI contract (#212)', () => {
       },
     };
     expect(() => validateAdminOpenApiDocument(withMutation)).toThrow('must require a reason');
+
+    const unaudited = JSON.parse(JSON.stringify(withMutation));
+    unaudited.paths['/api/admin/orders/{id}/cancel'].post.requestBody.content['application/json'].schema = {
+      type: 'object',
+      required: ['reason'],
+      properties: { reason: { type: 'string' } },
+    };
+    expect(() => validateAdminOpenApiDocument(unaudited)).toThrow('name the audit action');
+    unaudited.paths['/api/admin/orders/{id}/cancel'].post['x-audit-action'] = 'order.cancel';
+    expect(() => validateAdminOpenApiDocument(unaudited)).not.toThrow();
   });
 
   it('keeps admin paths out of the public contract', () => {

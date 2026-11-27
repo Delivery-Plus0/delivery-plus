@@ -14,6 +14,10 @@
     {
       "name": "orders",
       "description": "orders admin endpoints"
+    },
+    {
+      "name": "audit",
+      "description": "audit admin endpoints"
     }
   ],
   "paths": {
@@ -123,6 +127,173 @@
                 "createdAt:desc"
               ],
               "default": "createdAt:desc"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A PaginatedResult<T>",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items",
+                    "page",
+                    "limit",
+                    "total",
+                    "totalPages"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "limit": {
+                      "type": "integer"
+                    },
+                    "total": {
+                      "type": "integer"
+                    },
+                    "totalPages": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters or body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT, or a SYSTEM token on an admin route"
+          },
+          "403": {
+            "description": "Staff token without the required permission"
+          }
+        }
+      }
+    },
+    "/api/admin/audit": {
+      "get": {
+        "summary": "List staff actions, newest first (staff with audit.read)",
+        "description": "Requires staff permission: audit.read.",
+        "tags": [
+          "audit"
+        ],
+        "operationId": "admin_audit_get_api_admin_audit",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-permissions": [
+          "audit.read"
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "description": "Page number, starting at 1.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size, at most 100.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "actorId",
+            "in": "query",
+            "required": false,
+            "description": "The staff member who acted.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "targetType",
+            "in": "query",
+            "required": false,
+            "description": "What was acted on.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "USER",
+                "DRIVER",
+                "RESTAURANT",
+                "ORDER",
+                "DELIVERY",
+                "PAYMENT",
+                "MENU_ITEM",
+                "STAFF"
+              ]
+            }
+          },
+          {
+            "name": "targetId",
+            "in": "query",
+            "required": false,
+            "description": "The id of what was acted on.",
+            "schema": {
+              "type": "string",
+              "maxLength": 100
+            }
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "required": false,
+            "description": "A dotted action, e.g. driver.approve.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z_]+(\\.[a-z_]+)+$"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "description": "Inclusive, ISO 8601.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "description": "Exclusive, ISO 8601.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
             }
           }
         ],

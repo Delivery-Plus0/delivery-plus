@@ -63,7 +63,7 @@ COPY --from=builder /app/services/${SERVICE_NAME}/dist ./services/${SERVICE_NAME
 # Services like cart-service, tracking-service, and api-gateway do not own
 # database schemas and must not execute the local TypeORM CLI path.
 CMD ["sh", "-c", "case \"${SERVICE_NAME}\" in \
-  auth-service|user-service|restaurant-service|menu-service|order-service|payment-service|delivery-service|driver-service|notification-service) \
+  auth-service|user-service|restaurant-service|menu-service|order-service|payment-service|delivery-service|driver-service|notification-service|audit-service) \
     node ./node_modules/typeorm/cli.js migration:run -d ./services/${SERVICE_NAME}/dist/database/data-source.js ;; \
   *) \
     echo \"Skipping TypeORM migrations for ${SERVICE_NAME}\" ;; \

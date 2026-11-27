@@ -55,7 +55,7 @@ driver-service also needs `NATIONAL_ID_HMAC_SECRET`: the key of the HMAC that de
 
 Behind a load balancer or reverse proxy, set `TRUSTED_PROXY_HOPS` on the gateway to the number of proxies in front of it, for example `1` for one load balancer that appends to `X-Forwarded-For` (#251). Left at `0`, every client shares the balancer's address, so the per-client login and registration limits become one limit for everyone. Set too high, a client can choose the address it is counted as. See [services/api-gateway.md](services/api-gateway.md#client-ip-and-rate-limits).
 
-PostgreSQL creates these logical databases: `auth_service`, `user_service`, `restaurant_service`, `menu_service`, `order_service`, `payment_service`, `driver_service`, `delivery_service`, and `notification_service`. Compose passes each service its own database URL via `DATABASE_URL`.
+PostgreSQL creates these logical databases: `auth_service`, `user_service`, `restaurant_service`, `menu_service`, `order_service`, `payment_service`, `driver_service`, `delivery_service`, `notification_service`, and `audit_service` (#213; on an existing volume, create it by hand, see [audit-service](./services/audit-service.md#existing-environments)). Compose passes each service its own database URL via `DATABASE_URL`.
 
 The repository provides Compose validation commands, but this document does not claim that the full stack has been started successfully in every environment. Validate the local runtime with `docker compose config --quiet`, `docker compose ps`, and targeted service logs.
 

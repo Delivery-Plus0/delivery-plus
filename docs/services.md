@@ -16,6 +16,7 @@ This folder contains per-service documentation for the platform. Each page is in
 - [Driver Service](./services/driver-service.md)
 - [Tracking Service](./services/tracking-service.md)
 - [Notification Service](./services/notification-service.md)
+- [Audit Service](./services/audit-service.md)
 
 ## Related documentation
 

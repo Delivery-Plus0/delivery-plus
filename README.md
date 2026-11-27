@@ -208,6 +208,7 @@ Every service is self-contained and shares a common foundation through the inter
 | `delivery-service` | Automatic dispatch, delivery lifecycle, driver earnings ledger, ratings |
 | `tracking-service` | Live location tracking (Redis-backed, server-sent events) |
 | `notification-service` | In-app notifications for every order stage |
+| `audit-service` | Append-only log of every staff action (staff routes only) |
 
 Every service, including the API Gateway, exposes a `/health` route used by Compose healthchecks. These are liveness checks; they do not prove that Kafka, Redis, or downstream services are reachable. Services generally follow `controllers → services → repositories/entities`, with variations by service.
 

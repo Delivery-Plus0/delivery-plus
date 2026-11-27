@@ -339,7 +339,7 @@
                     "items": {
                       "type": "array",
                       "items": {
-                        "type": "object"
+                        "$ref": "#/components/schemas/StaffUserView"
                       }
                     },
                     "page": {
@@ -401,7 +401,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/StaffUserSearchResult"
                 }
               }
             }
@@ -480,7 +480,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/StaffUserDetail"
                 }
               }
             }
@@ -537,7 +537,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RevealedField"
                 }
               }
             }
@@ -2144,7 +2144,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/AccountActionResult"
                 }
               }
             }
@@ -2223,7 +2223,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/AccountActionResult"
                 }
               }
             }
@@ -2302,7 +2302,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/AccountActionResult"
                 }
               }
             }
@@ -2367,11 +2367,14 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": "The resource",
+            "description": "A list",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/StaffMember"
+                  }
                 }
               }
             }
@@ -2418,7 +2421,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/StaffRoleTemplates"
                 }
               }
             }
@@ -2465,7 +2468,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/StaffInvitation"
                 }
               }
             }
@@ -2569,7 +2572,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/StaffMember"
                 }
               }
             }
@@ -2668,7 +2671,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/StaffMember"
                 }
               }
             }
@@ -2747,7 +2750,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/StaffMember"
                 }
               }
             }
@@ -2921,7 +2924,7 @@
                     "items": {
                       "type": "array",
                       "items": {
-                        "type": "object"
+                        "$ref": "#/components/schemas/AuditEvent"
                       }
                     },
                     "page": {
@@ -3894,6 +3897,574 @@
           "changed": {
             "type": "boolean",
             "description": "False when the restaurant was already in that state."
+          }
+        },
+        "additionalProperties": false
+      },
+      "StaffUserView": {
+        "type": "object",
+        "description": "One person in the staff directory (#214): profile and account, personal data masked.",
+        "required": [
+          "id",
+          "fullName",
+          "email",
+          "phone",
+          "phoneVerified",
+          "avatarUrl",
+          "role",
+          "status",
+          "emailVerified",
+          "suspendedAt",
+          "suspendedReason",
+          "lastLoginAt",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "fullName": {
+            "type": "string",
+            "nullable": true
+          },
+          "email": {
+            "type": "string",
+            "description": "Masked (#317), or empty when the account has none; reveal it with POST /api/admin/users/{id}/reveal."
+          },
+          "phone": {
+            "type": "string",
+            "nullable": true,
+            "description": "Masked (#317)."
+          },
+          "phoneVerified": {
+            "type": "boolean"
+          },
+          "avatarUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "CUSTOMER",
+              "RESTAURANT_OWNER",
+              "DRIVER",
+              "ADMIN",
+              "SYSTEM",
+              null
+            ],
+            "nullable": true,
+            "description": "Null when auth-service doesn't answer."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "SUSPENDED",
+              null
+            ],
+            "nullable": true
+          },
+          "emailVerified": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "suspendedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "suspendedReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "lastLoginAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "StaffUserSearchResult": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StaffUserView"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "StaffUserDetail": {
+        "type": "object",
+        "description": "The staff person page (#214, #317).",
+        "required": [
+          "id",
+          "fullName",
+          "email",
+          "phone",
+          "phoneVerified",
+          "avatarUrl",
+          "role",
+          "status",
+          "emailVerified",
+          "suspendedAt",
+          "suspendedReason",
+          "lastLoginAt",
+          "createdAt",
+          "hasAddress",
+          "auditTrail",
+          "linked"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "fullName": {
+            "type": "string",
+            "nullable": true
+          },
+          "email": {
+            "type": "string",
+            "description": "Masked (#317), or empty when the account has none; reveal it with POST /api/admin/users/{id}/reveal."
+          },
+          "phone": {
+            "type": "string",
+            "nullable": true,
+            "description": "Masked (#317)."
+          },
+          "phoneVerified": {
+            "type": "boolean"
+          },
+          "avatarUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "CUSTOMER",
+              "RESTAURANT_OWNER",
+              "DRIVER",
+              "ADMIN",
+              "SYSTEM",
+              null
+            ],
+            "nullable": true,
+            "description": "Null when auth-service doesn't answer."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "SUSPENDED",
+              null
+            ],
+            "nullable": true
+          },
+          "emailVerified": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "suspendedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "suspendedReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "lastLoginAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "hasAddress": {
+            "type": "boolean",
+            "description": "Whether there is an address to reveal; never the address itself."
+          },
+          "auditTrail": {
+            "type": "object",
+            "description": "Query GET /api/admin/audit with these.",
+            "required": [
+              "targetType",
+              "targetId"
+            ],
+            "properties": {
+              "targetType": {
+                "type": "string",
+                "enum": [
+                  "USER"
+                ]
+              },
+              "targetId": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "additionalProperties": false
+          },
+          "linked": {
+            "type": "object",
+            "required": [
+              "driverId",
+              "restaurantIds"
+            ],
+            "properties": {
+              "driverId": {
+                "type": "string",
+                "nullable": true,
+                "description": "The driver record of a DRIVER account, null when there is none, or 'unavailable'."
+              },
+              "restaurantIds": {
+                "description": "The restaurants of a RESTAURANT_OWNER account, or 'unavailable'.",
+                "oneOf": [
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "unavailable"
+                    ]
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "AccountActionResult": {
+        "type": "object",
+        "description": "The result of suspend, reactivate or sign out everywhere (#215).",
+        "required": [
+          "userId",
+          "status",
+          "sessionsRevoked",
+          "changed"
+        ],
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "SUSPENDED"
+            ]
+          },
+          "sessionsRevoked": {
+            "type": "integer"
+          },
+          "changed": {
+            "type": "boolean",
+            "description": "False when the account was already in that state."
+          }
+        },
+        "additionalProperties": false
+      },
+      "StaffMember": {
+        "type": "object",
+        "description": "One staff member (#216): never hashes, tokens or lockout counters.",
+        "required": [
+          "id",
+          "email",
+          "status",
+          "permissions",
+          "lastLoginAt",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "email": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "SUSPENDED"
+            ],
+            "description": "SUSPENDED is a disabled staff member."
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "support.read",
+                "support.act",
+                "ops.read",
+                "ops.act",
+                "finance.read",
+                "finance.act",
+                "onboarding.review",
+                "users.manage",
+                "staff.manage",
+                "audit.read"
+              ]
+            }
+          },
+          "lastLoginAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "StaffRoleTemplates": {
+        "type": "object",
+        "description": "Permission sets the staff page offers when inviting (#216). A staff member holds permissions, never a role.",
+        "required": [
+          "support",
+          "operations",
+          "finance",
+          "onboarding",
+          "superAdmin"
+        ],
+        "properties": {
+          "support": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "support.read",
+                "support.act",
+                "ops.read",
+                "ops.act",
+                "finance.read",
+                "finance.act",
+                "onboarding.review",
+                "users.manage",
+                "staff.manage",
+                "audit.read"
+              ]
+            }
+          },
+          "operations": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "support.read",
+                "support.act",
+                "ops.read",
+                "ops.act",
+                "finance.read",
+                "finance.act",
+                "onboarding.review",
+                "users.manage",
+                "staff.manage",
+                "audit.read"
+              ]
+            }
+          },
+          "finance": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "support.read",
+                "support.act",
+                "ops.read",
+                "ops.act",
+                "finance.read",
+                "finance.act",
+                "onboarding.review",
+                "users.manage",
+                "staff.manage",
+                "audit.read"
+              ]
+            }
+          },
+          "onboarding": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "support.read",
+                "support.act",
+                "ops.read",
+                "ops.act",
+                "finance.read",
+                "finance.act",
+                "onboarding.review",
+                "users.manage",
+                "staff.manage",
+                "audit.read"
+              ]
+            }
+          },
+          "superAdmin": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "support.read",
+                "support.act",
+                "ops.read",
+                "ops.act",
+                "finance.read",
+                "finance.act",
+                "onboarding.review",
+                "users.manage",
+                "staff.manage",
+                "audit.read"
+              ]
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "StaffInvitation": {
+        "type": "object",
+        "description": "An invitation sent by email (#216); the token is only in the email.",
+        "required": [
+          "id",
+          "email",
+          "permissions",
+          "expiresAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "email": {
+            "type": "string"
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "support.read",
+                "support.act",
+                "ops.read",
+                "ops.act",
+                "finance.read",
+                "finance.act",
+                "onboarding.review",
+                "users.manage",
+                "staff.manage",
+                "audit.read"
+              ]
+            }
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AuditEvent": {
+        "type": "object",
+        "description": "One staff action in the append-only audit log (#213).",
+        "required": [
+          "id",
+          "actorId",
+          "actorEmail",
+          "permission",
+          "action",
+          "targetType",
+          "targetId",
+          "reason",
+          "before",
+          "after",
+          "service",
+          "correlationId",
+          "occurredAt",
+          "recordedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "actorId": {
+            "type": "string"
+          },
+          "actorEmail": {
+            "type": "string",
+            "nullable": true
+          },
+          "permission": {
+            "type": "string",
+            "description": "The permission the action was allowed by."
+          },
+          "action": {
+            "type": "string",
+            "example": "driver.approve"
+          },
+          "targetType": {
+            "type": "string",
+            "example": "DRIVER"
+          },
+          "targetId": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "before": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": true,
+            "description": "Changed fields before, personal data redacted."
+          },
+          "after": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": true,
+            "description": "Changed fields after, personal data redacted."
+          },
+          "service": {
+            "type": "string"
+          },
+          "correlationId": {
+            "type": "string"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "date-time"
           }
         },
         "additionalProperties": false

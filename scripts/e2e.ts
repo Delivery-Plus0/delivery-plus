@@ -468,7 +468,11 @@ async function assertStaffInvitation() {
   const admin = bearer((await axios.post(`${API_URL}/api/auth/login`, { email: ADMIN_EMAIL, password: ADMIN_PASSWORD })).data.accessToken);
   const email = `e2e.staff.${Date.now()}@example.com`;
 
-  const invitation = (await axios.post(`${API_URL}/api/admin/auth/staff/invitations`, { email, permissions: ['support.read', 'ops.read'], reason: 'E2E: new support agent' }, admin)).data;
+  const invitation = matchesAdminContract(
+    'StaffInvitation',
+    (await axios.post(`${API_URL}/api/admin/auth/staff/invitations`, { email, permissions: ['support.read', 'ops.read'], reason: 'E2E: new support agent' }, admin)).data,
+    'The invitation',
+  );
   const redis = new Redis(REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 2 });
   await redis.connect();
   const mail = JSON.parse((await redis.get(`test:email:${email}`).finally(() => redis.disconnect())) ?? '{}') as { text?: string };
@@ -484,9 +488,13 @@ async function assertStaffInvitation() {
   const claims = claimsOf(login.accessToken);
   const forbidden = await outcomeOf(axios.get(`${API_URL}/api/admin/audit`, bearer(login.accessToken)));
 
-  await axios.patch(`${API_URL}/api/admin/auth/staff/${claims.sub}/permissions`, { permissions: ['support.read', 'audit.read'], reason: 'E2E: needs the audit log' }, admin);
+  matchesAdminContract(
+    'StaffMember',
+    (await axios.patch(`${API_URL}/api/admin/auth/staff/${claims.sub}/permissions`, { permissions: ['support.read', 'audit.read'], reason: 'E2E: needs the audit log' }, admin)).data,
+    'The permission change',
+  );
   const refreshed = (await axios.post(`${API_URL}/api/auth/refresh`, { refreshToken: login.refreshToken })).data;
-  await axios.post(`${API_URL}/api/admin/auth/staff/${claims.sub}/disable`, { reason: 'E2E: done' }, admin);
+  matchesAdminContract('StaffMember', (await axios.post(`${API_URL}/api/admin/auth/staff/${claims.sub}/disable`, { reason: 'E2E: done' }, admin)).data, 'The disable');
   const afterDisable = await outcomeOf(axios.post(`${API_URL}/api/auth/login`, { email, password }));
 
   const got = {
@@ -540,6 +548,65 @@ async function assertEmailVerification() {
   const want = { resendTooSoon: 429, wrongCode: 401, verified: 200, reused: 401, login: 200 };
   if (JSON.stringify(got) !== JSON.stringify(want)) throw new Error(`Email verification: got ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`);
   console.log('Email verification: the code arrives by the test sender; resend within a minute 429; a wrong code 401, the right one verifies once, login 200');
+}
+
+/**
+ * #323: the people directory, account actions, staff list and audit log against docs/openapi/admin.json, for a
+ * fresh customer: found by exact email (masked in the answer), revealed (audited), suspended, reactivated and
+ * signed out everywhere, and every one of those actions is in the audit log.
+ */
+async function assertStaffPeopleAndAudit() {
+  await clearRateLimits();
+  const admin = { headers: { Authorization: `Bearer ${(await axios.post(`${API_URL}/api/auth/login`, { email: ADMIN_EMAIL, password: ADMIN_PASSWORD })).data.accessToken}` } };
+  const email = `e2e.person.${Date.now()}@example.com`;
+  const person = (await axios.post(`${API_URL}/api/auth/register`, { email, password: 'password123', fullName: 'E2E Person', role: 'CUSTOMER' })).data as { userId: string };
+  const id = person.userId;
+
+  matchesAdminPage('StaffUserView', (await axios.get(`${API_URL}/api/admin/users`, { ...admin, params: { limit: 20 } })).data, 'The people directory');
+  // The profile reaches user-service by event, a moment after the registration.
+  const found = {
+    items: await waitFor(
+      'the new person in the email search',
+      async () => matchesAdminContract('StaffUserSearchResult', (await axios.post(`${API_URL}/api/admin/users/search`, { email }, admin)).data, 'The email search').items,
+      (items: { id: string }[]) => items.length > 0,
+    ),
+  } as { items: { id: string; email: string }[] };
+  const page = matchesAdminContract('StaffUserDetail', (await axios.get(`${API_URL}/api/admin/users/${id}`, admin)).data, 'The person page');
+  const revealed = matchesAdminContract('RevealedField', (await axios.post(`${API_URL}/api/admin/users/${id}/reveal`, { field: 'email', reason: 'E2E: support call' }, admin)).data, 'The reveal');
+  const action = (name: string, reason: string) =>
+    axios.post(`${API_URL}/api/admin/auth/users/${id}/${name}`, { reason }, admin).then((response) => matchesAdminContract('AccountActionResult', response.data, `The ${name}`));
+  const suspended = await action('suspend', 'E2E: suspension check');
+  const reactivated = await action('reactivate', 'E2E: done');
+  // The suspension ended every session; sign in again so there is one to end.
+  await axios.post(`${API_URL}/api/auth/login`, { email, password: 'password123' });
+  const signedOut = await action('revoke-sessions', 'E2E: sign out everywhere');
+  const staff = (await axios.get(`${API_URL}/api/admin/auth/staff`, admin)).data as unknown[];
+  staff.forEach((member, index) => matchesAdminContract('StaffMember', member, `Staff member ${index}`));
+  matchesAdminContract('StaffRoleTemplates', (await axios.get(`${API_URL}/api/admin/auth/staff/role-templates`, admin)).data, 'The role templates');
+  const trail = await waitFor(
+    "the person's audit trail",
+    async () => matchesAdminPage('AuditEvent', (await axios.get(`${API_URL}/api/admin/audit`, { ...admin, params: page.auditTrail })).data, 'The audit log').items,
+    (items: { action: string }[]) => items.length >= 4,
+  );
+
+  const got = {
+    found: `${found.items.length} ${found.items[0]?.id === id} ${found.items[0]?.email.includes('•')}`,
+    page: `${page.role} ${page.hasAddress} ${page.email === found.items[0]?.email}`,
+    revealed: revealed.value === email,
+    actions: `${suspended.status} ${reactivated.status} ${signedOut.changed}`,
+    staff: staff.length > 0,
+    trail: trail.map((item: { action: string }) => item.action).sort().join(','),
+  };
+  const want = {
+    found: '1 true true',
+    page: 'CUSTOMER false true',
+    revealed: true,
+    actions: 'SUSPENDED ACTIVE true',
+    staff: true,
+    trail: 'pii.reveal,user.reactivate,user.revoke_sessions,user.suspend',
+  };
+  if (JSON.stringify(got) !== JSON.stringify(want)) throw new Error(`Staff people pages: got ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`);
+  console.log('Staff people pages: directory, exact search (masked), page, reveal, suspend, reactivate, sign out everywhere, staff list and audit trail match the admin contract');
 }
 
 /**
@@ -782,6 +849,7 @@ async function runE2E() {
     await assertEmailVerification();
     await assertRestaurantApplication(customerAuth);
     await assertStaffDriverPages(driverAuth);
+    await assertStaffPeopleAndAudit();
 
     // 1. Get Restaurants
     const restaurantsRes = await axios.get(`${API_URL}/api/restaurants`, customerAuth);

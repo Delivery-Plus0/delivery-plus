@@ -317,14 +317,14 @@ describe('admin OpenAPI contract (#212)', () => {
     expect(doc.paths['/api/admin/users/search'].post.requestBody.content['application/json'].schema.required).toBeUndefined();
   });
 
-  it('types every drivers and restaurants admin response, and every schema compiles (#323)', () => {
+  it('types every admin response but the orders list (Production 4), and every schema compiles (#323)', () => {
     const doc = generateAdminOpenApiDocument() as { paths: Record<string, Record<string, any>>; components: { schemas: Record<string, unknown> } };
     const untyped: string[] = [];
     for (const [path, operations] of Object.entries(doc.paths as Record<string, Record<string, any>>)) {
-      if (!/^\/api\/admin\/(drivers|restaurants)(\/|$)/.test(path)) continue;
+      if (path.startsWith('/api/admin/orders')) continue;
       for (const [method, operation] of Object.entries(operations)) {
         const schema = Object.values(operation.responses as Record<string, any>).find((r) => r.content)?.content['application/json'].schema;
-        const ref = schema?.$ref ?? schema?.properties?.items?.items?.$ref;
+        const ref = schema?.$ref ?? schema?.properties?.items?.items?.$ref ?? schema?.items?.$ref;
         if (!ref || !doc.components.schemas[ref.split('/').pop()]) untyped.push(`${method.toUpperCase()} ${path}`);
       }
     }
@@ -332,7 +332,7 @@ describe('admin OpenAPI contract (#212)', () => {
 
     // Strict Ajv: unknown keywords, nullable without a type or a broken $ref fail here, not in the E2E.
     const ajv = new Ajv({ strict: true, validateFormats: false });
-    ajv.addVocabulary(['components']);
+    ajv.addVocabulary(['components', 'example']);
     ajv.addSchema({ components: doc.components }, 'admin');
     for (const name of Object.keys(doc.components.schemas)) {
       expect(() => ajv.getSchema(`admin#/components/schemas/${name}`)).not.toThrow();

@@ -29,6 +29,13 @@ export const SERVICE_DEFINITIONS = [
       { method: 'post', path: '/password/forgot', summary: 'Request a password reset code by SMS', auth: false, statusCode: 202 },
       { method: 'post', path: '/password/reset', summary: 'Reset the password using the SMS code; ends every session', auth: false, statusCode: 204 },
       { method: 'get', path: '/me', summary: 'Get the current authenticated user', auth: true, statusCode: 200 },
+      {
+        method: 'post',
+        path: '/staff/accept-invitation',
+        summary: 'Accept a staff invitation: set a password (12+ characters), name and phone (#216)',
+        auth: false,
+        statusCode: 201,
+      },
     ],
   },
   {
@@ -235,6 +242,20 @@ export type AdminRouteDefinition = {
 };
 
 /** Page pagination shared by every admin list route (ADR 002: limit capped at 100). */
+/** The staff permissions (shared STAFF_PERMISSIONS), for the admin contract's enums. */
+export const STAFF_PERMISSION_NAMES = [
+  'support.read',
+  'support.act',
+  'ops.read',
+  'ops.act',
+  'finance.read',
+  'finance.act',
+  'onboarding.review',
+  'users.manage',
+  'staff.manage',
+  'audit.read',
+] as const;
+
 export const ADMIN_PAGE_QUERY: readonly AdminQueryParameter[] = [
   { name: 'page', description: 'Page number, starting at 1.', schema: { type: 'integer', minimum: 1, default: 1 } },
   { name: 'limit', description: 'Page size, at most 100.', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
@@ -567,6 +588,66 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
             reason: { type: 'string', minLength: 3, maxLength: 500, description: 'Why, for the audit log. Never shown to the person.' },
           },
         },
+      },
+      {
+        method: 'get',
+        path: '/staff',
+        summary: 'List staff with their permissions and status (staff with staff.manage)',
+        permissions: ['staff.manage'],
+        statusCode: 200,
+        response: 'object',
+      },
+      {
+        method: 'get',
+        path: '/staff/role-templates',
+        summary: 'The permission sets offered as roles (staff with staff.manage)',
+        permissions: ['staff.manage'],
+        statusCode: 200,
+        response: 'object',
+      },
+      {
+        method: 'post',
+        path: '/staff/invitations',
+        summary: 'Invite someone by email with a set of permissions; the link works once, 48 h (staff with staff.manage)',
+        permissions: ['staff.manage'],
+        statusCode: 201,
+        response: 'object',
+        auditAction: 'staff.invite',
+        requestBody: {
+          type: 'object',
+          required: ['email', 'permissions', 'reason'],
+          properties: { email: { type: 'string', format: 'email' }, permissions: { type: 'array', minItems: 1, items: { type: 'string', enum: [...STAFF_PERMISSION_NAMES] } }, reason: { type: 'string', minLength: 3, maxLength: 300, description: 'Why, for the audit log.' } },
+        },
+      },
+      {
+        method: 'patch',
+        path: '/staff/{id}/permissions',
+        summary: "Replace a staff member's permissions; applies at their next refresh (staff with staff.manage)",
+        permissions: ['staff.manage'],
+        statusCode: 200,
+        response: 'object',
+        auditAction: 'staff.permissions_change',
+        requestBody: { type: 'object', required: ['permissions', 'reason'], properties: { permissions: { type: 'array', minItems: 1, items: { type: 'string', enum: [...STAFF_PERMISSION_NAMES] } }, reason: { type: 'string', minLength: 3, maxLength: 300, description: 'Why, for the audit log.' } } },
+      },
+      {
+        method: 'post',
+        path: '/staff/{id}/disable',
+        summary: 'Disable a staff account and end its sessions (staff with staff.manage)',
+        permissions: ['staff.manage'],
+        statusCode: 200,
+        response: 'object',
+        auditAction: 'staff.disable',
+        requestBody: { type: 'object', required: ['reason'], properties: { reason: { type: 'string', minLength: 3, maxLength: 300, description: 'Why, for the audit log.' } } },
+      },
+      {
+        method: 'post',
+        path: '/staff/{id}/enable',
+        summary: 'Enable a disabled staff account (staff with staff.manage)',
+        permissions: ['staff.manage'],
+        statusCode: 200,
+        response: 'object',
+        auditAction: 'staff.enable',
+        requestBody: { type: 'object', required: ['reason'], properties: { reason: { type: 'string', minLength: 3, maxLength: 300, description: 'Why, for the audit log.' } } },
       },
     ],
   },

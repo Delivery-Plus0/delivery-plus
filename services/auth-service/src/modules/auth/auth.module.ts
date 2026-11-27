@@ -12,6 +12,10 @@ import { Redis } from 'ioredis';
 import { SessionsRepository } from '../../repositories/sessions.repository';
 import { SessionsService } from '../../services/sessions.service';
 import { SessionCleanupService } from '../../services/session-cleanup.service';
+import { AdminStaffController, StaffInvitationController } from '../../controllers/admin-staff.controller';
+import { StaffService } from '../../services/staff.service';
+import { StaffRepository } from '../../repositories/staff.repository';
+import { StaffInvitation } from '../../entities/staff-invitation.entity';
 import { AdminAccountsController } from '../../controllers/admin-accounts.controller';
 import { AdminAccountsService } from '../../services/admin-accounts.service';
 import { InternalAccountsController } from '../../controllers/internal-accounts.controller';
@@ -25,7 +29,7 @@ import { APP_CONFIG, AppConfig } from '../../config/app-config';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Credential, AuthSession, StaffPermission]),
+    TypeOrmModule.forFeature([Credential, AuthSession, StaffPermission, StaffInvitation]),
     JwtModule.registerAsync({
       useFactory: (config: AppConfig) => ({
         secret: config.jwtSecret,
@@ -34,7 +38,7 @@ import { APP_CONFIG, AppConfig } from '../../config/app-config';
       inject: [APP_CONFIG],
     }),
   ],
-  controllers: [AuthController, InternalSessionsController, InternalAccountsController, AdminAccountsController],
+  controllers: [AuthController, InternalSessionsController, InternalAccountsController, AdminAccountsController, AdminStaffController, StaffInvitationController],
   providers: [
     AuthService,
     CredentialsRepository,
@@ -42,6 +46,8 @@ import { APP_CONFIG, AppConfig } from '../../config/app-config';
     SessionsRepository,
     SessionsService,
     AdminAccountsService,
+    StaffService,
+    StaffRepository,
     SessionCleanupService,
     StaffPermissionsRepository,
     TestAdminService,

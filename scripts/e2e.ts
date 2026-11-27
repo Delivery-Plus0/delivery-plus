@@ -431,6 +431,64 @@ async function assertAccountSuspension() {
  * Verification email (#203): register → the test sender's email in Redis carries a 6-digit code →
  * a wrong code is refused → the right one verifies → login works. Resending within a minute is 429.
  */
+/**
+ * #216: invite → accept → sign in. The test email sender keeps the invitation in Redis; the new staff
+ * member's token carries exactly the invited permissions, and a permission change shows at the next refresh.
+ */
+async function assertStaffInvitation() {
+  await clearRateLimits();
+  const bearer = (token: string) => ({ headers: { Authorization: `Bearer ${token}` } });
+  const claimsOf = (token: string) => JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));
+  const admin = bearer((await axios.post(`${API_URL}/api/auth/login`, { email: ADMIN_EMAIL, password: ADMIN_PASSWORD })).data.accessToken);
+  const email = `e2e.staff.${Date.now()}@example.com`;
+
+  const invitation = (await axios.post(`${API_URL}/api/admin/auth/staff/invitations`, { email, permissions: ['support.read', 'ops.read'], reason: 'E2E: new support agent' }, admin)).data;
+  const redis = new Redis(REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 2 });
+  await redis.connect();
+  const mail = JSON.parse((await redis.get(`test:email:${email}`).finally(() => redis.disconnect())) ?? '{}') as { text?: string };
+  const token = new URL(mail.text?.match(/https?:\/\/\S+/)?.[0] ?? 'http://x').searchParams.get('token') ?? '';
+
+  const shortPassword = await outcomeOf(
+    axios.post(`${API_URL}/api/auth/staff/accept-invitation`, { token, password: 'short-pass', fullName: 'E2E Staff', phone: '01012345678' }),
+  );
+  const password = 'E2E-staff-passw0rd!';
+  await axios.post(`${API_URL}/api/auth/staff/accept-invitation`, { token, password, fullName: 'E2E Staff', phone: '01012345678' });
+  const reused = await outcomeOf(axios.post(`${API_URL}/api/auth/staff/accept-invitation`, { token, password, fullName: 'E2E Staff', phone: '01012345678' }));
+  const login = (await axios.post(`${API_URL}/api/auth/login`, { email, password, appId: 'admin' })).data;
+  const claims = claimsOf(login.accessToken);
+  const forbidden = await outcomeOf(axios.get(`${API_URL}/api/admin/audit`, bearer(login.accessToken)));
+
+  await axios.patch(`${API_URL}/api/admin/auth/staff/${claims.sub}/permissions`, { permissions: ['support.read', 'audit.read'], reason: 'E2E: needs the audit log' }, admin);
+  const refreshed = (await axios.post(`${API_URL}/api/auth/refresh`, { refreshToken: login.refreshToken })).data;
+  await axios.post(`${API_URL}/api/admin/auth/staff/${claims.sub}/disable`, { reason: 'E2E: done' }, admin);
+  const afterDisable = await outcomeOf(axios.post(`${API_URL}/api/auth/login`, { email, password }));
+
+  const got = {
+    invited: invitation.permissions.join(','),
+    shortPassword: shortPassword.status,
+    role: claims.role,
+    perms: (claims.perms ?? []).join(','),
+    forbidden: forbidden.status,
+    reused: `${reused.status} ${reused.error}`,
+    refreshedPerms: (claimsOf(refreshed.accessToken).perms ?? []).join(','),
+    afterDisable: `${afterDisable.status} ${afterDisable.error}`,
+  };
+  const want = {
+    invited: 'ops.read,support.read',
+    shortPassword: 400,
+    role: 'ADMIN',
+    perms: 'ops.read,support.read',
+    forbidden: 403,
+    reused: '410 InvitationInvalid',
+    refreshedPerms: 'audit.read,support.read',
+    afterDisable: '403 AccountSuspended',
+  };
+  if (JSON.stringify(got) !== JSON.stringify(want)) {
+    throw new Error(`Staff invitation: got ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`);
+  }
+  console.log('Staff invitation: invited by email, accepted once with a 12+ character password, signed in with exactly the invited permissions; a change applies at the next refresh; disabled');
+}
+
 async function assertEmailVerification() {
   const email = `e2e.verify.${Date.now()}@example.com`;
   await axios.post(`${API_URL}/api/auth/register`, { email, password: 'password123', fullName: 'E2E Verify' }, { headers: { 'Accept-Language': 'en' } });
@@ -655,6 +713,7 @@ async function runE2E() {
     await assertPasswordChange();
     await assertPasswordReset();
     await assertAccountSuspension();
+    await assertStaffInvitation();
     await assertEmailVerification();
     await assertRestaurantApplication(customerAuth);
 

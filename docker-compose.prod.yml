@@ -90,6 +90,7 @@ services:
       EMAIL_CODE_HASH_SECRET: ${EMAIL_CODE_HASH_SECRET:-}
       INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:?INTERNAL_AUTH_SECRET must be set}
       USER_SERVICE_URL: http://user-service:3002
+      ADMIN_APP_URL: ${ADMIN_APP_URL:-}
       KAFKA_BROKER: kafka:29092
     healthcheck:
       test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3001/health/ready']

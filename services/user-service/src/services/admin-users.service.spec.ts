@@ -35,7 +35,7 @@ const setup = () => {
     findById: jest.fn(),
   };
   const accounts = { queryAccounts: jest.fn() };
-  const linked = { driverIdFor: jest.fn() };
+  const linked = { driverIdFor: jest.fn(), restaurantIdsFor: jest.fn() };
   return { service: new AdminUsersService(profiles as never, accounts as never, linked as never), profiles, accounts, linked };
 };
 const query = (extra: Partial<AdminListUsersQueryDto> = {}) => Object.assign(new AdminListUsersQueryDto(), extra);
@@ -155,7 +155,18 @@ describe('AdminUsersService (#214)', () => {
     const { service, profiles, accounts, linked } = setup();
     profiles.findById.mockResolvedValue(profile('a'));
     accounts.queryAccounts.mockResolvedValue({ items: [account('a')], total: 1 });
-    await expect(service.detail('a')).resolves.toMatchObject({ linked: { driverId: null } });
+    await expect(service.detail('a')).resolves.toMatchObject({ linked: { driverId: null, restaurantIds: [] } });
     expect(linked.driverIdFor).not.toHaveBeenCalled();
+    expect(linked.restaurantIdsFor).not.toHaveBeenCalled();
+  });
+
+  it("links an owner to their restaurants, and says so when restaurant-service doesn't answer", async () => {
+    const { service, profiles, accounts, linked } = setup();
+    profiles.findById.mockResolvedValue(profile('o'));
+    accounts.queryAccounts.mockResolvedValue({ items: [account('o', { role: UserRole.RESTAURANT_OWNER })], total: 1 });
+    linked.restaurantIdsFor.mockResolvedValueOnce(['r1']);
+    await expect(service.detail('o')).resolves.toMatchObject({ linked: { driverId: null, restaurantIds: ['r1'] } });
+    linked.restaurantIdsFor.mockResolvedValueOnce(undefined);
+    await expect(service.detail('o')).resolves.toMatchObject({ linked: { restaurantIds: 'unavailable' } });
   });
 });

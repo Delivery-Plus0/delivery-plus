@@ -33,4 +33,23 @@ export class LinkedRecordsClient {
       return undefined;
     }
   }
+
+  /** The restaurants of an owner: ids (usually one), or undefined when unknown. */
+  async restaurantIdsFor(userId: string): Promise<string[] | undefined> {
+    try {
+      const response = await fetch(`${this.config.restaurantServiceUrl}/internal/restaurants/by-owner/${encodeURIComponent(userId)}`, {
+        headers: { Authorization: await this.systemToken.mint() },
+        signal: AbortSignal.timeout(3000),
+      });
+      if (!response.ok) {
+        this.logger.warn(`staff.linked_restaurants_failed status=${response.status}`);
+        return undefined;
+      }
+      return ((await response.json()) as { ids: string[] }).ids;
+    } catch (error) {
+      this.logger.warn(`staff.linked_restaurants_failed ${error instanceof Error ? error.name : 'error'}`);
+      return undefined;
+    }
+  }
 }
+

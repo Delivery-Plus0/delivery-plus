@@ -113,6 +113,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER_URLENCODED:?POSTGRES_USER_URLENCODED must be set}:${POSTGRES_PASSWORD_URLENCODED:?POSTGRES_PASSWORD_URLENCODED must be set}@postgres:5432/user_service
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
       SYSTEM_JWT_SECRET: ${SYSTEM_JWT_SECRET:?SYSTEM_JWT_SECRET must be set (a long random value, different from JWT_SECRET)}
+      RESTAURANT_SERVICE_URL: http://restaurant-service:3003
       DRIVER_SERVICE_URL: http://driver-service:3009
       AUTH_SERVICE_URL: http://auth-service:3001
       REDIS_URL: redis://redis:6379
@@ -159,6 +160,8 @@ services:
       DEFAULT_DELIVERY_RADIUS_KM: ${DEFAULT_DELIVERY_RADIUS_KM:-5}
       MENU_SERVICE_URL: http://menu-service:3004
       SYSTEM_JWT_SECRET: ${SYSTEM_JWT_SECRET:?SYSTEM_JWT_SECRET must be set (a long random value, different from JWT_SECRET)}
+      ORDER_SERVICE_URL: http://order-service:3006
+      USER_SERVICE_URL: http://user-service:3002
       AWS_REGION: ${AWS_REGION:-us-east-1}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}

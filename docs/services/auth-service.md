@@ -143,6 +143,27 @@ Login and register accept an optional `appId` (`customer`, `driver`, `restaurant
 - **Password policy:** same as registration (minimum 8 characters), for change and reset.
 - Raw codes, phone numbers and passwords never appear in logs. As elsewhere, access tokens already issued stay valid until they expire.
 
+## Staff accounts (#216)
+Least privilege for staff: an `ADMIN` can't self-register (#105), so staff join by invitation. Published as `/api/admin/auth/staff`, all `staff.manage`:
+
+| Route | What it does |
+| --- | --- |
+| `GET /admin/auth/staff` | Staff with their permissions and status (no hashes or tokens). |
+| `GET /admin/auth/staff/role-templates` | The role templates (Support, Operations, Finance, Onboarding, Super admin): plain permission sets the console pre-fills. Staff hold permissions, never a role name. |
+| `POST /admin/auth/staff/invitations` `{email, permissions[], reason}` | Emails a single-use link (`ADMIN_APP_URL/accept-invitation?token=…`, EmailSender #203) valid `STAFF_INVITATION_TTL_HOURS` (48). Only the token's SHA-256 is stored. A new invitation to the same email revokes the older one; an email that already has an account is refused. |
+| `PATCH /admin/auth/staff/:id/permissions` `{permissions[], reason}` | Replaces the set. |
+| `POST /admin/auth/staff/:id/disable` and `/enable` `{reason}` | Disabling ends the person's sessions. |
+
+`POST /auth/staff/accept-invitation` `{token, password, fullName, phone}` is public (the token is the proof) and rate-limited. The password needs at least 12 characters (customers: 8). It creates an `ADMIN` credential, email verified, with exactly the invited permissions, and the user-service profile, in one transaction: if user-service refuses, nothing stays and the link still works. A used, revoked or expired link answers `410 InvitationInvalid`.
+
+**Guard rails:** nobody removes their own `staff.manage` or disables their own account. The last ACTIVE holder of `staff.manage` can't lose it or be disabled (`409 LastSuperAdmin`). The checks run under an advisory lock, so two changes can't both pass them.
+
+**When a change applies:** permissions are read at every sign-in and refresh (#202), so a change applies at the next refresh. The delay is at most the access token's lifetime (`JWT_EXPIRES_IN`, 15 minutes by default). Disabling ends the refresh sessions at once.
+
+Every change is audited (#213): `staff.invite`, `staff.accept`, `staff.permissions_change`, `staff.disable`, `staff.enable`. MFA for staff follows after launch (#232). The first super admin comes from the bootstrap script (#234).
+
+Without `ADMIN_APP_URL` (no default in production) or a configured email provider, invitations answer `503 EmailUnavailable` instead of sending a wrong or no link.
+
 ## Staff actions on accounts (#215)
 auth-service owns credentials and sessions, so the staff account actions live here, published as `/api/admin/auth/users/:id/...` (ADR 002: each service owns its admin routes; the gateway's `/api/admin/users` is user-service's directory). All need `users.manage` and a `reason`, and each stages one audit event with the change in one transaction. Repeats are no-ops. Staff accounts are refused (managed with the staff tools, #216), and so is the actor's own account.
 

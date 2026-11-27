@@ -664,6 +664,37 @@
         ]
       }
     },
+    "/api/auth/staff/accept-invitation": {
+      "post": {
+        "summary": "Accept a staff invitation: set a password (12+ characters), name and phone (#216)",
+        "tags": [
+          "auth"
+        ],
+        "operationId": "auth_post_api_auth_staff_accept_invitation",
+        "responses": {
+          "201": {
+            "description": "Successful response"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": []
+      }
+    },
     "/api/users/me": {
       "get": {
         "summary": "Get the current authenticated user profile",

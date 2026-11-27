@@ -159,6 +159,7 @@ services:
       TEST_ADMIN_PASSWORD: ${TEST_ADMIN_PASSWORD:-Qa-Only-Admin-Passw0rd!}
       INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:-local-internal-auth-development-only}
       USER_SERVICE_URL: http://user-service:3002
+      ADMIN_APP_URL: ${ADMIN_APP_URL:-http://localhost:8085}
       KAFKA_BROKER: kafka:29092
     healthcheck:
       test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3001/health/ready']

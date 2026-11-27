@@ -21,6 +21,18 @@ export const STAFF_PERMISSIONS = [
 ] as const;
 export type StaffPermission = (typeof STAFF_PERMISSIONS)[number];
 
+/**
+ * #216: the role templates of the staff tools: a UI convenience, stored as plain permission sets.
+ * A staff member holds permissions, never a role name; a template only pre-fills them.
+ */
+export const STAFF_ROLE_TEMPLATES: Record<'support' | 'operations' | 'finance' | 'onboarding' | 'superAdmin', readonly StaffPermission[]> = {
+  support: ['support.read', 'support.act'],
+  operations: ['ops.read', 'ops.act', 'support.read'],
+  finance: ['finance.read', 'finance.act'],
+  onboarding: ['onboarding.review', 'support.read'],
+  superAdmin: STAFF_PERMISSIONS,
+};
+
 export const PERMISSIONS_KEY = 'permissions';
 
 /** The route needs a staff token holding every listed permission. Use with JwtAuthGuard. */

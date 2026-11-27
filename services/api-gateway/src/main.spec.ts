@@ -321,17 +321,23 @@ describe('admin OpenAPI contract (#212)', () => {
       .filter(({ route, operation }) => !route.startsWith('GET ') && operation['x-read-only'] !== true)
       .map(({ route, operation }) => `${route} -> ${operation['x-audit-action']}`)
       .sort();
-    expect(mutations).toEqual([
-      'POST /api/admin/auth/users/{id}/reactivate -> user.reactivate',
-      'POST /api/admin/auth/users/{id}/revoke-sessions -> user.revoke_sessions',
-      'POST /api/admin/auth/users/{id}/suspend -> user.suspend',
-      'POST /api/admin/drivers/{id}/reactivate -> driver.reactivate',
-      'POST /api/admin/drivers/{id}/review -> driver.approve',
-      'POST /api/admin/drivers/{id}/suspend -> driver.suspend',
-      'POST /api/admin/restaurants/{id}/reactivate -> restaurant.reactivate',
-      'POST /api/admin/restaurants/{id}/review -> restaurant.approve',
-      'POST /api/admin/restaurants/{id}/suspend -> restaurant.suspend',
-    ]);
+    expect(mutations).toEqual(
+      [
+        'PATCH /api/admin/auth/staff/{id}/permissions -> staff.permissions_change',
+        'POST /api/admin/auth/staff/invitations -> staff.invite',
+        'POST /api/admin/auth/staff/{id}/disable -> staff.disable',
+        'POST /api/admin/auth/staff/{id}/enable -> staff.enable',
+        'POST /api/admin/auth/users/{id}/reactivate -> user.reactivate',
+        'POST /api/admin/auth/users/{id}/revoke-sessions -> user.revoke_sessions',
+        'POST /api/admin/auth/users/{id}/suspend -> user.suspend',
+        'POST /api/admin/drivers/{id}/reactivate -> driver.reactivate',
+        'POST /api/admin/drivers/{id}/review -> driver.approve',
+        'POST /api/admin/drivers/{id}/suspend -> driver.suspend',
+        'POST /api/admin/restaurants/{id}/reactivate -> restaurant.reactivate',
+        'POST /api/admin/restaurants/{id}/review -> restaurant.approve',
+        'POST /api/admin/restaurants/{id}/suspend -> restaurant.suspend',
+      ].sort(),
+    );
   });
 
   it('keeps admin paths out of the public contract', () => {

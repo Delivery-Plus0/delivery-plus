@@ -184,6 +184,88 @@ export const SERVICE_DEFINITIONS = [
   },
 ] as const;
 
+/**
+ * Staff admin routes (#212). Each service owns its own `/admin/...` routes; the
+ * gateway publishes them under `/api/admin/<service>/...`. They never appear in
+ * the public spec — this is a separate contract (`docs/openapi/admin.json`).
+ */
+export const ADMIN_SERVICE_PREFIXES = [
+  '/api/admin/auth',
+  '/api/admin/users',
+  '/api/admin/restaurants',
+  '/api/admin/menus',
+  '/api/admin/cart',
+  '/api/admin/orders',
+  '/api/admin/payments',
+  '/api/admin/deliveries',
+  '/api/admin/drivers',
+  '/api/admin/tracking',
+  '/api/admin/notifications',
+] as const;
+
+/** A query parameter of an admin route, as it appears in docs/openapi/admin.json. */
+export type AdminQueryParameter = {
+  name: string;
+  description: string;
+  schema: Record<string, unknown>;
+};
+
+/** One admin route. Each route declares its own parameters and body; nothing is shared by default. */
+export type AdminRouteDefinition = {
+  method: 'get' | 'post' | 'patch' | 'put' | 'delete';
+  /** Relative to the service's admin prefix; `{id}` path parameters are documented automatically. */
+  path: string;
+  summary: string;
+  /** Staff permissions the route requires (PermissionsGuard). */
+  permissions: readonly string[];
+  statusCode: number;
+  query?: readonly AdminQueryParameter[];
+  /** JSON body schema for mutations; every mutation carries a `reason` (ADR 002). */
+  requestBody?: Record<string, unknown>;
+  /** `paginated` is a PaginatedResult<T>; `object` a single resource. */
+  response: 'paginated' | 'object';
+};
+
+/** Page pagination shared by every admin list route (ADR 002: limit capped at 100). */
+export const ADMIN_PAGE_QUERY: readonly AdminQueryParameter[] = [
+  { name: 'page', description: 'Page number, starting at 1.', schema: { type: 'integer', minimum: 1, default: 1 } },
+  { name: 'limit', description: 'Page size, at most 100.', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
+];
+
+export const ADMIN_SERVICE_DEFINITIONS: readonly {
+  service: string;
+  publicPrefix: string;
+  routes: readonly AdminRouteDefinition[];
+}[] = [
+  {
+    service: 'orders',
+    publicPrefix: '/api/admin/orders',
+    routes: [
+      {
+        method: 'get',
+        path: '',
+        summary: 'List all orders (staff with support.read)',
+        permissions: ['support.read'],
+        statusCode: 200,
+        response: 'paginated',
+        query: [
+          ...ADMIN_PAGE_QUERY,
+          { name: 'q', description: 'A full order id; anything else matches nothing.', schema: { type: 'string', maxLength: 100 } },
+          { name: 'id', description: 'One order.', schema: { type: 'string', format: 'uuid' } },
+          { name: 'customerId', description: 'Orders of one customer.', schema: { type: 'string', format: 'uuid' } },
+          { name: 'restaurantId', description: 'Orders of one restaurant.', schema: { type: 'string', format: 'uuid' } },
+          {
+            name: 'status',
+            description: 'active = not finished, completed = DELIVERED, cancelled = CANCELLED or FAILED.',
+            schema: { type: 'string', enum: ['active', 'completed', 'cancelled'] },
+          },
+          { name: 'sort', description: 'Order by creation time.', schema: { type: 'string', enum: ['createdAt:asc', 'createdAt:desc'], default: 'createdAt:desc' } },
+        ],
+      },
+    ],
+  },
+];
+
 export function extractPathParameters(path: string): string[] {
   const matches = Array.from(path.matchAll(/\/(?:\{([^}]+)\}|:([A-Za-z0-9_]+))/g));
   const names = matches.map((match) => match[1] ?? match[2]).filter((value): value is string => Boolean(value));
@@ -1600,7 +1682,11 @@ export function generatePublicOpenApiDocument() {
   return publicSpec;
 }
 
-export function validatePublicOpenApiDocument(doc: Record<string, any>, servicePrefixes: readonly string[] = SERVICE_PREFIXES): void {
+export function validatePublicOpenApiDocument(
+  doc: Record<string, any>,
+  servicePrefixes: readonly string[] = SERVICE_PREFIXES,
+  options: { forbidAdmin?: boolean } = {},
+): void {
   assert(doc.openapi === '3.0.3', 'OpenAPI version must be 3.0.3');
   assert(doc.servers?.[0]?.url === 'http://localhost:3000', 'Gateway server URL must point to localhost:3000');
   assert(doc.paths && typeof doc.paths === 'object', 'paths must exist');
@@ -1613,6 +1699,8 @@ export function validatePublicOpenApiDocument(doc: Record<string, any>, serviceP
   for (const path of pathNames) {
     assert(path.startsWith('/api/'), `Public path must start with /api/: ${path}`);
     assert(!path.includes('/internal'), `Internal-only route leaked into public OpenAPI: ${path}`);
+    // #212: admin routes are a separate contract (docs/openapi/admin.json), never public.
+    assert(options.forbidAdmin === false || !path.startsWith('/api/admin/'), `Admin route leaked into public OpenAPI: ${path}`);
     assert(!path.toLowerCase().includes('docs-json'), `Docs JSON route leaked into business contract: ${path}`);
     assert(!/\/:[A-Za-z0-9_]+/.test(path), `Express-style path params are not valid in OpenAPI paths: ${path}. Use /{parameter} instead.`);
 
@@ -1654,11 +1742,15 @@ export function validatePublicOpenApiDocument(doc: Record<string, any>, serviceP
     }
   }
 
-  for (const prefix of servicePrefixes) {
-    assert(
-      pathNames.some((path) => path === prefix || path.startsWith(`${prefix}/`)),
-      `Missing public routes for service prefix: ${prefix}`,
-    );
+  // Coverage over every service prefix is a public-spec rule. The admin contract grows
+  // service by service (#212: one example route first), so it only checks what it declares.
+  if (options.forbidAdmin !== false) {
+    for (const prefix of servicePrefixes) {
+      assert(
+        pathNames.some((path) => path === prefix || path.startsWith(`${prefix}/`)),
+        `Missing public routes for service prefix: ${prefix}`,
+      );
+    }
   }
 
   const visit = (node: unknown) => {
@@ -1694,5 +1786,130 @@ export function validatePublicOpenApiDocument(doc: Record<string, any>, serviceP
     }
   }
 
-  assert(Array.isArray(doc.tags) && doc.tags.length >= servicePrefixes.length, 'Public OpenAPI must include service tags');
+  assert(Array.isArray(doc.tags) && doc.tags.length >= (options.forbidAdmin === false ? 1 : servicePrefixes.length), 'Public OpenAPI must include service tags');
+}
+
+
+/**
+ * The admin API contract (#212): `/api/admin/<service>/...` at the gateway,
+ * `/admin/...` inside each service. Staff-only, bearer JWT with role ADMIN and
+ * the `perms` claim; SYSTEM tokens answer 401. Kept out of the public spec.
+ */
+export function generateAdminOpenApiDocument() {
+  const adminSpec = {
+    openapi: '3.0.3',
+    info: {
+      title: 'Delivery Plus Admin API',
+      version: '1.0.0',
+      description:
+        'Staff admin contract for the Delivery Plus platform (#212). Each service owns its own /admin routes; the gateway publishes them under /api/admin/<service>. Requires a staff JWT (role ADMIN) carrying the route\'s permissions; SYSTEM tokens are refused with 401. Every mutation requires a reason and goes through the audit hook (#213).',
+    },
+    servers: [{ url: 'http://localhost:3000' }],
+    tags: ADMIN_SERVICE_DEFINITIONS.map(({ service }) => ({ name: service, description: `${service} admin endpoints` })),
+    paths: {} as Record<string, Record<string, any>>,
+    components: {
+      securitySchemes: {
+        bearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+        },
+      },
+      schemas: {
+        ErrorResponse: {
+          type: 'object',
+          properties: {
+            statusCode: { type: 'integer' },
+            error: { type: 'string' },
+            message: { type: 'string' },
+          },
+        },
+      },
+    },
+  };
+
+  for (const service of ADMIN_SERVICE_DEFINITIONS) {
+    for (const route of service.routes) {
+      const pathKey = joinPublicPath(service.publicPrefix, route.path);
+      const operationId = `admin_${service.service}_${route.method}_${pathKey.replace(/[/:{}-]+/g, '_').replace(/^_+|_+$/g, '')}`;
+
+      const pathParameters = extractPathParameters(pathKey).map((name) => ({
+        name,
+        in: 'path',
+        required: true,
+        schema: { type: 'string', format: 'uuid' },
+      }));
+      const queryParameters = (route.query ?? []).map(({ name, description, schema }) => ({
+        name,
+        in: 'query',
+        required: false,
+        description,
+        schema,
+      }));
+      const okSchema =
+        route.response === 'paginated'
+          ? {
+              type: 'object',
+              required: ['items', 'page', 'limit', 'total', 'totalPages'],
+              properties: {
+                items: { type: 'array', items: { type: 'object' } },
+                page: { type: 'integer' },
+                limit: { type: 'integer' },
+                total: { type: 'integer' },
+                totalPages: { type: 'integer' },
+              },
+            }
+          : { type: 'object' };
+
+      const operation: Record<string, any> = {
+        summary: route.summary,
+        description: `Requires staff permission: ${route.permissions.join(', ')}.`,
+        tags: [service.service],
+        operationId,
+        security: [{ bearerAuth: [] }],
+        'x-permissions': [...route.permissions],
+        parameters: [...pathParameters, ...queryParameters],
+        responses: {
+          [String(route.statusCode)]: {
+            description: route.response === 'paginated' ? 'A PaginatedResult<T>' : 'The resource',
+            content: { 'application/json': { schema: okSchema } },
+          },
+          '400': { description: 'Invalid parameters or body', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          '401': { description: 'Missing or invalid JWT, or a SYSTEM token on an admin route' },
+          '403': { description: 'Staff token without the required permission' },
+        },
+      };
+      if (route.requestBody) {
+        operation.requestBody = { required: true, content: { 'application/json': { schema: route.requestBody } } };
+      }
+
+      if (!adminSpec.paths[pathKey]) {
+        adminSpec.paths[pathKey] = {};
+      }
+      adminSpec.paths[pathKey][route.method] = operation;
+    }
+  }
+
+  return adminSpec;
+}
+
+/** Same contract rules as the public spec, plus: every path is an /api/admin path. */
+export function validateAdminOpenApiDocument(doc: Record<string, any>): void {
+  validatePublicOpenApiDocument(doc, ADMIN_SERVICE_PREFIXES, { forbidAdmin: false });
+  for (const [path, operations] of Object.entries(doc.paths as Record<string, Record<string, any>>)) {
+    assert(path.startsWith('/api/admin/'), `Admin path must start with /api/admin/: ${path}`);
+    for (const [method, operation] of Object.entries(operations)) {
+      assert(
+        Array.isArray(operation['x-permissions']) && operation['x-permissions'].length > 0,
+        `Admin route must declare its staff permissions: ${method.toUpperCase()} ${path}`,
+      );
+      if (method !== 'get') {
+        const body = operation.requestBody?.content?.['application/json']?.schema;
+        assert(
+          Array.isArray(body?.required) && body.required.includes('reason'),
+          `Admin mutation must require a reason (ADR 002): ${method.toUpperCase()} ${path}`,
+        );
+      }
+    }
+  }
 }

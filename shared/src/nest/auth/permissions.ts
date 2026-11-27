@@ -1,6 +1,6 @@
 import { CanActivate, ExecutionContext, Injectable, SetMetadata } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { ForbiddenError } from '../../errors/app-error';
+import { ForbiddenError, UnauthorizedError } from '../../errors/app-error';
 import { UserRole } from '../../types/enums';
 
 /**
@@ -35,6 +35,13 @@ export class PermissionsGuard implements CanActivate {
     if (!required || required.length === 0) return true;
 
     const user = context.switchToHttp().getRequest().user as { role?: UserRole; perms?: string[] } | undefined;
+
+    // #212: a SYSTEM (service) token is never a staff identity. On any
+    // permission-guarded route it answers 401, before any permission check.
+    if (user?.role === UserRole.SYSTEM) {
+      throw new UnauthorizedError('SYSTEM tokens cannot call staff routes');
+    }
+
     const held = new Set(user?.role === UserRole.ADMIN ? user.perms ?? [] : []);
     const missing = required.filter((permission) => !held.has(permission));
     if (missing.length > 0) throw new ForbiddenError(`Requires staff permission: ${missing.join(', ')}`);

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { Repository, In, FindOptionsWhere } from 'typeorm';
 import { BaseEvent, OrderStatus, TOPICS, stageEvent } from '@food-delivery/shared';
 import { Order } from '../entities/order.entity';
 import { OrderItem } from '../entities/order-item.entity';
@@ -176,6 +176,44 @@ export class OrdersRepository {
     return this.repo.findAndCount({
       where: { restaurantId },
       order: { createdAt: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+  }
+
+  /**
+   * #212: staff list of every order. Explicit filters only (ids, status group), plus
+   * a free-text `q` over the order and customer ids. No cross-service joins.
+   */
+  async findForAdmin(
+    page: number,
+    limit: number,
+    options: {
+      statuses?: OrderStatus[] | null;
+      q?: string;
+      id?: string;
+      customerId?: string;
+      restaurantId?: string;
+      sort?: 'ASC' | 'DESC';
+    } = {},
+  ): Promise<[Order[], number]> {
+    const where: FindOptionsWhere<Order> = {};
+    if (options.statuses) where.status = In(options.statuses);
+    if (options.id) where.id = options.id;
+    if (options.customerId) where.customerId = options.customerId;
+    if (options.restaurantId) where.restaurantId = options.restaurantId;
+
+    // q is a free-text probe, never a leak: it only matches full ids typed by staff.
+    const trimmed = options.q?.trim();
+    if (trimmed) {
+      const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmed);
+      if (uuidLike && !where.id) where.id = trimmed;
+      else if (!uuidLike) return [[], 0];
+    }
+
+    return this.repo.findAndCount({
+      where,
+      order: { createdAt: options.sort === 'ASC' ? 'ASC' : 'DESC' },
       skip: (page - 1) * limit,
       take: limit,
     });

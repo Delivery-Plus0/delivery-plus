@@ -9,9 +9,11 @@ import {
   generatePublicOpenApiDocument,
   joinPublicPath,
   validatePublicOpenApiDocument,
+  generateAdminOpenApiDocument,
+  validateAdminOpenApiDocument,
 } from './public-openapi';
 import { isBlockedInternalRoute } from './route-policy';
-import { getCorsOptions, getServicePrefix, rewriteProxyPath } from './main';
+import { getCorsOptions, getServicePrefix, PROXIES, rewriteProxyPath } from './main';
 
 describe('gateway browser CORS', () => {
   it('allows the idempotency header used by order and payment clients', () => {
@@ -85,6 +87,11 @@ describe('gateway browser CORS', () => {
 describe('gateway internal route exposure', () => {
   it('blocks the internal users route from public proxying', () => {
     expect(isBlockedInternalRoute('/api/users/internal')).toBe(true);
+    // #212: admin routes have one way in, /api/admin/<service>.
+    expect(isBlockedInternalRoute('/api/menus/admin')).toBe(true);
+    expect(isBlockedInternalRoute('/api/menus/admin/menu-items/abc')).toBe(true);
+    expect(isBlockedInternalRoute('/api/menus/restaurants/abc/menu')).toBe(false);
+    expect(isBlockedInternalRoute('/api/admin/menus/menu-items/abc')).toBe(false);
     expect(isBlockedInternalRoute('/api/users/internal/profile')).toBe(true);
     expect(isBlockedInternalRoute('/api/users/Internal')).toBe(true);
     expect(isBlockedInternalRoute('/api/users/INTERNAL/users')).toBe(true);
@@ -160,6 +167,14 @@ describe('gateway internal route exposure', () => {
     expect(getServicePrefix('/api/users')).toBe('/users');
     expect(rewriteProxyPath('/api/users', '/me')).toBe('/users/me');
     expect(rewriteProxyPath('/api/users', '/123')).toBe('/users/123');
+  });
+
+  it('rewrites admin routes to the service /admin route space (#212)', () => {
+    expect(getServicePrefix('/api/admin/orders')).toBe('/admin/orders');
+    expect(rewriteProxyPath('/api/admin/orders', '/')).toBe('/admin/orders/');
+    expect(rewriteProxyPath('/api/admin/orders', '/?page=2&limit=50')).toBe('/admin/orders/?page=2&limit=50');
+    expect(rewriteProxyPath('/api/admin/orders', '/abc')).toBe('/admin/orders/abc');
+    expect(Object.keys(PROXIES).filter((p) => p.startsWith('/api/admin/')).length).toBe(11);
   });
 
   it('preserves menu-service root routes and swagger-json rewrite behavior', () => {
@@ -254,5 +269,39 @@ describe('gateway internal route exposure', () => {
     }
     expect(document.paths['/api/users/me/avatar/image-upload-url'].post.responses['201'].content)
       .toBeDefined();
+  });
+});
+describe('admin OpenAPI contract (#212)', () => {
+  it('documents each admin route with its own parameters and permissions', () => {
+    const doc = generateAdminOpenApiDocument();
+    expect(() => validateAdminOpenApiDocument(doc)).not.toThrow();
+    const list = doc.paths['/api/admin/orders'].get;
+    expect(list['x-permissions']).toEqual(['support.read']);
+    expect(list.parameters.map((p: { name: string }) => p.name)).toEqual(
+      expect.arrayContaining(['page', 'limit', 'q', 'id', 'customerId', 'restaurantId', 'status', 'sort']),
+    );
+  });
+
+  it('rejects an admin route without permissions, and a mutation without a reason', () => {
+    const doc = generateAdminOpenApiDocument();
+    const withoutPerms = JSON.parse(JSON.stringify(doc));
+    delete withoutPerms.paths['/api/admin/orders'].get['x-permissions'];
+    expect(() => validateAdminOpenApiDocument(withoutPerms)).toThrow('declare its staff permissions');
+
+    const withMutation = JSON.parse(JSON.stringify(doc));
+    withMutation.paths['/api/admin/orders/{id}/cancel'] = {
+      post: {
+        ...doc.paths['/api/admin/orders'].get,
+        operationId: 'admin_orders_post_cancel',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { note: { type: 'string' } } } } } },
+      },
+    };
+    expect(() => validateAdminOpenApiDocument(withMutation)).toThrow('must require a reason');
+  });
+
+  it('keeps admin paths out of the public contract', () => {
+    const doc = generatePublicOpenApiDocument();
+    expect(Object.keys(doc.paths).some((path) => path.startsWith('/api/admin/'))).toBe(false);
   });
 });

@@ -129,6 +129,10 @@ From `services/order-service/src/config/app-config.ts`:
 - `PORT` (default: `3006`)
 - `NODE_ENV` (default: `development`)
 
+## Admin routes (#212)
+
+`GET /admin/orders` lists every order for staff holding `support.read`. The gateway publishes it as `GET /api/admin/orders`. Page pagination (`page`, `limit` capped at 100), explicit filters (`id`, `customerId`, `restaurantId`, `status` group) and `sort` (`createdAt:asc` | `createdAt:desc`, default desc). Guarded by the shared `PermissionsGuard`: a staff ADMIN without the permission gets 403, a SYSTEM token gets 401. Contract: `docs/openapi/admin.json`. See [ADR 002](../adr/002-admin-api.md).
+
 ## Notes
 This is one of the central orchestration services: it owns the order state machine and bridges cart, payment, and delivery flows.
 

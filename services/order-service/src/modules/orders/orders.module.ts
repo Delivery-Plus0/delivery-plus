@@ -6,6 +6,7 @@ import { OrderItem } from '../../entities/order-item.entity';
 import { OrdersRepository } from '../../repositories/orders.repository';
 import { OrdersService } from '../../services/orders.service';
 import { OrdersController } from '../../controllers/orders.controller';
+import { AdminOrdersController } from '../../controllers/admin-orders.controller';
 import { CartServiceClient } from '../../common/cart-service.client';
 import { RestaurantServiceClient } from '../../common/restaurant-service.client';
 import { UserServiceClient } from '../../common/user-service.client';
@@ -21,7 +22,7 @@ import { RolesGuard } from '@food-delivery/shared';
       inject: [APP_CONFIG],
     }),
   ],
-  controllers: [OrdersController],
+  controllers: [OrdersController, AdminOrdersController],
   providers: [
     OrdersService,
     OrdersRepository,

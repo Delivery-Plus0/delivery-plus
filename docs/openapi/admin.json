@@ -20,6 +20,10 @@
       "description": "users admin endpoints"
     },
     {
+      "name": "drivers",
+      "description": "drivers admin endpoints"
+    },
+    {
       "name": "audit",
       "description": "audit admin endpoints"
     }
@@ -443,6 +447,309 @@
           "users"
         ],
         "operationId": "admin_users_get_api_admin_users_id",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-permissions": [
+          "support.read"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters or body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT, or a SYSTEM token on an admin route"
+          },
+          "403": {
+            "description": "Staff token without the required permission"
+          }
+        }
+      }
+    },
+    "/api/admin/drivers": {
+      "get": {
+        "summary": "List drivers: status, verification, licences expiring, plate prefix (staff with support.read)",
+        "description": "Requires staff permission: support.read.",
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "admin_drivers_get_api_admin_drivers",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-permissions": [
+          "support.read"
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "description": "Page number, starting at 1.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size, at most 100.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Work status.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "OFFLINE",
+                "AVAILABLE",
+                "BUSY",
+                "SUSPENDED"
+              ]
+            }
+          },
+          {
+            "name": "verificationStatus",
+            "in": "query",
+            "required": false,
+            "description": "Application status.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "PENDING",
+                "VERIFIED",
+                "REJECTED"
+              ]
+            }
+          },
+          {
+            "name": "licenceExpiringWithinDays",
+            "in": "query",
+            "required": false,
+            "description": "Driving or vehicle licence ends within this many days (Cairo dates).",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 365
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "The start of the licence plate, any case.",
+            "schema": {
+              "type": "string",
+              "maxLength": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A PaginatedResult<T>",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items",
+                    "page",
+                    "limit",
+                    "total",
+                    "totalPages"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "limit": {
+                      "type": "integer"
+                    },
+                    "total": {
+                      "type": "integer"
+                    },
+                    "totalPages": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters or body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT, or a SYSTEM token on an admin route"
+          },
+          "403": {
+            "description": "Staff token without the required permission"
+          }
+        }
+      }
+    },
+    "/api/admin/drivers/queue": {
+      "get": {
+        "summary": "Submitted applications waiting for a decision, oldest first (staff with onboarding.review)",
+        "description": "Requires staff permission: onboarding.review.",
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "admin_drivers_get_api_admin_drivers_queue",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-permissions": [
+          "onboarding.review"
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "description": "Page number, starting at 1.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size, at most 100.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A PaginatedResult<T>",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items",
+                    "page",
+                    "limit",
+                    "total",
+                    "totalPages"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "limit": {
+                      "type": "integer"
+                    },
+                    "total": {
+                      "type": "integer"
+                    },
+                    "totalPages": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters or body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT, or a SYSTEM token on an admin route"
+          },
+          "403": {
+            "description": "Staff token without the required permission"
+          }
+        }
+      }
+    },
+    "/api/admin/drivers/{id}": {
+      "get": {
+        "summary": "One driver: application, reviews, documents, ledger balance and rating (staff with support.read)",
+        "description": "Requires staff permission: support.read.",
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "admin_drivers_get_api_admin_drivers_id",
         "security": [
           {
             "bearerAuth": []

@@ -10,6 +10,7 @@ Snapshot of `dev` after per-stage customer notifications (#129, 2026-10-06). Mer
 - Production 3, #212: admin API conventions. The shared `@RequirePermissions`/`PermissionsGuard` (a SYSTEM token gets 401), gateway routing `/api/admin/<service>` → the service's `/admin/<service>`, the separate `docs/openapi/admin.json` contract, and `GET /admin/orders` in order-service. See [ADR 002](../docs/adr/002-admin-api.md).
 - Production 3, #213: audit-service (the 12th service, :3012) stores every staff action append-only (triggers and revoked grants). Services record an action with `AdminAudit.record(manager, ...)` in the same transaction, through their outbox to `admin.actions`; auth, user, driver, restaurant, menu and payment gained an outbox. Read it with `GET /api/admin/audit` (`audit.read`).
 - Production 3, #214 (people): `/api/admin/users` in user-service: list (name prefix, role, status, verification, dates), exact phone/email search by POST, and detail. The account side comes from auth-service's internal SYSTEM route; `credentials.lastLoginAt` is set on sign-in.
+- Production 3, #214 (drivers): `/api/admin/drivers` in driver-service: the list (status, verification, licences expiring, plate prefix), the review queue (`onboarding.review`) and the driver page with the ledger balance and rating from delivery-service's internal route. Names come from user-service's names-only internal route.
 
 When code and this file disagree, the code wins; update this file in the same PR that changes the behavior.
 

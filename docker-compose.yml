@@ -179,6 +179,7 @@ services:
       - DATABASE_URL=postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/user_service
       - JWT_SECRET=${JWT_SECRET:-local-development-only}
       - SYSTEM_JWT_SECRET=${SYSTEM_JWT_SECRET:?SYSTEM_JWT_SECRET must be set, this stack runs with NODE_ENV=production}
+      - DRIVER_SERVICE_URL=http://driver-service:3009
       - AUTH_SERVICE_URL=http://auth-service:3001
       - REDIS_URL=redis://redis:6379
       - INTERNAL_AUTH_SECRET=${INTERNAL_AUTH_SECRET:-local-internal-auth-development-only}
@@ -383,6 +384,7 @@ services:
       - DATABASE_URL=postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/driver_service
       - JWT_SECRET=${JWT_SECRET:-local-development-only}
       - SYSTEM_JWT_SECRET=${SYSTEM_JWT_SECRET:?SYSTEM_JWT_SECRET must be set, this stack runs with NODE_ENV=production}
+      - DELIVERY_SERVICE_URL=http://delivery-service:3008
       - USER_SERVICE_URL=http://user-service:3002
       - KAFKA_BROKER=kafka:29092
       # #207: production mode needs the private documents bucket and the national ID HMAC key.

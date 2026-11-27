@@ -106,4 +106,11 @@ export class EarningsService implements OnModuleInit, OnModuleDestroy {
       totalPages: Math.ceil(total / limit) || 1,
     };
   }
+
+  /** #214: a driver's balance for the staff console, by driver id (no token of the driver's). */
+  async totalsForStaff(driverId: string, now = new Date()): Promise<{ currency: 'EGP'; pending: string; available: string; balance: string }> {
+    await this.ledger.settleDue(now, driverId);
+    return { currency: 'EGP', ...(await this.ledger.totals(driverId)) };
+  }
 }
+

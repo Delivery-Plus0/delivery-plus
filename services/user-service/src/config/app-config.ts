@@ -12,6 +12,8 @@ export interface AppConfig {
   orderServiceUrl: string;
   /** #214: the account side of the staff people directory. */
   authServiceUrl: string;
+  /** #214: links a DRIVER account to its driver record on the staff person page. */
+  driverServiceUrl: string;
   redisUrl: string;
   internalAuthSecret: string;
   internalAuthAllowedService: string;
@@ -39,6 +41,7 @@ export function loadConfig(): AppConfig {
     systemJwtSecret: loadSystemJwtSecret(process.env.NODE_ENV || 'development'),
     orderServiceUrl: process.env.ORDER_SERVICE_URL || 'http://localhost:3006',
     authServiceUrl: process.env.AUTH_SERVICE_URL || 'http://localhost:3001',
+    driverServiceUrl: process.env.DRIVER_SERVICE_URL || 'http://localhost:3009',
     redisUrl: process.env.REDIS_URL || 'redis://localhost:6379',
     internalAuthSecret: requireInternalAuthSecret(),
     internalAuthAllowedService: process.env.INTERNAL_AUTH_ALLOWED_SERVICE || 'auth-service',

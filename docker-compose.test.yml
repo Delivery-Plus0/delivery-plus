@@ -182,6 +182,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/user_service
       JWT_SECRET: ${JWT_SECRET:-local-development-only}
       SYSTEM_JWT_SECRET: ${SYSTEM_JWT_SECRET:-local-system-jwt-development-only}
+      DRIVER_SERVICE_URL: http://driver-service:3009
       AUTH_SERVICE_URL: http://auth-service:3001
       REDIS_URL: redis://redis:6379
       INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:-local-internal-auth-development-only}
@@ -418,6 +419,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/driver_service
       JWT_SECRET: ${JWT_SECRET:-local-development-only}
       SYSTEM_JWT_SECRET: ${SYSTEM_JWT_SECRET:-local-system-jwt-development-only}
+      DELIVERY_SERVICE_URL: http://delivery-service:3008
       USER_SERVICE_URL: http://user-service:3002
       # #206 test hook: seeded drivers start VERIFIED, since no admin account exists to verify them yet.
       DRIVER_AUTO_VERIFY: 'true'

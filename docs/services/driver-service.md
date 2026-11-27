@@ -27,6 +27,20 @@ Driver application (#207, see below):
 - `POST /drivers/:id/application/review` – approve or reject a submitted application (staff with `onboarding.review`)
 - `POST /drivers/:id/documents/:type/read-url` – a 5-minute URL to view a document; every read is recorded (staff with `onboarding.review`, 60 a minute)
 
+## Staff driver lists and page (#214)
+Published as `/api/admin/drivers`:
+
+| Route | Permission | What it does |
+| --- | --- | --- |
+| `GET /admin/drivers` | `support.read` | Drivers newest first: `status`, `verificationStatus`, `licenceExpiringWithinDays` (driving or vehicle licence ends by that Cairo date), `q` (plate prefix, any case, LIKE wildcards refused). |
+| `GET /admin/drivers/queue` | `onboarding.review` | Submitted applications still `PENDING`, oldest submission first. |
+| `GET /admin/drivers/:id` | `support.read` | The staff application view (fields, current documents, review history), the driver row, and the ledger balance and rating from delivery-service. |
+
+- Rows carry the driver's full name from user-service (`POST /internal/users/names`, names only). When user-service doesn't answer, `fullName` is null; when delivery-service doesn't, `summary` is null. Nothing is made up.
+- The page lists document metadata, not URLs. A document is opened through `POST /drivers/:id/documents/:type/read-url` (`onboarding.review`), which records the read (#207).
+- No row carries the national-ID hash.
+- `GET /internal/drivers/by-user/:userId` (SYSTEM, user-service only) gives the driver id of a person for the staff person page.
+
 ## Dispatch fairness (#210)
 
 Available, VERIFIED drivers are listed by `COALESCE(availableSince, updatedAt) ASC, id ASC`: the longest-idle driver is offered work first, with a deterministic tie-breaker. Going online or being released from a delivery records database time in the same compare-and-set update as the status. Leaving AVAILABLE clears the timestamp. Repeated online/release requests are no-ops and retain the current queue position; unrelated profile or verification edits do not change it.
@@ -47,6 +61,7 @@ The delivery-service claim/retry loop and VERIFIED gate are unchanged. Its inter
 None. Driver availability is changed synchronously by `delivery-service` (BUSY on assignment, AVAILABLE on completion or cancellation). The service used to also release drivers from `delivery.completed`/`delivery.cancelled`; that consumer was removed because a late event could free a driver who is already on the next delivery.
 
 ## Required env vars
+- `DELIVERY_SERVICE_URL` (default `http://localhost:3008`): the balance and rating on the staff driver page (#214).
 From `services/driver-service/src/config/app-config.ts`:
 
 - `DATABASE_URL`

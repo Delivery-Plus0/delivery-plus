@@ -41,6 +41,12 @@ describe('EarningsService', () => {
     );
   });
 
+  it('gives staff a driver balance by driver id, settling due entries first (#214)', async () => {
+    await expect(service.totalsForStaff('driver-7', NOW)).resolves.toEqual({ currency: 'EGP', pending: '12.50', available: '6.25', balance: '18.75' });
+    expect(ledger.settleDue).toHaveBeenCalledWith(NOW, 'driver-7');
+    expect(driverClient.getOwnProfile).not.toHaveBeenCalled();
+  });
+
   it("settles the caller's due entries, then reports ledger totals and entries", async () => {
     const earnings = await service.getForDriver('Bearer driver', 1, 20, NOW);
 

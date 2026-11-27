@@ -16,6 +16,7 @@ import { DeliveriesRepository } from '../../repositories/deliveries.repository';
 import { DeliveriesService } from '../../services/deliveries.service';
 import { AutoDispatchService } from '../../services/auto-dispatch.service';
 import { DriverReconciliationService } from '../../services/driver-reconciliation.service';
+import { InternalDriversController } from '../../controllers/internal-drivers.controller';
 import { DeliveriesController } from '../../controllers/deliveries.controller';
 import { OrderServiceClient } from '../../common/order-service.client';
 import { DriverServiceClient } from '../../common/driver-service.client';
@@ -35,7 +36,7 @@ import { APP_CONFIG, AppConfig } from '../../config/app-config';
       inject: [APP_CONFIG],
     }),
   ],
-  controllers: [DeliveriesController],
+  controllers: [DeliveriesController, InternalDriversController],
   providers: [
     OutboxRelayService,
     DeliveriesService,

@@ -12,6 +12,11 @@ import { DriversService } from '../../services/drivers.service';
 import { DRIVER_DOCUMENT_STORAGE, DriverApplicationService } from '../../services/driver-application.service';
 import { DriversController } from '../../controllers/drivers.controller';
 import { DriverApplicationController } from '../../controllers/driver-application.controller';
+import { InternalDriversController } from '../../controllers/internal-drivers.controller';
+import { AdminDriversController } from '../../controllers/admin-drivers.controller';
+import { AdminDriversService } from '../../services/admin-drivers.service';
+import { StaffLookupsClient } from '../../common/staff-lookups.client';
+import { SystemTokenService } from '../../common/system-token.service';
 import { APP_CONFIG, AppConfig } from '../../config/app-config';
 import { UserServiceClient } from '../../common/user-service.client';
 import { LicenceExpiryRepository } from '../../repositories/licence-expiry.repository';
@@ -26,11 +31,14 @@ import { LicenceExpiryService } from '../../jobs/licence-expiry.service';
     }),
   ],
   // The application controller first: its `me/…` routes must be matched before any `:id/…` route.
-  controllers: [DriverApplicationController, DriversController],
+  controllers: [DriverApplicationController, DriversController, AdminDriversController, InternalDriversController],
   providers: [
     DriversService,
     DriversRepository,
     UserServiceClient,
+    AdminDriversService,
+    StaffLookupsClient,
+    SystemTokenService,
     DriverApplicationService,
     DriverApplicationRepository,
     LicenceExpiryRepository,

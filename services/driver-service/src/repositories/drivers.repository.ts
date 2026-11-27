@@ -97,4 +97,35 @@ export class DriversRepository {
       .take(limit)
       .getManyAndCount();
   }
+
+  /**
+   * #214: the staff driver list. Explicit filters; `platePrefix` is the start of the plate (stored
+   * uppercase); `licenceExpiringBy` keeps drivers whose driving or vehicle licence ends on or before
+   * that Cairo date. The review queue (`queue`) is submitted, still PENDING applications, oldest first.
+   */
+  async findForAdmin(filter: AdminDriverFilter, page: number, limit: number): Promise<[Driver[], number]> {
+    const qb = this.repo.createQueryBuilder('d');
+    if (filter.status) qb.andWhere('d.status = :status', { status: filter.status });
+    if (filter.verificationStatus) qb.andWhere('d.verificationStatus = :verificationStatus', { verificationStatus: filter.verificationStatus });
+    if (filter.queue) qb.andWhere(`d.submittedAt IS NOT NULL AND d.verificationStatus = 'PENDING'`);
+    if (filter.licenceExpiringBy) {
+      qb.andWhere('(d.drivingLicenceExpiresOn <= :by OR d.vehicleLicenceExpiresOn <= :by)', { by: filter.licenceExpiringBy });
+    }
+    if (filter.platePrefix) {
+      const escaped = filter.platePrefix.replace(/[\\%_]/g, (c) => `\\${c}`);
+      qb.andWhere(`d.licensePlate LIKE :plate ESCAPE '\\'`, { plate: `${escaped}%` });
+    }
+    if (filter.queue) qb.orderBy('d.submittedAt', 'ASC');
+    else qb.orderBy('d.createdAt', 'DESC');
+    return qb.addOrderBy('d.id', 'ASC').skip((page - 1) * limit).take(limit).getManyAndCount();
+  }
 }
+
+export interface AdminDriverFilter {
+  status?: string;
+  verificationStatus?: 'PENDING' | 'VERIFIED' | 'REJECTED';
+  queue?: boolean;
+  licenceExpiringBy?: string;
+  platePrefix?: string;
+}
+

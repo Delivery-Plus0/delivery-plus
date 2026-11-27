@@ -11,6 +11,8 @@ export interface AppConfig {
   /** #202: signs/verifies service-to-service SYSTEM tokens; required in production (see loadSystemJwtSecret). */
   systemJwtSecret: string;
   userServiceUrl: string;
+  /** #214: the ledger balance and rating on the staff driver page. */
+  deliveryServiceUrl: string;
   /** #153: going online needs a verified phone (off by default). */
   phoneVerificationRequired: boolean;
   /** #206 test hook: new driver profiles start VERIFIED. Never in production. */
@@ -41,6 +43,7 @@ export function loadConfig(): AppConfig {
     jwtSecret: process.env.JWT_SECRET as string,
     systemJwtSecret: loadSystemJwtSecret(process.env.NODE_ENV || 'development'),
     userServiceUrl: process.env.USER_SERVICE_URL || 'http://localhost:3002',
+    deliveryServiceUrl: process.env.DELIVERY_SERVICE_URL || 'http://localhost:3008',
     phoneVerificationRequired: phoneVerificationRequired(),
     ...loadVerificationConfig(nodeEnv),
     redisUrl: process.env.REDIS_URL || 'redis://localhost:6379',

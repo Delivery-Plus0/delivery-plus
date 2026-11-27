@@ -341,6 +341,23 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
         statusCode: 200,
         response: 'object',
       },
+      {
+        method: 'post',
+        path: '/{id}/reveal',
+        summary: "Reveal one of a person's masked values; audited as pii.reveal (staff with support.read)",
+        permissions: ['support.read'],
+        statusCode: 200,
+        response: 'object',
+        auditAction: 'pii.reveal',
+        requestBody: {
+          type: 'object',
+          required: ['field', 'reason'],
+          properties: {
+            field: { type: 'string', enum: ['phone', 'email', 'address'] },
+            reason: { type: 'string', minLength: 3, maxLength: 300, description: 'Why, for the audit log.' },
+          },
+        },
+      },
     ],
   },
   {
@@ -532,6 +549,22 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
           required: ['reason'],
           properties: {
             reason: { type: 'string', minLength: 3, maxLength: 500, description: 'Why, for the audit log. Never shown to the person.' },
+          },
+        },
+      },
+      {
+        method: 'post',
+        path: '/{id}/reveal',
+        summary: "Reveal a restaurant's masked contact phone; audited as pii.reveal (staff with support.read)",
+        permissions: ['support.read'],
+        statusCode: 200,
+        response: 'object',
+        auditAction: 'pii.reveal',
+        requestBody: {
+          type: 'object',
+          required: ['reason'],
+          properties: {
+            reason: { type: 'string', minLength: 3, maxLength: 300, description: 'Why, for the audit log.' },
           },
         },
       },

@@ -1,13 +1,14 @@
 import { EntityManager } from 'typeorm';
 import { Inject, Injectable } from '@nestjs/common';
 import {
+  CacheService,
   ForbiddenError,
   NotFoundError,
   PaginatedResult,
   RestaurantStatus,
   S3StorageService,
   UserRole,
-  CacheService,
+  maskPhone,
 } from '@food-delivery/shared';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { RestaurantsRepository } from '../repositories/restaurants.repository';
@@ -343,6 +344,8 @@ export class RestaurantsService {
   private toStaffApplication(restaurant: Restaurant, reviews: RestaurantReview[]): StaffRestaurantApplicationDto {
     return {
       ...this.toOwnerRestaurant(restaurant, reviews),
+      // #317: staff see the contact phone masked; the owner's own view keeps it.
+      contactPhone: maskPhone(restaurant.contactPhone),
       ownerId: restaurant.ownerId,
       reviews: reviews.map(({ id, decision, note, reviewerUserId, applicationSubmittedAt, reviewedAt }) => ({
         id,

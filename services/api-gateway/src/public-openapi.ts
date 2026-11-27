@@ -237,8 +237,8 @@ export type AdminRouteDefinition = {
    * it needs no reason and records no audit event.
    */
   readOnly?: boolean;
-  /** `paginated` is a PaginatedResult<T>; `object` a single resource. */
-  response: 'paginated' | 'object';
+  /** `paginated` is a PaginatedResult<T>; `object` a single resource; `array` a bare list (the staff list). */
+  response: 'paginated' | 'object' | 'array';
   /**
    * #323: the named schema (ADMIN_RESPONSE_SCHEMAS) of the success body, or of each item when paginated.
    * Without it the contract can only say "an object".
@@ -247,6 +247,20 @@ export type AdminRouteDefinition = {
   /** Path parameters that are not uuids, e.g. a document type. Every other `{name}` is a uuid. */
   pathParameters?: Record<string, Record<string, unknown>>;
 };
+
+/** The staff permissions (shared STAFF_PERMISSIONS), for the admin contract's enums. */
+export const STAFF_PERMISSION_NAMES = [
+  'support.read',
+  'support.act',
+  'ops.read',
+  'ops.act',
+  'finance.read',
+  'finance.act',
+  'onboarding.review',
+  'users.manage',
+  'staff.manage',
+  'audit.read',
+] as const;
 
 const dateTime = { type: 'string', format: 'date-time' } as const;
 const nullableDateTime = { type: 'string', format: 'date-time', nullable: true } as const;
@@ -276,6 +290,23 @@ const restaurantLastReview = record(
   { decision: { type: 'string', enum: ['APPROVED', 'REJECTED', 'WITHDRAWN'] }, note: nullableString, reviewedAt: dateTime },
   { nullable: true, description: 'The latest decision, or null before the first one.' },
 );
+
+/** #323: the person fields of the staff directory, shared by the row and the page. */
+const STAFF_USER_FIELDS = {
+  id: uuid,
+  fullName: nullableString,
+  email: { type: 'string', description: 'Masked (#317), or empty when the account has none; reveal it with POST /api/admin/users/{id}/reveal.' },
+  phone: { ...nullableString, description: 'Masked (#317).' },
+  phoneVerified: { type: 'boolean' },
+  avatarUrl: nullableString,
+  role: { type: 'string', enum: ['CUSTOMER', 'RESTAURANT_OWNER', 'DRIVER', 'ADMIN', 'SYSTEM', null], nullable: true, description: "Null when auth-service doesn't answer." },
+  status: { type: 'string', enum: ['ACTIVE', 'SUSPENDED', null], nullable: true },
+  emailVerified: { type: 'boolean', nullable: true },
+  suspendedAt: nullableDateTime,
+  suspendedReason: nullableString,
+  lastLoginAt: nullableDateTime,
+  createdAt: dateTime,
+} as const;
 
 /**
  * #323: the response bodies of the admin routes, named in `components.schemas` of docs/openapi/admin.json.
@@ -453,6 +484,75 @@ export const ADMIN_RESPONSE_SCHEMAS = {
     { restaurant: record({ id: uuid, status: RESTAURANT_STATUS }), changed: { type: 'boolean', description: 'False when the restaurant was already in that state.' } },
     { description: 'The result of a suspend or reactivate (#215).' },
   ),
+  StaffUserView: record(
+    STAFF_USER_FIELDS,
+    { description: 'One person in the staff directory (#214): profile and account, personal data masked.' },
+  ),
+  StaffUserSearchResult: record({ items: { type: 'array', items: { $ref: '#/components/schemas/StaffUserView' } } }),
+  StaffUserDetail: record(
+    {
+      ...STAFF_USER_FIELDS,
+      hasAddress: { type: 'boolean', description: 'Whether there is an address to reveal; never the address itself.' },
+      auditTrail: record({ targetType: { type: 'string', enum: ['USER'] }, targetId: uuid }, { description: 'Query GET /api/admin/audit with these.' }),
+      linked: record({
+        driverId: { ...nullableString, description: "The driver record of a DRIVER account, null when there is none, or 'unavailable'." },
+        restaurantIds: {
+          description: "The restaurants of a RESTAURANT_OWNER account, or 'unavailable'.",
+          oneOf: [{ type: 'array', items: uuid }, { type: 'string', enum: ['unavailable'] }],
+        },
+      }),
+    },
+    { description: 'The staff person page (#214, #317).' },
+  ),
+  AccountActionResult: record(
+    {
+      userId: uuid,
+      status: { type: 'string', enum: ['ACTIVE', 'SUSPENDED'] },
+      sessionsRevoked: { type: 'integer' },
+      changed: { type: 'boolean', description: 'False when the account was already in that state.' },
+    },
+    { description: 'The result of suspend, reactivate or sign out everywhere (#215).' },
+  ),
+  StaffMember: record(
+    {
+      id: uuid,
+      email: { type: 'string' },
+      status: { type: 'string', enum: ['ACTIVE', 'SUSPENDED'], description: 'SUSPENDED is a disabled staff member.' },
+      permissions: { type: 'array', items: { type: 'string', enum: [...STAFF_PERMISSION_NAMES] } },
+      lastLoginAt: nullableDateTime,
+      createdAt: dateTime,
+    },
+    { description: 'One staff member (#216): never hashes, tokens or lockout counters.' },
+  ),
+  StaffRoleTemplates: record(
+    Object.fromEntries(
+      ['support', 'operations', 'finance', 'onboarding', 'superAdmin'].map((name) => [name, { type: 'array', items: { type: 'string', enum: [...STAFF_PERMISSION_NAMES] } }]),
+    ),
+    { description: 'Permission sets the staff page offers when inviting (#216). A staff member holds permissions, never a role.' },
+  ),
+  StaffInvitation: record(
+    { id: uuid, email: { type: 'string' }, permissions: { type: 'array', items: { type: 'string', enum: [...STAFF_PERMISSION_NAMES] } }, expiresAt: dateTime },
+    { description: 'An invitation sent by email (#216); the token is only in the email.' },
+  ),
+  AuditEvent: record(
+    {
+      id: uuid,
+      actorId: { type: 'string' },
+      actorEmail: nullableString,
+      permission: { type: 'string', description: 'The permission the action was allowed by.' },
+      action: { type: 'string', example: 'driver.approve' },
+      targetType: { type: 'string', example: 'DRIVER' },
+      targetId: { type: 'string' },
+      reason: { type: 'string' },
+      before: { type: 'object', nullable: true, additionalProperties: true, description: 'Changed fields before, personal data redacted.' },
+      after: { type: 'object', nullable: true, additionalProperties: true, description: 'Changed fields after, personal data redacted.' },
+      service: { type: 'string' },
+      correlationId: { type: 'string' },
+      occurredAt: dateTime,
+      recordedAt: dateTime,
+    },
+    { description: 'One staff action in the append-only audit log (#213).' },
+  ),
   RevealedField: record(
     { field: { type: 'string' }, value: { ...nullableString, description: 'The unmasked value, or null when there is none. Never store or log it.' } },
     { description: 'One revealed personal field (#317), recorded as a pii.reveal audit event.' },
@@ -460,19 +560,6 @@ export const ADMIN_RESPONSE_SCHEMAS = {
 } as const;
 
 /** Page pagination shared by every admin list route (ADR 002: limit capped at 100). */
-/** The staff permissions (shared STAFF_PERMISSIONS), for the admin contract's enums. */
-export const STAFF_PERMISSION_NAMES = [
-  'support.read',
-  'support.act',
-  'ops.read',
-  'ops.act',
-  'finance.read',
-  'finance.act',
-  'onboarding.review',
-  'users.manage',
-  'staff.manage',
-  'audit.read',
-] as const;
 
 export const ADMIN_PAGE_QUERY: readonly AdminQueryParameter[] = [
   { name: 'page', description: 'Page number, starting at 1.', schema: { type: 'integer', minimum: 1, default: 1 } },
@@ -522,6 +609,7 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
         permissions: ['support.read'],
         statusCode: 200,
         response: 'paginated',
+        responseSchema: 'StaffUserView',
         query: [
           ...ADMIN_PAGE_QUERY,
           { name: 'role', description: 'Account role.', schema: { type: 'string', enum: ['CUSTOMER', 'DRIVER', 'RESTAURANT_OWNER', 'ADMIN'] } },
@@ -544,6 +632,7 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
         permissions: ['support.read'],
         statusCode: 200,
         response: 'object',
+        responseSchema: 'StaffUserSearchResult',
         readOnly: true,
         requestBody: {
           type: 'object',
@@ -558,6 +647,7 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
         permissions: ['support.read'],
         statusCode: 200,
         response: 'object',
+        responseSchema: 'StaffUserDetail',
       },
       {
         method: 'post',
@@ -566,6 +656,7 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
         permissions: ['support.read'],
         statusCode: 200,
         response: 'object',
+        responseSchema: 'RevealedField',
         auditAction: 'pii.reveal',
         requestBody: {
           type: 'object',
@@ -854,6 +945,7 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
         permissions: ['users.manage'],
         statusCode: 200,
         response: 'object',
+        responseSchema: 'AccountActionResult',
         auditAction: 'user.suspend',
         requestBody: {
           type: 'object',
@@ -870,6 +962,7 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
         permissions: ['users.manage'],
         statusCode: 200,
         response: 'object',
+        responseSchema: 'AccountActionResult',
         auditAction: 'user.reactivate',
         requestBody: {
           type: 'object',
@@ -886,6 +979,7 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
         permissions: ['users.manage'],
         statusCode: 200,
         response: 'object',
+        responseSchema: 'AccountActionResult',
         auditAction: 'user.revoke_sessions',
         requestBody: {
           type: 'object',
@@ -901,7 +995,8 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
         summary: 'List staff with their permissions and status (staff with staff.manage)',
         permissions: ['staff.manage'],
         statusCode: 200,
-        response: 'object',
+        response: 'array',
+        responseSchema: 'StaffMember',
       },
       {
         method: 'get',
@@ -910,6 +1005,7 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
         permissions: ['staff.manage'],
         statusCode: 200,
         response: 'object',
+        responseSchema: 'StaffRoleTemplates',
       },
       {
         method: 'post',
@@ -918,6 +1014,7 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
         permissions: ['staff.manage'],
         statusCode: 201,
         response: 'object',
+        responseSchema: 'StaffInvitation',
         auditAction: 'staff.invite',
         requestBody: {
           type: 'object',
@@ -932,6 +1029,7 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
         permissions: ['staff.manage'],
         statusCode: 200,
         response: 'object',
+        responseSchema: 'StaffMember',
         auditAction: 'staff.permissions_change',
         requestBody: { type: 'object', required: ['permissions', 'reason'], properties: { permissions: { type: 'array', minItems: 1, items: { type: 'string', enum: [...STAFF_PERMISSION_NAMES] } }, reason: { type: 'string', minLength: 3, maxLength: 300, description: 'Why, for the audit log.' } } },
       },
@@ -942,6 +1040,7 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
         permissions: ['staff.manage'],
         statusCode: 200,
         response: 'object',
+        responseSchema: 'StaffMember',
         auditAction: 'staff.disable',
         requestBody: { type: 'object', required: ['reason'], properties: { reason: { type: 'string', minLength: 3, maxLength: 300, description: 'Why, for the audit log.' } } },
       },
@@ -952,6 +1051,7 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
         permissions: ['staff.manage'],
         statusCode: 200,
         response: 'object',
+        responseSchema: 'StaffMember',
         auditAction: 'staff.enable',
         requestBody: { type: 'object', required: ['reason'], properties: { reason: { type: 'string', minLength: 3, maxLength: 300, description: 'Why, for the audit log.' } } },
       },
@@ -968,6 +1068,7 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
         permissions: ['audit.read'],
         statusCode: 200,
         response: 'paginated',
+        responseSchema: 'AuditEvent',
         query: [
           { name: 'page', description: 'Page number, starting at 1.', schema: { type: 'integer', minimum: 1, default: 1 } },
           { name: 'limit', description: 'Page size, at most 100.', schema: { type: 'integer', minimum: 1, maximum: 100, default: 50 } },
@@ -2582,7 +2683,9 @@ export function generateAdminOpenApiDocument() {
                 totalPages: { type: 'integer' },
               },
             }
-          : bodySchema;
+          : route.response === 'array'
+            ? { type: 'array', items: bodySchema }
+            : bodySchema;
 
       const operation: Record<string, any> = {
         summary: route.summary,
@@ -2594,7 +2697,7 @@ export function generateAdminOpenApiDocument() {
         parameters: [...pathParameters, ...queryParameters],
         responses: {
           [String(route.statusCode)]: {
-            description: route.response === 'paginated' ? 'A PaginatedResult<T>' : 'The resource',
+            description: route.response === 'paginated' ? 'A PaginatedResult<T>' : route.response === 'array' ? 'A list' : 'The resource',
             content: { 'application/json': { schema: okSchema } },
           },
           '400': { description: 'Invalid parameters or body', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },

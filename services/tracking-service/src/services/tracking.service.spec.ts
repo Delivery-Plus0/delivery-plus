@@ -87,16 +87,18 @@ describe('TrackingService', () => {
       });
 
       it('rejects a replayed or reordered report (not newer than the last accepted one for this delivery)', async () => {
+        // One timestamp for both: two ago(5) calls a millisecond apart would make the "replay" newer (#329).
+        const lastAccepted = ago(5);
         locationRepository.find.mockResolvedValue({
           userId: 'user-1',
           deliveryId: 'delivery-1',
           latitude: 30.2,
           longitude: 31.3,
           updatedAt: new Date().toISOString(),
-          recordedAt: ago(5),
+          recordedAt: lastAccepted,
         });
 
-        await expect(report({ recordedAt: ago(5) })).rejects.toMatchObject({ reason: 'OUT_OF_ORDER' }); // replay
+        await expect(report({ recordedAt: lastAccepted })).rejects.toMatchObject({ reason: 'OUT_OF_ORDER' }); // replay
         await expect(report({ recordedAt: ago(8) })).rejects.toMatchObject({ reason: 'OUT_OF_ORDER' }); // reordered
         expect(locationRepository.save).not.toHaveBeenCalled();
 

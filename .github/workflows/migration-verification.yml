@@ -107,7 +107,7 @@ jobs:
           set -euo pipefail
           for service in auth-service user-service restaurant-service menu-service \
                          order-service payment-service delivery-service driver-service \
-                         notification-service; do
+                         notification-service audit-service; do
             echo "== $service =="
             output=$(npm run migration:show --workspace="services/$service" --if-present 2>&1) || {
               echo "$output"
@@ -188,6 +188,42 @@ jobs:
           check driver_service       "select count(*) from pg_trigger where tgname='TRG_driver_reviews_append_only'" "trigger TRG_driver_reviews_append_only"
 
           check notification_service "select count(*) from information_schema.tables where table_name='notifications'" "table notifications"
+
+          # #213: the services that stage staff audit events have an outbox.
+          for db in auth_service user_service driver_service restaurant_service menu_service payment_service; do
+            check "$db" "select count(*) from information_schema.tables where table_name='outbox_events'" "table outbox_events"
+          done
+
+          check audit_service        "select count(*) from information_schema.tables where table_name='audit_events'" "table audit_events"
+          check audit_service        "select count(*) from pg_trigger where tgname='TRG_audit_events_append_only'" "trigger TRG_audit_events_append_only"
+          check audit_service        "select count(*) from pg_trigger where tgname='TRG_audit_events_no_truncate'" "trigger TRG_audit_events_no_truncate"
+
+      # #213: the audit log is append-only. The CI user is a superuser, which ignores the revoked
+      # grants, so this proves the triggers: an insert works, and UPDATE, DELETE and TRUNCATE fail.
+      - name: Verify the audit log is append-only
+        env:
+          PGPASSWORD: postgres
+        run: |
+          set -euo pipefail
+          q() { psql -h localhost -U postgres -d audit_service -v ON_ERROR_STOP=1 -qtAc "$1"; }
+          q "INSERT INTO audit_events (id, \"actorId\", permission, action, \"targetType\", \"targetId\", reason, service, \"correlationId\", \"occurredAt\")
+             VALUES (gen_random_uuid(), gen_random_uuid(), 'audit.read', 'ci.check', 'USER', 'ci', 'CI append-only check', 'ci', 'ci', now())"
+          for statement in "UPDATE audit_events SET reason = 'changed'" "DELETE FROM audit_events" "TRUNCATE audit_events"; do
+            if q "$statement" 2>/dev/null; then
+              echo "FAIL: '$statement' succeeded on the append-only audit log"
+              exit 1
+            fi
+            echo "OK: '$statement' refused"
+          done
+
+      # #213: the audit log's dedup on eventId, its filters and the append-only triggers live in SQL.
+      - name: Run audit-service Postgres repository test
+        env:
+          PGPASSWORD: postgres
+          AUDIT_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/audit_service_repository_test
+        run: |
+          psql -h localhost -U postgres -c "CREATE DATABASE audit_service_repository_test"
+          npm test --workspace=services/audit-service -- --runInBand
 
       # #206: the driver verification gate lives in SQL (the dispatch list and the claim
       # compare-and-set), so drivers.repository.integration.spec.ts builds the schema with the

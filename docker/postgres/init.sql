@@ -11,3 +11,4 @@ CREATE DATABASE payment_service;
 CREATE DATABASE driver_service;
 CREATE DATABASE delivery_service;
 CREATE DATABASE notification_service;
+CREATE DATABASE audit_service;

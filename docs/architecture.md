@@ -1,6 +1,6 @@
 # Architecture
 
-The platform is a NestJS 10 / TypeScript monorepo with one API Gateway and eleven domain services. Nine domain services own PostgreSQL databases; cart and tracking use Redis; the gateway owns no persistence. The `shared` workspace contains cross-cutting infrastructure, not business workflows.
+The platform is a NestJS 10 / TypeScript monorepo with one API Gateway and twelve domain services. Ten domain services own PostgreSQL databases (audit-service since #213); cart and tracking use Redis; the gateway owns no persistence. The `shared` workspace contains cross-cutting infrastructure, not business workflows.
 
 ```mermaid
 graph TD

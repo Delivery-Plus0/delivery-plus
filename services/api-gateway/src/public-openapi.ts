@@ -201,6 +201,7 @@ export const ADMIN_SERVICE_PREFIXES = [
   '/api/admin/drivers',
   '/api/admin/tracking',
   '/api/admin/notifications',
+  '/api/admin/audit',
 ] as const;
 
 /** A query parameter of an admin route, as it appears in docs/openapi/admin.json. */
@@ -222,6 +223,8 @@ export type AdminRouteDefinition = {
   query?: readonly AdminQueryParameter[];
   /** JSON body schema for mutations; every mutation carries a `reason` (ADR 002). */
   requestBody?: Record<string, unknown>;
+  /** The audit action a mutation records with `AdminAudit.record` (#213), e.g. `driver.approve`. */
+  auditAction?: string;
   /** `paginated` is a PaginatedResult<T>; `object` a single resource. */
   response: 'paginated' | 'object';
 };
@@ -260,6 +263,34 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
             schema: { type: 'string', enum: ['active', 'completed', 'cancelled'] },
           },
           { name: 'sort', description: 'Order by creation time.', schema: { type: 'string', enum: ['createdAt:asc', 'createdAt:desc'], default: 'createdAt:desc' } },
+        ],
+      },
+    ],
+  },
+  {
+    service: 'audit',
+    publicPrefix: '/api/admin/audit',
+    routes: [
+      {
+        method: 'get',
+        path: '',
+        summary: 'List staff actions, newest first (staff with audit.read)',
+        permissions: ['audit.read'],
+        statusCode: 200,
+        response: 'paginated',
+        query: [
+          { name: 'page', description: 'Page number, starting at 1.', schema: { type: 'integer', minimum: 1, default: 1 } },
+          { name: 'limit', description: 'Page size, at most 100.', schema: { type: 'integer', minimum: 1, maximum: 100, default: 50 } },
+          { name: 'actorId', description: 'The staff member who acted.', schema: { type: 'string', format: 'uuid' } },
+          {
+            name: 'targetType',
+            description: 'What was acted on.',
+            schema: { type: 'string', enum: ['USER', 'DRIVER', 'RESTAURANT', 'ORDER', 'DELIVERY', 'PAYMENT', 'MENU_ITEM', 'STAFF'] },
+          },
+          { name: 'targetId', description: 'The id of what was acted on.', schema: { type: 'string', maxLength: 100 } },
+          { name: 'action', description: 'A dotted action, e.g. driver.approve.', schema: { type: 'string', pattern: '^[a-z_]+(\\.[a-z_]+)+$' } },
+          { name: 'from', description: 'Inclusive, ISO 8601.', schema: { type: 'string', format: 'date-time' } },
+          { name: 'to', description: 'Exclusive, ISO 8601.', schema: { type: 'string', format: 'date-time' } },
         ],
       },
     ],
@@ -1882,6 +1913,9 @@ export function generateAdminOpenApiDocument() {
       if (route.requestBody) {
         operation.requestBody = { required: true, content: { 'application/json': { schema: route.requestBody } } };
       }
+      if (route.auditAction) {
+        operation['x-audit-action'] = route.auditAction;
+      }
 
       if (!adminSpec.paths[pathKey]) {
         adminSpec.paths[pathKey] = {};
@@ -1908,6 +1942,10 @@ export function validateAdminOpenApiDocument(doc: Record<string, any>): void {
         assert(
           Array.isArray(body?.required) && body.required.includes('reason'),
           `Admin mutation must require a reason (ADR 002): ${method.toUpperCase()} ${path}`,
+        );
+        assert(
+          typeof operation['x-audit-action'] === 'string' && /^[a-z_]+(\.[a-z_]+)+$/.test(operation['x-audit-action']),
+          `Admin mutation must name the audit action it records (#213): ${method.toUpperCase()} ${path}`,
         );
       }
     }

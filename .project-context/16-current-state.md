@@ -8,14 +8,15 @@ Snapshot of `dev` after per-stage customer notifications (#129, 2026-10-06). Mer
 - All of Phase 4 (driver and restaurant clients, in their own private repos).
 - The Phase 6 core (#5).
 - Production 3, #212: admin API conventions. The shared `@RequirePermissions`/`PermissionsGuard` (a SYSTEM token gets 401), gateway routing `/api/admin/<service>` → the service's `/admin/<service>`, the separate `docs/openapi/admin.json` contract, and `GET /admin/orders` in order-service. See [ADR 002](../docs/adr/002-admin-api.md).
+- Production 3, #213: audit-service (the 12th service, :3012) stores every staff action append-only (triggers and revoked grants). Services record an action with `AdminAudit.record(manager, ...)` in the same transaction, through their outbox to `admin.actions`; auth, user, driver, restaurant, menu and payment gained an outbox. Read it with `GET /api/admin/audit` (`audit.read`).
 
 When code and this file disagree, the code wins; update this file in the same PR that changes the behavior.
 
 ## Platform at a glance
 
-- Backend-only food-delivery platform: one API Gateway plus eleven NestJS domain services in a single npm-workspaces monorepo, sharing a `shared` package.
+- Backend-only food-delivery platform: one API Gateway plus twelve NestJS domain services (audit-service since #213) in a single npm-workspaces monorepo, sharing a `shared` package.
 - Clients call only the gateway (`:3000`), which proxies by path prefix to the owning service.
-- Nine services own a PostgreSQL database each (one Postgres instance, separate logical databases). Cart and tracking keep their state in Redis. The gateway owns no data.
+- Ten services own a PostgreSQL database each (audit-service since #213) (one Postgres instance, separate logical databases). Cart and tracking keep their state in Redis. The gateway owns no data.
 - Services talk to each other over synchronous HTTP for lookups and state changes, and over Kafka (`order.events`, `payment.events`, `delivery.events`) for asynchronous reactions.
 - Media (avatars, restaurant images, menu item images) goes directly from the client to S3-compatible object storage through presigned POST policies. Services store only URLs.
 

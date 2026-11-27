@@ -31,6 +31,8 @@ export const PROXIES = {
   '/api/admin/drivers': process.env.DRIVER_SERVICE_URL || 'http://localhost:3009',
   '/api/admin/tracking': process.env.TRACKING_SERVICE_URL || 'http://localhost:3010',
   '/api/admin/notifications': process.env.NOTIFICATION_SERVICE_URL || 'http://localhost:3011',
+  // #213: audit-service has only staff routes, so it has no public prefix.
+  '/api/admin/audit': process.env.AUDIT_SERVICE_URL || 'http://localhost:3012',
 } as const;
 
 export function getServicePrefix(gatewayPath: string): string {

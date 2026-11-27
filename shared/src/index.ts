@@ -19,6 +19,7 @@ export * from './nest/filters/http-exception.filter';
 export * from './events/index';
 export * from './kafka/index';
 export * from './outbox/index';
+export * from './audit/index';
 export * from './redis/index';
 export * from './storage/s3-storage.service';
 export * from './storage/s3-clients';

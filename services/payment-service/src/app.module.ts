@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { CorrelationIdMiddleware, KafkaModule } from '@food-delivery/shared';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { HealthController } from './controllers/health.controller';
+import { OutboxModule } from './common/outbox.module';
 import { ConfigModule } from './config/config.module';
 import { loadConfig } from './config/app-config';
 import { Payment } from './entities/payment.entity';
@@ -23,6 +24,8 @@ const config = loadConfig();
       groupId: 'payment-service-group',
     }),
     PaymentsModule,
+    // #213: relays this service's outbox (staff audit events).
+    OutboxModule,
   ],
   controllers: [HealthController],
 })

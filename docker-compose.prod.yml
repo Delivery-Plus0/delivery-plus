@@ -35,6 +35,7 @@ services:
       DRIVER_SERVICE_URL: http://driver-service:3009
       TRACKING_SERVICE_URL: http://tracking-service:3010
       NOTIFICATION_SERVICE_URL: http://notification-service:3011
+      AUDIT_SERVICE_URL: http://audit-service:3012
     ports:
       - '3000:3000'
     healthcheck:
@@ -65,6 +66,8 @@ services:
         condition: service_healthy
       notification-service:
         condition: service_healthy
+      audit-service:
+        condition: service_healthy
 
   auth-service:
     build:
@@ -86,12 +89,15 @@ services:
       EMAIL_CODE_HASH_SECRET: ${EMAIL_CODE_HASH_SECRET:-}
       INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:?INTERNAL_AUTH_SECRET must be set}
       USER_SERVICE_URL: http://user-service:3002
+      KAFKA_BROKER: kafka:29092
     healthcheck:
       test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3001/health/ready']
       interval: 5s
       timeout: 5s
       retries: 10
     depends_on:
+      kafka:
+        condition: service_healthy
       postgres:
         condition: service_healthy
 
@@ -120,12 +126,15 @@ services:
       AWS_S3_PUBLIC_ENDPOINT: ${AWS_S3_PUBLIC_ENDPOINT:-}
       AWS_PUBLIC_BASE_URL: ${AWS_PUBLIC_BASE_URL:?AWS_PUBLIC_BASE_URL must be set}
       AWS_S3_FORCE_PATH_STYLE: ${AWS_S3_FORCE_PATH_STYLE:-false}
+      KAFKA_BROKER: kafka:29092
     healthcheck:
       test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3002/health/ready']
       interval: 5s
       timeout: 5s
       retries: 10
     depends_on:
+      kafka:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       redis:
@@ -155,12 +164,15 @@ services:
       AWS_S3_PUBLIC_ENDPOINT: ${AWS_S3_PUBLIC_ENDPOINT:-}
       AWS_PUBLIC_BASE_URL: ${AWS_PUBLIC_BASE_URL:?AWS_PUBLIC_BASE_URL must be set}
       AWS_S3_FORCE_PATH_STYLE: ${AWS_S3_FORCE_PATH_STYLE:-false}
+      KAFKA_BROKER: kafka:29092
     healthcheck:
       test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3003/health/ready']
       interval: 5s
       timeout: 5s
       retries: 10
     depends_on:
+      kafka:
+        condition: service_healthy
       postgres:
         condition: service_healthy
 
@@ -186,12 +198,15 @@ services:
       AWS_S3_PUBLIC_ENDPOINT: ${AWS_S3_PUBLIC_ENDPOINT:-}
       AWS_PUBLIC_BASE_URL: ${AWS_PUBLIC_BASE_URL:?AWS_PUBLIC_BASE_URL must be set}
       AWS_S3_FORCE_PATH_STYLE: ${AWS_S3_FORCE_PATH_STYLE:-false}
+      KAFKA_BROKER: kafka:29092
     healthcheck:
       test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3004/health/ready']
       interval: 5s
       timeout: 5s
       retries: 10
     depends_on:
+      kafka:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       restaurant-service:
@@ -395,6 +410,32 @@ services:
       KAFKA_BROKER: kafka:29092
     healthcheck:
       test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3011/health/ready']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  # #213: the append-only staff audit log; consumes admin.actions.
+  audit-service:
+    build:
+      context: .
+      args:
+        SERVICE_NAME: audit-service
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://${POSTGRES_USER_URLENCODED:?POSTGRES_USER_URLENCODED must be set}:${POSTGRES_PASSWORD_URLENCODED:?POSTGRES_PASSWORD_URLENCODED must be set}@postgres:5432/audit_service
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKER: kafka:29092
+    healthcheck:
+      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3012/health/ready']
       interval: 5s
       timeout: 5s
       retries: 10

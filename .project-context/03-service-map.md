@@ -16,6 +16,7 @@ This file is the high-level dependency map. For deeper service-by-service detail
 | driver-service | 3009 | PostgreSQL | delivery-service, tracking-service | drivers (availability: compare-and-set; drivers only go online/offline, delivery-service claims and releases) | none | none |
 | tracking-service | 3010 | Redis, delivery-service, driver-service | gateway | last-known locations | none | none |
 | notification-service | 3011 | PostgreSQL, Kafka | gateway | notification records | none | order.events, payment.events, delivery.events |
+| audit-service | 3012 | PostgreSQL, Kafka | gateway (`/api/admin/audit` only) | the append-only staff audit log (#213) | none | admin.actions |
 
 ## Port and route conventions
 

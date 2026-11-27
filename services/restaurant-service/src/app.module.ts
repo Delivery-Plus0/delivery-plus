@@ -1,8 +1,9 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { CorrelationIdMiddleware, RedisModule } from '@food-delivery/shared';
+import { CorrelationIdMiddleware, KafkaModule, RedisModule } from '@food-delivery/shared';
 import { RestaurantsModule } from './modules/restaurants/restaurants.module';
 import { HealthController } from './controllers/health.controller';
+import { OutboxModule } from './common/outbox.module';
 import { ConfigModule } from './config/config.module';
 import { loadConfig } from './config/app-config';
 import { Restaurant } from './entities/restaurant.entity';
@@ -17,6 +18,13 @@ const config = loadConfig();
     TypeOrmModule.forRoot(buildTypeOrmConfig(config.databaseUrl, [Restaurant, RestaurantReview])),
     RedisModule.register({ url: process.env.REDIS_URL || 'redis://localhost:6379' }),
     RestaurantsModule,
+    // #213: publishes this service's outbox (staff audit events); it consumes nothing.
+    KafkaModule.register({
+      clientId: 'restaurant-service',
+      brokers: [process.env.KAFKA_BROKER || 'localhost:9092'],
+      producerOnly: true,
+    }),
+    OutboxModule,
   ],
   controllers: [HealthController],
 })

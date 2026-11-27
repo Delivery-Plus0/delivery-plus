@@ -14,6 +14,11 @@ export interface KafkaModuleOptions {
   durableIdempotency?: boolean;
   /** Attempts per event before it is dead-lettered (default 3, exponential backoff between them). */
   maxHandlerAttempts?: number;
+  /**
+   * Publish only (#213: services whose outbox relays admin audit events). No consumer is created,
+   * so the service joins no consumer group.
+   */
+  producerOnly?: boolean;
 }
 
 @Global()
@@ -26,15 +31,17 @@ export class KafkaModule {
         useValue: options,
       },
       KafkaProducerService,
-      KafkaConsumerService,
     ];
+    if (!options.producerOnly) {
+      providers.push(KafkaConsumerService);
+    }
     if (options.durableIdempotency) {
       providers.push(DurableEventIdempotencyService);
     }
     return {
       module: KafkaModule,
       providers,
-      exports: [KafkaProducerService, KafkaConsumerService],
+      exports: options.producerOnly ? [KafkaProducerService] : [KafkaProducerService, KafkaConsumerService],
     };
   }
 }

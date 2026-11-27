@@ -448,7 +448,7 @@ async function assertStaffInvitation() {
   const mail = JSON.parse((await redis.get(`test:email:${email}`).finally(() => redis.disconnect())) ?? '{}') as { text?: string };
   const token = new URL(mail.text?.match(/https?:\/\/\S+/)?.[0] ?? 'http://x').searchParams.get('token') ?? '';
 
-  const shortPassword = await outcomeOf(
+  const tooShort = await outcomeOf(
     axios.post(`${API_URL}/api/auth/staff/accept-invitation`, { token, password: 'short-pass', fullName: 'E2E Staff', phone: '01012345678' }),
   );
   const password = 'E2E-staff-passw0rd!';
@@ -465,7 +465,7 @@ async function assertStaffInvitation() {
 
   const got = {
     invited: invitation.permissions.join(','),
-    shortPassword: shortPassword.status,
+    tooShort: tooShort.status,
     role: claims.role,
     perms: (claims.perms ?? []).join(','),
     forbidden: forbidden.status,
@@ -475,7 +475,7 @@ async function assertStaffInvitation() {
   };
   const want = {
     invited: 'ops.read,support.read',
-    shortPassword: 400,
+    tooShort: 400,
     role: 'ADMIN',
     perms: 'ops.read,support.read',
     forbidden: 403,

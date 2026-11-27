@@ -41,6 +41,17 @@ Published as `/api/admin/drivers`:
 - No row carries the national-ID hash.
 - `GET /internal/drivers/by-user/:userId` (SYSTEM, user-service only) gives the driver id of a person for the staff person page.
 
+## Staff actions (#215)
+Published as `/api/admin/drivers/:id/...`. Each needs a `reason` (for the audit log, never shown to the driver), stages one audit event (#213) in the same transaction, and tells the driver. A repeat changes nothing and records nothing.
+
+| Route | Permission | Effect |
+| --- | --- | --- |
+| `POST :id/review` `{decision, note?, submittedAt, reason}` | `onboarding.review` | The #207 decision on that exact submission (compare-and-set); `note` is what the driver reads. |
+| `POST :id/suspend` `{reason}` | `ops.act` | `OFFLINE`/`AVAILABLE` → `SUSPENDED` now. A **BUSY driver finishes the current delivery first**: the request is kept (`suspensionRequestedAt`, migration 010) and the release at the end of the job lands on `SUSPENDED` instead of `AVAILABLE`, in one SQL statement, so a release racing the suspension can't lose it. |
+| `POST :id/reactivate` `{reason}` | `ops.act` | `SUSPENDED` → `OFFLINE` (the driver goes online again themselves), or a BUSY driver's pending suspension is withdrawn. |
+
+`PATCH /drivers/:id/verification` and `POST /drivers/:id/application/review` stay for one release (deprecated), then go.
+
 ## Dispatch fairness (#210)
 
 Available, VERIFIED drivers are listed by `COALESCE(availableSince, updatedAt) ASC, id ASC`: the longest-idle driver is offered work first, with a deterministic tie-breaker. Going online or being released from a delivery records database time in the same compare-and-set update as the status. Leaving AVAILABLE clears the timestamp. Repeated online/release requests are no-ops and retain the current queue position; unrelated profile or verification edits do not change it.

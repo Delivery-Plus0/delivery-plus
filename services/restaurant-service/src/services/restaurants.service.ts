@@ -1,3 +1,4 @@
+import { EntityManager } from 'typeorm';
 import { Inject, Injectable } from '@nestjs/common';
 import {
   ForbiddenError,
@@ -85,7 +86,10 @@ export class RestaurantsService {
   /** Public: only an APPROVED restaurant exists for customers (#208). */
   async getById(id: string): Promise<PublicRestaurantDto> {
     const restaurant = await this.getEntityById(id);
-    if (restaurant.approvalStatus !== 'APPROVED') throw new NotFoundError(`Restaurant ${id} not found`);
+    // #215 (owner decision): a suspended restaurant is gone for customers, like an unapproved one.
+    if (restaurant.approvalStatus !== 'APPROVED' || restaurant.status === RestaurantStatus.SUSPENDED) {
+      throw new NotFoundError(`Restaurant ${id} not found`);
+    }
     return this.toPublicRestaurant(restaurant);
   }
 
@@ -125,6 +129,11 @@ export class RestaurantsService {
     return { id: restaurant.id, contactPhone: restaurant.contactPhone ?? null };
   }
 
+  /** #215: drops the cached copy after a staff status change, so customers see it at once. */
+  async forget(id: string): Promise<void> {
+    await this.cache.del(`restaurant:${id}`);
+  }
+
   /** #208: the application with its review history, for staff with onboarding.review. */
   async getApplicationForStaff(id: string): Promise<StaffRestaurantApplicationDto> {
     const restaurant = await this.restaurants.findById(id);
@@ -136,7 +145,12 @@ export class RestaurantsService {
    * #208: a staff decision on the exact submission the reviewer loaded (compare-and-set on submittedAt).
    * An approval re-checks the application, menu included (422). Repeating the same decision is a no-op.
    */
-  async review(reviewerUserId: string, id: string, dto: ReviewRestaurantApplicationDto): Promise<StaffRestaurantApplicationDto> {
+  async review(
+    reviewerUserId: string,
+    id: string,
+    dto: ReviewRestaurantApplicationDto,
+    onDecided?: (manager: EntityManager, restaurant: Restaurant) => Promise<void>,
+  ): Promise<StaffRestaurantApplicationDto> {
     if (!(await this.restaurants.findById(id))) throw new NotFoundError(`Restaurant ${id} not found`);
     try {
       await this.restaurants.decideIfSubmitted(
@@ -147,6 +161,7 @@ export class RestaurantsService {
           const missing = await this.missingForApproval(restaurant);
           if (missing.length) throw new RestaurantApplicationIncompleteError(missing);
         },
+        onDecided,
       );
     } catch (error) {
       if (error instanceof NotInReviewError) {

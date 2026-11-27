@@ -11,6 +11,8 @@ import { DataSource } from 'typeorm';
 import { Restaurant } from '../entities/restaurant.entity';
 import { RestaurantReview } from '../entities/restaurant-review.entity';
 import { buildTypeOrmConfig } from '../database/typeorm.config';
+import { ListRestaurantsQueryDto } from '../dto/list-restaurants-query.dto';
+import { AdminAudit } from '@food-delivery/shared';
 import { RestaurantsRepository } from './restaurants.repository';
 
 const DATABASE_URL = process.env.RESTAURANT_TEST_DATABASE_URL;
@@ -78,4 +80,41 @@ describeDb('RestaurantsRepository.findForAdmin (PostgreSQL integration, #214)', 
     expect(names(await repo.findByContactPhone('+201011111111'))).toEqual(['Koshary Abou Tarek']);
     expect(await repo.findByContactPhone('+2010111')).toEqual([]);
   });
+
+  it('suspends and reactivates in a transaction with one audit event each, idempotently, and hides a suspended one from customers (#215)', async () => {
+    const [[zooba]] = await repo.findForAdmin({ namePrefix: 'zooba' }, 1, 1);
+    const act = (kind: 'suspend' | 'reactivate') =>
+      repo.transaction(async (manager) => {
+        const change = kind === 'suspend' ? await repo.suspend(manager, zooba.id) : await repo.reactivate(manager, zooba.id);
+        if (change) {
+          await AdminAudit.record(manager, {
+            actor: { id: randomUUID() },
+            permission: 'ops.act',
+            action: `restaurant.${kind}`,
+            targetType: 'RESTAURANT',
+            targetId: zooba.id,
+            reason: 'Integration test',
+            before: change.before,
+            after: change.after,
+            service: 'restaurant-service',
+          });
+        }
+        return change;
+      });
+    const publicNames = async () =>
+      (await repo.list(Object.assign(new ListRestaurantsQueryDto(), { page: 1, limit: 50, sortBy: 'createdAt', sortOrder: 'DESC' }), 5))[0].map((item) => item.restaurant.name);
+
+    expect(await publicNames()).toContain('Zooba');
+    expect(await act('suspend')).toEqual({ before: { status: 'BUSY' }, after: { status: 'SUSPENDED' } });
+    expect(await act('suspend')).toBeNull();
+    expect(await publicNames()).not.toContain('Zooba');
+
+    expect(await act('reactivate')).toEqual({ before: { status: 'SUSPENDED' }, after: { status: 'CLOSED' } });
+    expect(await act('reactivate')).toBeNull();
+    expect(await publicNames()).toContain('Zooba');
+
+    const actions = await ds.query(`SELECT "payload"->'payload'->>'action' AS "action" FROM "outbox_events" WHERE "payload"->'payload'->>'targetId' = $1 ORDER BY "id"`, [zooba.id]);
+    expect(actions.map((row: { action: string }) => row.action)).toEqual(['restaurant.suspend', 'restaurant.reactivate']);
+  });
 });
+

@@ -1,3 +1,4 @@
+import { EntityManager } from 'typeorm';
 import { createHmac } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import {
@@ -159,7 +160,13 @@ export class DriverApplicationService {
    * decision is refused (409). An approval needs a complete application with no expired licence (422).
    * Repeating the same decision on the same submission returns the application unchanged.
    */
-  async review(reviewerUserId: string, driverId: string, dto: ReviewDriverApplicationDto, now = new Date()): Promise<StaffDriverApplicationView> {
+  async review(
+    reviewerUserId: string,
+    driverId: string,
+    dto: ReviewDriverApplicationDto,
+    now = new Date(),
+    onDecided?: (manager: EntityManager, driver: { userId: string; verificationStatus: string }) => Promise<void>,
+  ): Promise<StaffDriverApplicationView> {
     await this.requireApplication(driverId);
     try {
       await this.applications.decideIfSubmitted(
@@ -170,6 +177,7 @@ export class DriverApplicationService {
           const problems = applicationProblems(driver, documents, cairoDate(now));
           if (problems) throw new ApplicationIncompleteError(problems.missingFields, problems.missingDocuments, problems.expiredLicences);
         },
+        onDecided,
       );
     } catch (error) {
       if (error instanceof NotInReviewError) {

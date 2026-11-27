@@ -237,6 +237,7 @@ describe('driver documents over HTTP (#207)', () => {
         driverId,
         { decision: 'REJECTED', note: 'Selfie is blurry', reviewerUserId: staffUserId, submittedAt: new Date(submittedAt) },
         expect.any(Function),
+        undefined, // #215: no audit hook on the old staff route
       );
     });
 

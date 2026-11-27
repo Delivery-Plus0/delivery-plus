@@ -45,6 +45,17 @@ Published as `/api/admin/restaurants`:
 - `GET /internal/restaurants/by-owner/:ownerId` (SYSTEM, user-service only) links an owner account to its restaurants on the staff person page.
 - Needs `USER_SERVICE_URL` and `ORDER_SERVICE_URL`.
 
+## Staff actions (#215)
+Published as `/api/admin/restaurants/:id/...`. Each needs a `reason`, stages one audit event in the same transaction, tells the owner, and drops the cached copy so customers see the change at once. A repeat changes nothing and records nothing.
+
+| Route | Permission | Effect |
+| --- | --- | --- |
+| `POST :id/review` `{decision, note?, submittedAt, reason}` | `onboarding.review` | The #208 decision on that exact submission. |
+| `POST :id/suspend` `{reason}` | `ops.act` | Any status → `SUSPENDED`: gone from the public list and 404 by id for customers (owner decision, `docs/business/restaurant-availability.md`). |
+| `POST :id/reactivate` `{reason}` | `ops.act` | `SUSPENDED` → `CLOSED`; the owner opens it. |
+
+`POST /restaurants/:id/review` and the admin branch of `PATCH /restaurants/:id/status` stay for one release (deprecated), then go.
+
 ## Required env vars
 From `services/restaurant-service/src/config/app-config.ts`:
 

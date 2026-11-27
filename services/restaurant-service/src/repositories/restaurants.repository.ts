@@ -106,6 +106,8 @@ export class RestaurantsRepository {
     id: string,
     review: RestaurantReviewDecisionInput,
     check: (restaurant: Restaurant) => Promise<void> | void,
+    /** #215: runs in the same transaction after a new decision (not on a repeat), e.g. the audit event. */
+    onDecided?: (manager: EntityManager, restaurant: Restaurant) => Promise<void>,
   ): Promise<'decided' | 'repeat'> {
     return this.repo.manager.transaction(async (manager) => {
       const restaurant = await this.lock(manager, id);
@@ -132,6 +134,7 @@ export class RestaurantsRepository {
           note: review.note,
           applicationSubmittedAt: restaurant.submittedAt as Date,
         });
+        if (onDecided) await onDecided(manager, restaurant);
         return 'decided';
       }
 
@@ -157,8 +160,8 @@ export class RestaurantsRepository {
   }
 
   async list(query: ListRestaurantsQueryDto, defaultRadiusKm: number): Promise<[RestaurantListItem[], number]> {
-    // #208: customers only ever see APPROVED restaurants.
-    const qb = this.repo.createQueryBuilder('r').where(`r.approvalStatus = 'APPROVED'`);
+    // #208: customers only ever see APPROVED restaurants; #215 (owner decision): never a SUSPENDED one.
+    const qb = this.repo.createQueryBuilder('r').where(`r.approvalStatus = 'APPROVED'`).andWhere(`r.status <> 'SUSPENDED'`);
 
     if (query.status) {
       qb.andWhere('r.status = :status', { status: query.status });
@@ -248,6 +251,28 @@ export class RestaurantsRepository {
   findByContactPhone(phone: string): Promise<Restaurant[]> {
     return this.repo.find({ where: { contactPhone: phone }, order: { createdAt: 'DESC' }, take: 20 });
   }
+
+  /** #215: runs staff actions in one transaction with their audit event. */
+  transaction<T>(work: (manager: EntityManager) => Promise<T>): Promise<T> {
+    return this.repo.manager.transaction(work);
+  }
+
+  /**
+   * #215: suspends a restaurant in the caller's transaction (any status → SUSPENDED). Null when it was
+   * already suspended: the action is idempotent and records nothing.
+   */
+  async suspend(manager: EntityManager, id: string): Promise<{ before: { status: string }; after: { status: string } } | null> {
+    const current = await this.lock(manager, id);
+    if (!current || current.status === RestaurantStatus.SUSPENDED) return null;
+    await manager.update(Restaurant, { id, status: current.status }, { status: RestaurantStatus.SUSPENDED });
+    return { before: { status: current.status }, after: { status: RestaurantStatus.SUSPENDED } };
+  }
+
+  /** #215: lifts a suspension to CLOSED (the owner opens when ready). Null when it wasn't suspended. */
+  async reactivate(manager: EntityManager, id: string): Promise<{ before: { status: string }; after: { status: string } } | null> {
+    const result = await manager.update(Restaurant, { id, status: RestaurantStatus.SUSPENDED }, { status: RestaurantStatus.CLOSED });
+    return result.affected ? { before: { status: RestaurantStatus.SUSPENDED }, after: { status: RestaurantStatus.CLOSED } } : null;
+  }
 }
 
 export interface AdminRestaurantFilter {
@@ -257,4 +282,3 @@ export interface AdminRestaurantFilter {
   namePrefix?: string;
   near?: { latitude: number; longitude: number; withinKm: number };
 }
-

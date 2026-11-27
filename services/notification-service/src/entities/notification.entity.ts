@@ -9,6 +9,8 @@ export enum NotificationType {
   ORDER_CANCELLED = 'ORDER_CANCELLED',
   PAYMENT_FAILED = 'PAYMENT_FAILED',
   PAYMENT_REFUNDED = 'PAYMENT_REFUNDED',
+  /** #215: a staff decision about the person's account, application or restaurant. */
+  ACCOUNT_UPDATE = 'ACCOUNT_UPDATE',
 }
 
 @Entity('notifications')

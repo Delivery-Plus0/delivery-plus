@@ -314,6 +314,26 @@ describe('admin OpenAPI contract (#212)', () => {
     expect(doc.paths['/api/admin/users/search'].post.requestBody.content['application/json'].schema.required).toBeUndefined();
   });
 
+  it('lists every admin mutation with the audit action it records (#213, #215)', () => {
+    const doc = generateAdminOpenApiDocument();
+    const mutations = Object.entries(doc.paths as Record<string, Record<string, Record<string, unknown>>>)
+      .flatMap(([path, operations]) => Object.entries(operations).map(([method, operation]) => ({ route: `${method.toUpperCase()} ${path}`, operation })))
+      .filter(({ route, operation }) => !route.startsWith('GET ') && operation['x-read-only'] !== true)
+      .map(({ route, operation }) => `${route} -> ${operation['x-audit-action']}`)
+      .sort();
+    expect(mutations).toEqual([
+      'POST /api/admin/auth/users/{id}/reactivate -> user.reactivate',
+      'POST /api/admin/auth/users/{id}/revoke-sessions -> user.revoke_sessions',
+      'POST /api/admin/auth/users/{id}/suspend -> user.suspend',
+      'POST /api/admin/drivers/{id}/reactivate -> driver.reactivate',
+      'POST /api/admin/drivers/{id}/review -> driver.approve',
+      'POST /api/admin/drivers/{id}/suspend -> driver.suspend',
+      'POST /api/admin/restaurants/{id}/reactivate -> restaurant.reactivate',
+      'POST /api/admin/restaurants/{id}/review -> restaurant.approve',
+      'POST /api/admin/restaurants/{id}/suspend -> restaurant.suspend',
+    ]);
+  });
+
   it('keeps admin paths out of the public contract', () => {
     const doc = generatePublicOpenApiDocument();
     expect(Object.keys(doc.paths).some((path) => path.startsWith('/api/admin/'))).toBe(false);

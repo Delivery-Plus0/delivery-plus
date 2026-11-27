@@ -30,6 +30,7 @@ The services with an outbox for this are auth, user, driver, restaurant, menu an
 | `reason` | Required on every admin mutation; `AdminAudit.record` refuses an empty one. |
 | `before`, `after` | Only the fields the action changed (`auditDiff`). |
 | `service`, `correlationId`, `occurredAt` | |
+| `notify` | Optional (#215): `{userId, messageKey, params}`, the person notification-service tells about the action. Not stored in the audit log's columns. |
 
 **Redaction:** `redactAuditFields` replaces values whose key names a password, token, hash, OTP or verification code, API key, signature, any `...Url`/`...Key` of a stored object (private documents), or a phone number with `[redacted]`. The log line for a consumed event carries ids and the action only, never the reason or the values.
 

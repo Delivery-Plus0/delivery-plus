@@ -22,6 +22,8 @@ import { DriverAvailableSince1700000000004 } from '../database/migrations/005-dr
 import { DriverEffectiveIdleIndex1700000000005 } from '../database/migrations/006-driver-effective-idle-index';
 import { DriverApplicationDocuments1700000000006 } from '../database/migrations/007-driver-application-documents';
 import { DriverReviews1700000000007 } from '../database/migrations/008-driver-reviews';
+import { OutboxEvents1700000000008 } from '../database/migrations/009-outbox-events';
+import { DriverSuspensionRequest1700000000009 } from '../database/migrations/010-driver-suspension-request';
 import { LICENCE_EXPIRED_NOTE, LICENCE_EXPIRY_LOCK, LicenceExpiryRepository } from './licence-expiry.repository';
 import { DriverApplicationRepository } from './driver-application.repository';
 import { DriversRepository } from './drivers.repository';
@@ -38,6 +40,8 @@ const MIGRATIONS = [
   DriverEffectiveIdleIndex1700000000005,
   DriverApplicationDocuments1700000000006,
   DriverReviews1700000000007,
+  OutboxEvents1700000000008,
+  DriverSuspensionRequest1700000000009,
 ];
 const ENTITIES = [Driver, DriverDocument, DriverDocumentAccess, DriverReview];
 

@@ -26,6 +26,9 @@ import { VerifyExistingDrivers1700000000003 } from '../database/migrations/004-v
 import { DriverAvailableSince1700000000004 } from '../database/migrations/005-driver-available-since';
 import { DriverEffectiveIdleIndex1700000000005 } from '../database/migrations/006-driver-effective-idle-index';
 import { DriverApplicationDocuments1700000000006 } from '../database/migrations/007-driver-application-documents';
+import { DriverReviews1700000000007 } from '../database/migrations/008-driver-reviews';
+import { OutboxEvents1700000000008 } from '../database/migrations/009-outbox-events';
+import { DriverSuspensionRequest1700000000009 } from '../database/migrations/010-driver-suspension-request';
 
 const DATABASE_URL = process.env.DRIVER_TEST_DATABASE_URL;
 const describeDb = DATABASE_URL ? describe : describe.skip;
@@ -37,6 +40,9 @@ const ALL_MIGRATIONS = [
   DriverAvailableSince1700000000004,
   DriverEffectiveIdleIndex1700000000005,
   DriverApplicationDocuments1700000000006,
+  DriverReviews1700000000007,
+  OutboxEvents1700000000008,
+  DriverSuspensionRequest1700000000009,
 ];
 
 /** The service's own DataSource options, with an explicit migration list. */
@@ -90,7 +96,7 @@ describeDb('DriversRepository (PostgreSQL integration, #206, #210)', () => {
       await before.destroy();
 
       await open();
-      expect(await ds.runMigrations()).toHaveLength(4);
+      expect(await ds.runMigrations()).toHaveLength(ALL_MIGRATIONS.length - BEFORE_206.length);
 
       expect(await repo.findById(pending)).toMatchObject({ verificationStatus: 'VERIFIED', verifiedAt: expect.any(Date) });
       expect(await repo.findById(rejected)).toMatchObject({ verificationStatus: 'REJECTED', verifiedAt: null });
@@ -118,13 +124,13 @@ describeDb('DriversRepository (PostgreSQL integration, #206, #210)', () => {
       await before.query(`UPDATE drivers SET "updatedAt" = '2026-01-01T00:00:00Z' WHERE id = $1`, [online]);
       await before.destroy();
       await open();
-      expect(await ds.runMigrations()).toHaveLength(3);
+      const after210 = ALL_MIGRATIONS.length - BEFORE_210.length;
+      expect(await ds.runMigrations()).toHaveLength(after210);
       expect((await repo.findById(online))?.availableSince).toEqual(new Date('2026-01-01T00:00:00Z'));
       expect((await repo.findById(offline))?.availableSince).toBeNull();
-      await ds.undoLastMigration(); // Undo the application tables (#207) first.
-      await ds.undoLastMigration(); // Then the expression index.
-      await ds.undoLastMigration(); // Then the idle column.
-      expect(await ds.runMigrations()).toHaveLength(3);
+      // Undo everything after #210, newest first, down to the idle column; then reapply.
+      for (let i = 0; i < after210; i++) await ds.undoLastMigration();
+      expect(await ds.runMigrations()).toHaveLength(after210);
       expect((await repo.findById(online))?.availableSince).toEqual(new Date('2026-01-01T00:00:00Z'));
     });
   });

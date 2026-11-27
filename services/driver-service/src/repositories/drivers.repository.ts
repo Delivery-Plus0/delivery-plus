@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, Repository } from 'typeorm';
+import { EntityManager, FindOptionsWhere, Repository } from 'typeorm';
 import { DriverStatus } from '@food-delivery/shared';
 import { Driver } from '../entities/driver.entity';
 import { DriverDocument } from '../entities/driver-document.entity';
@@ -119,7 +119,90 @@ export class DriversRepository {
     else qb.orderBy('d.createdAt', 'DESC');
     return qb.addOrderBy('d.id', 'ASC').skip((page - 1) * limit).take(limit).getManyAndCount();
   }
+
+  /**
+   * #215: the end of a delivery (BUSY → AVAILABLE, or OFFLINE for a driver who lost verification),
+   * in one compare-and-set: when staff asked to suspend the driver meanwhile, the release lands on
+   * SUSPENDED instead and the request is cleared. One statement, so a suspension can't be lost to a
+   * release racing it.
+   */
+  async releaseFromBusy(id: string, to: DriverStatus): Promise<Driver | null> {
+    // For an UPDATE, TypeORM's query() resolves to [rows, affectedCount].
+    const [rows]: [{ id: string }[], number] = await this.repo.query(
+      `UPDATE "drivers"
+          SET "status" = CASE WHEN "suspensionRequestedAt" IS NOT NULL THEN 'SUSPENDED'::driver_status ELSE $2::driver_status END,
+              "availableSince" = CASE WHEN "suspensionRequestedAt" IS NULL AND $2::text = 'AVAILABLE' THEN clock_timestamp() ELSE NULL END,
+              "suspensionRequestedAt" = NULL
+        WHERE "id" = $1 AND "status" = 'BUSY'
+          -- On duty needs VERIFIED (#206), as transitionStatus checks: a rejection landing meanwhile fails the write.
+          AND ($2::text <> 'AVAILABLE' OR "verificationStatus" = 'VERIFIED' OR "suspensionRequestedAt" IS NOT NULL)
+       RETURNING "id"`,
+      [id, to],
+    );
+    return rows.length ? this.findById(id) : null;
+  }
+
+  /**
+   * #215: suspends a driver in the caller's transaction. Off duty (OFFLINE, AVAILABLE): SUSPENDED now.
+   * BUSY: the request is recorded and applied when the delivery ends. Null when there was nothing to do
+   * (already suspended, or already requested): the action is idempotent.
+   */
+  async suspend(manager: EntityManager, id: string): Promise<DriverStatusChange | null> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const driver = await manager.getRepository(Driver).findOne({ where: { id } });
+      if (!driver || driver.status === DriverStatus.SUSPENDED || (driver.status === DriverStatus.BUSY && driver.suspensionRequestedAt)) return null;
+      const before = { status: driver.status, suspensionRequested: !!driver.suspensionRequestedAt };
+      if (driver.status === DriverStatus.BUSY) {
+        const result = await manager
+          .createQueryBuilder()
+          .update(Driver)
+          .set({ suspensionRequestedAt: () => 'now()' })
+          .where(`id = :id AND status = 'BUSY' AND "suspensionRequestedAt" IS NULL`, { id })
+          .execute();
+        if (result.affected) return { before, after: { status: DriverStatus.BUSY, suspensionRequested: true } };
+      } else {
+        const result = await manager
+          .createQueryBuilder()
+          .update(Driver)
+          .set({ status: DriverStatus.SUSPENDED, availableSince: null, suspensionRequestedAt: null })
+          .where('id = :id AND status = :from', { id, from: driver.status })
+          .execute();
+        if (result.affected) return { before, after: { status: DriverStatus.SUSPENDED, suspensionRequested: false } };
+      }
+      // The driver changed status between the read and the write (a claim or a release): read again.
+    }
+    throw new Error(`Driver ${id} kept changing status during the suspension`);
+  }
+
+  /**
+   * #215: reactivates a driver in the caller's transaction: SUSPENDED → OFFLINE (they go online
+   * themselves), or a BUSY driver's pending suspension is withdrawn. Null when there was nothing to do.
+   */
+  async reactivate(manager: EntityManager, id: string): Promise<DriverStatusChange | null> {
+    const suspended = await manager
+      .createQueryBuilder()
+      .update(Driver)
+      .set({ status: DriverStatus.OFFLINE, suspensionRequestedAt: null })
+      .where(`id = :id AND status = 'SUSPENDED'`, { id })
+      .execute();
+    if (suspended.affected) {
+      return { before: { status: DriverStatus.SUSPENDED, suspensionRequested: false }, after: { status: DriverStatus.OFFLINE, suspensionRequested: false } };
+    }
+    const withdrawn = await manager
+      .createQueryBuilder()
+      .update(Driver)
+      .set({ suspensionRequestedAt: null })
+      .where(`id = :id AND status = 'BUSY' AND "suspensionRequestedAt" IS NOT NULL`, { id })
+      .execute();
+    if (withdrawn.affected) {
+      return { before: { status: DriverStatus.BUSY, suspensionRequested: true }, after: { status: DriverStatus.BUSY, suspensionRequested: false } };
+    }
+    return null;
+  }
 }
+
+/** #215: the state a staff suspension or reactivation changed, for its audit event. */
+export type DriverStatusChange = { before: { status: DriverStatus; suspensionRequested: boolean }; after: { status: DriverStatus; suspensionRequested: boolean } };
 
 export interface AdminDriverFilter {
   status?: string;
@@ -128,4 +211,3 @@ export interface AdminDriverFilter {
   licenceExpiringBy?: string;
   platePrefix?: string;
 }
-

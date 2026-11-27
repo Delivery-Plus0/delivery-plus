@@ -1,3 +1,5 @@
+import { AdminRestaurantActionsController } from '../../controllers/admin-restaurant-actions.controller';
+import { AdminRestaurantActionsService } from '../../services/admin-restaurant-actions.service';
 import { AdminRestaurantsController } from '../../controllers/admin-restaurants.controller';
 import { InternalRestaurantsController } from '../../controllers/internal-restaurants.controller';
 import { AdminRestaurantsService } from '../../services/admin-restaurants.service';
@@ -24,7 +26,7 @@ import { MenuServiceClient } from '../../common/menu-service.client';
       inject: [APP_CONFIG],
     }),
   ],
-  controllers: [RestaurantsController, AdminRestaurantsController, InternalRestaurantsController],
+  controllers: [RestaurantsController, AdminRestaurantsController, AdminRestaurantActionsController, InternalRestaurantsController],
   providers: [
     RestaurantsService,
     RestaurantsRepository,
@@ -32,6 +34,7 @@ import { MenuServiceClient } from '../../common/menu-service.client';
     InternalAuthGuard,
     MenuServiceClient,
     AdminRestaurantsService,
+    AdminRestaurantActionsService,
     StaffLookupsClient,
     SystemTokenService,
   ],

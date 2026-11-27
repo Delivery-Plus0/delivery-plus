@@ -208,7 +208,11 @@ export class DriversService {
       driver.status === DriverStatus.BUSY && target === DriverStatus.AVAILABLE && driver.verificationStatus !== 'VERIFIED'
         ? DriverStatus.OFFLINE
         : target;
-    const updated = await this.drivers.transitionStatus(driver.id, driver.status, releasedTo);
+    // #215: a release honours a suspension staff asked for during the delivery (atomically).
+    const updated =
+      driver.status === DriverStatus.BUSY && target === DriverStatus.AVAILABLE
+        ? await this.drivers.releaseFromBusy(driver.id, releasedTo)
+        : await this.drivers.transitionStatus(driver.id, driver.status, releasedTo);
     if (updated) return updated;
 
     const current = await this.getById(driver.id);

@@ -143,7 +143,11 @@ export class AuthController {
   @Roles(UserRole.ADMIN)
   @RequirePermissions('users.manage')
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Suspend or reactivate an account (staff with users.manage). Suspending ends its sessions' })
+  @ApiOperation({
+    summary: 'Suspend or reactivate an account (staff with users.manage). Suspending ends its sessions',
+    description: 'Deprecated (#215): use POST /api/admin/auth/users/:id/suspend and /reactivate, which are audited. Removed after one release.',
+    deprecated: true,
+  })
   setAccountStatus(@Param('id', new ParseUUIDPipe()) id: string, @Body() dto: UpdateAccountStatusDto, @CurrentUser() actor: JwtPayload) {
     return this.authService.setAccountStatus(id, dto.status, dto.reason?.trim() || null, actor.sub);
   }

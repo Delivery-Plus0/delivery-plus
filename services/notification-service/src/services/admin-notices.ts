@@ -20,6 +20,14 @@ export const ADMIN_NOTICES: Record<string, { title: string; message: (params: Re
     title: 'Restaurant needs changes',
     message: (p) => `${p.restaurantName ?? 'Your restaurant'} was not approved.${p.note ? ` Reviewer's note: ${p.note}` : ''} You can fix it and submit again.`,
   },
+  'driver.review_withdrawn': {
+    title: 'Application back in review',
+    message: () => 'The last decision on your driver application was withdrawn. Your application is back in review.',
+  },
+  'restaurant.review_withdrawn': {
+    title: 'Restaurant back in review',
+    message: (p) => `The last decision on ${p.restaurantName ?? 'your restaurant'} was withdrawn. It is back in review.`,
+  },
   'driver.suspended': {
     title: 'Driving paused',
     message: () => 'Your driver account was suspended by Delivery Plus. Contact support if you think this is a mistake.',

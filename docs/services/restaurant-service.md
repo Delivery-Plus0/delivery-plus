@@ -52,6 +52,7 @@ Published as `/api/admin/restaurants/:id/...`. Each needs a `reason`, stages one
 | Route | Permission | Effect |
 | --- | --- | --- |
 | `POST :id/review` `{decision, note?, submittedAt, reason}` | `onboarding.review` | The #208 decision on that exact submission. |
+| `POST :id/review/undo` `{reason}` | `onboarding.review` | #318: the reviewer withdraws their own latest decision within 10 seconds: back to `SUBMITTED` and `CLOSED`, a `WITHDRAWN` history row (migration 007), the owner is told; `409 UndoWindowClosed` / `UndoNotAllowed`. |
 | `POST :id/suspend` `{reason}` | `ops.act` | Any status → `SUSPENDED`: gone from the public list and 404 by id for customers (owner decision, `docs/business/restaurant-availability.md`). |
 | `POST :id/reactivate` `{reason}` | `ops.act` | `SUSPENDED` → `CLOSED`; the owner opens it. |
 

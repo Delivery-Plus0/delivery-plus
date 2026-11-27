@@ -1151,6 +1151,85 @@
         "x-audit-action": "driver.reactivate"
       }
     },
+    "/api/admin/drivers/{id}/review/undo": {
+      "post": {
+        "summary": "Undo your own review decision within 10 seconds; the driver is told (staff with onboarding.review)",
+        "description": "Requires staff permission: onboarding.review.",
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "admin_drivers_post_api_admin_drivers_id_review_undo",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-permissions": [
+          "onboarding.review"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters or body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT, or a SYSTEM token on an admin route"
+          },
+          "403": {
+            "description": "Staff token without the required permission"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reason"
+                ],
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 500,
+                    "description": "Why, for the audit log."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-audit-action": "driver.review_undo"
+      }
+    },
     "/api/admin/restaurants": {
       "get": {
         "summary": "List restaurants of every approval status: status, name prefix, area (staff with support.read)",
@@ -1878,6 +1957,85 @@
           }
         },
         "x-audit-action": "pii.reveal"
+      }
+    },
+    "/api/admin/restaurants/{id}/review/undo": {
+      "post": {
+        "summary": "Undo your own review decision within 10 seconds; the owner is told (staff with onboarding.review)",
+        "description": "Requires staff permission: onboarding.review.",
+        "tags": [
+          "restaurants"
+        ],
+        "operationId": "admin_restaurants_post_api_admin_restaurants_id_review_undo",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-permissions": [
+          "onboarding.review"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters or body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT, or a SYSTEM token on an admin route"
+          },
+          "403": {
+            "description": "Staff token without the required permission"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reason"
+                ],
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 500,
+                    "description": "Why, for the audit log."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-audit-action": "restaurant.review_undo"
       }
     },
     "/api/admin/auth/users/{id}/suspend": {

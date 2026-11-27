@@ -47,6 +47,7 @@ Published as `/api/admin/drivers/:id/...`. Each needs a `reason` (for the audit 
 | Route | Permission | Effect |
 | --- | --- | --- |
 | `POST :id/review` `{decision, note?, submittedAt, reason}` | `onboarding.review` | The #207 decision on that exact submission (compare-and-set); `note` is what the driver reads. |
+| `POST :id/review/undo` `{reason}` | `onboarding.review` | #318: the reviewer withdraws their own latest decision within **10 seconds** (database clock): back to `PENDING` with the same submission, an online driver goes `OFFLINE`, a `WITHDRAWN` row joins the review history (migration 011), the driver is told. A repeat is a no-op. `409 UndoWindowClosed` after 10 s, `409 UndoNotAllowed` for anyone else's decision, `409 DriverOnDelivery` once the driver took a job. |
 | `POST :id/suspend` `{reason}` | `ops.act` | `OFFLINE`/`AVAILABLE` → `SUSPENDED` now. A **BUSY driver finishes the current delivery first**: the request is kept (`suspensionRequestedAt`, migration 010) and the release at the end of the job lands on `SUSPENDED` instead of `AVAILABLE`, in one SQL statement, so a release racing the suspension can't lose it. |
 | `POST :id/reactivate` `{reason}` | `ops.act` | `SUSPENDED` → `OFFLINE` (the driver goes online again themselves), or a BUSY driver's pending suspension is withdrawn. |
 

@@ -116,5 +116,29 @@ describeDb('RestaurantsRepository.findForAdmin (PostgreSQL integration, #214)', 
     const actions = await ds.query(`SELECT "payload"->'payload'->>'action' AS "action" FROM "outbox_events" WHERE "payload"->'payload'->>'targetId' = $1 ORDER BY "id"`, [zooba.id]);
     expect(actions.map((row: { action: string }) => row.action)).toEqual(['restaurant.suspend', 'restaurant.reactivate']);
   });
+
+  it("undoes the reviewer's own decision within the window, once, and refuses others and a closed window (#318)", async () => {
+    const reviewer = randomUUID();
+    const decided = async (by: string, decision: 'APPROVED' | 'REJECTED') => {
+      const [row] = await ds.query(
+        `INSERT INTO "restaurants" ("ownerId", "name", "address", "status", "approvalStatus", "submittedAt", "approvedAt")
+         VALUES ($1, $2, 'Cairo', 'OPEN', $3::varchar, '2026-11-20T00:00:00Z', CASE WHEN $3::text = 'APPROVED' THEN now() END) RETURNING "id"`,
+        [randomUUID(), `Undo ${randomUUID().slice(0, 6)}`, decision],
+      );
+      await ds.query(`INSERT INTO "restaurant_reviews" ("restaurantId", "reviewerUserId", "decision", "applicationSubmittedAt") VALUES ($1, $2, $3, '2026-11-20T00:00:00Z')`, [row.id, by, decision]);
+      return row.id as string;
+    };
+    const id = await decided(reviewer, 'APPROVED');
+    const hook = jest.fn().mockResolvedValue(undefined);
+    expect(await repo.undoDecision(id, reviewer, 10, hook)).toBe('undone');
+    expect(await repo.undoDecision(id, reviewer, 10, hook)).toBe('repeat');
+    expect(hook).toHaveBeenCalledTimes(1);
+    expect(await repo.findById(id)).toMatchObject({ approvalStatus: 'SUBMITTED', status: 'CLOSED', approvedAt: null });
+    const decisions = await ds.query(`SELECT "decision" FROM "restaurant_reviews" WHERE "restaurantId" = $1 ORDER BY "reviewedAt", "id"`, [id]);
+    expect(decisions.map((r: { decision: string }) => r.decision)).toEqual(['APPROVED', 'WITHDRAWN']);
+
+    expect(await repo.undoDecision(await decided(randomUUID(), 'REJECTED'), reviewer, 10)).toBe('not-allowed');
+    expect(await repo.undoDecision(await decided(reviewer, 'REJECTED'), reviewer, -1)).toBe('window-closed');
+  });
 });
 

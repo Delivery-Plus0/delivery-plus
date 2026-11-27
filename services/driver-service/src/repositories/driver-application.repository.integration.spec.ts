@@ -22,6 +22,7 @@ import { DriverApplicationDocuments1700000000006 } from '../database/migrations/
 import { DriverReviews1700000000007 } from '../database/migrations/008-driver-reviews';
 import { OutboxEvents1700000000008 } from '../database/migrations/009-outbox-events';
 import { DriverSuspensionRequest1700000000009 } from '../database/migrations/010-driver-suspension-request';
+import { ReviewWithdrawn1700000000010 } from '../database/migrations/011-review-withdrawn';
 import { DriverReview } from '../entities/driver-review.entity';
 import {
   ApplicationLockedError,
@@ -50,6 +51,7 @@ const ALL_MIGRATIONS = [
   DriverReviews1700000000007,
   OutboxEvents1700000000008,
   DriverSuspensionRequest1700000000009,
+  ReviewWithdrawn1700000000010,
 ];
 const ENTITIES = [Driver, DriverDocument, DriverDocumentAccess, DriverReview];
 

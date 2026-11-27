@@ -451,6 +451,20 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
           },
         },
       },
+      {
+        method: 'post',
+        path: '/{id}/review/undo',
+        summary: "Undo your own review decision within 10 seconds; the driver is told (staff with onboarding.review)",
+        permissions: ['onboarding.review'],
+        statusCode: 200,
+        response: 'object',
+        auditAction: 'driver.review_undo',
+        requestBody: {
+          type: 'object',
+          required: ['reason'],
+          properties: { reason: { type: 'string', minLength: 3, maxLength: 500, description: 'Why, for the audit log.' } },
+        },
+      },
     ],
   },
   {
@@ -566,6 +580,20 @@ export const ADMIN_SERVICE_DEFINITIONS: readonly {
           properties: {
             reason: { type: 'string', minLength: 3, maxLength: 300, description: 'Why, for the audit log.' },
           },
+        },
+      },
+      {
+        method: 'post',
+        path: '/{id}/review/undo',
+        summary: "Undo your own review decision within 10 seconds; the owner is told (staff with onboarding.review)",
+        permissions: ['onboarding.review'],
+        statusCode: 200,
+        response: 'object',
+        auditAction: 'restaurant.review_undo',
+        requestBody: {
+          type: 'object',
+          required: ['reason'],
+          properties: { reason: { type: 'string', minLength: 3, maxLength: 500, description: 'Why, for the audit log.' } },
         },
       },
     ],

@@ -1,6 +1,7 @@
 import { Column, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 
-export type DriverReviewDecision = 'VERIFIED' | 'REJECTED';
+/** `WITHDRAWN` (#318): the reviewer undid their decision within the undo window. */
+export type DriverReviewDecision = 'VERIFIED' | 'REJECTED' | 'WITHDRAWN';
 
 /**
  * One staff decision on a driver (#207): who decided what, with which note, on which submission and

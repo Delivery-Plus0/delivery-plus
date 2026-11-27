@@ -1,12 +1,20 @@
 import { Injectable } from '@nestjs/common';
 import { EntityManager } from 'typeorm';
-import { AdminAudit, AuditActor, NotFoundError } from '@food-delivery/shared';
+import { AdminAudit, AppError, AuditActor, NotFoundError } from '@food-delivery/shared';
 import { RestaurantsRepository } from '../repositories/restaurants.repository';
 import { OutboxRelayService } from '../common/outbox.module';
 import { RestaurantsService, StaffRestaurantApplicationDto } from './restaurants.service';
 import { AdminReviewRestaurantDto } from '../dto/admin-restaurant-actions.dto';
 
 const SERVICE = 'restaurant-service';
+/** #318 (owner decision): how long after a decision its reviewer can undo it. */
+export const REVIEW_UNDO_WINDOW_SECONDS = 10;
+
+export class ReviewUndoRefusedError extends AppError {
+  constructor(code: 'UndoNotAllowed' | 'UndoWindowClosed', message: string) {
+    super(409, code, message);
+  }
+}
 
 export interface RestaurantActionResult {
   restaurant: { id: string; status: string };
@@ -48,6 +56,29 @@ export class AdminRestaurantActionsService {
     });
     this.outbox.kick();
     return view;
+  }
+
+  /** #318: the queue's Undo, within 10 seconds, by the reviewer who decided. Audited; the owner is told. */
+  async undoReview(actor: AuditActor, id: string, reason: string): Promise<{ restaurantId: string; undone: boolean }> {
+    const outcome = await this.restaurants.undoDecision(id, actor.id, REVIEW_UNDO_WINDOW_SECONDS, async (manager, restaurant, withdrawn) => {
+      await AdminAudit.record(manager, {
+        actor,
+        permission: 'onboarding.review',
+        action: 'restaurant.review_undo',
+        targetType: 'RESTAURANT',
+        targetId: id,
+        reason,
+        before: { approvalStatus: withdrawn },
+        after: { approvalStatus: 'SUBMITTED' },
+        service: SERVICE,
+        notify: { userId: restaurant.ownerId, messageKey: 'restaurant.review_withdrawn', params: { restaurantName: restaurant.name } },
+      });
+    });
+    if (outcome === 'window-closed') throw new ReviewUndoRefusedError('UndoWindowClosed', `A decision can only be undone within ${REVIEW_UNDO_WINDOW_SECONDS} seconds`);
+    if (outcome === 'not-allowed') throw new ReviewUndoRefusedError('UndoNotAllowed', 'Only your own latest decision on this restaurant can be undone');
+    await this.restaurantsService.forget(id);
+    if (outcome === 'undone') this.outbox.kick();
+    return { restaurantId: id, undone: outcome === 'undone' };
   }
 
   /** Any status → SUSPENDED; the restaurant disappears from customers at once (#215 owner decision). */

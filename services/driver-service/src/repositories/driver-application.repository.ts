@@ -28,6 +28,12 @@ export interface ApplicationFields {
 export class ApplicationLockedError extends Error {}
 /** A review was refused: the application isn't waiting for review, or a different submission is. */
 export class NotInReviewError extends Error {}
+/** #318: only the reviewer's own latest decision, still in force, can be undone. */
+export class UndoNotAllowedError extends Error {}
+/** #318: the undo window has passed. */
+export class UndoWindowClosedError extends Error {}
+/** #318: an approved driver who already took a delivery can't be put back in review. */
+export class UndoDriverOnDeliveryError extends Error {}
 /** The national ID is already on another driver account. */
 export class DuplicateNationalIdError extends Error {}
 /** The document type already has the maximum number of versions. */
@@ -216,6 +222,55 @@ export class DriverApplicationRepository {
         (latest.note ?? null) === review.note;
       if (repeat) return 'repeat';
       throw new NotInReviewError();
+    });
+  }
+
+  /**
+   * #318: withdraws the reviewer's latest decision within `windowSeconds` (database clock), in one
+   * transaction: the application is back in review (PENDING, same submission), a driver who went
+   * online is taken offline, a `WITHDRAWN` row joins the history, and `onUndone` runs (the audit
+   * event). A second undo of the same decision is a repeat.
+   */
+  async undoDecision(
+    driverId: string,
+    reviewerUserId: string,
+    windowSeconds: number,
+    onUndone?: (manager: EntityManager, driver: DriverApplicationRow, withdrawn: 'VERIFIED' | 'REJECTED') => Promise<void>,
+  ): Promise<'undone' | 'repeat'> {
+    return this.dataSource.transaction(async (manager) => {
+      const driver = await this.lockRow(manager, driverId);
+      if (!driver) throw new UndoNotAllowedError();
+      const [latest]: (DriverReview & { ageSeconds: number })[] = await manager.query(
+        `SELECT *, extract(epoch FROM clock_timestamp() - "reviewedAt")::float AS "ageSeconds"
+           FROM "driver_reviews" WHERE "driverId" = $1 ORDER BY "reviewedAt" DESC, "id" DESC LIMIT 1`,
+        [driverId],
+      );
+      if (latest?.decision === 'WITHDRAWN' && latest.reviewerUserId === reviewerUserId) return 'repeat';
+      if (!latest || latest.decision === 'WITHDRAWN' || latest.reviewerUserId !== reviewerUserId || driver.verificationStatus !== latest.decision) {
+        throw new UndoNotAllowedError();
+      }
+      if (latest.ageSeconds > windowSeconds) throw new UndoWindowClosedError();
+      const [status] = (await manager.query(`SELECT "status" FROM "drivers" WHERE "id" = $1`, [driverId])) as { status: string }[];
+      if (status.status === 'BUSY') throw new UndoDriverOnDeliveryError();
+
+      await manager.query(
+        `UPDATE "drivers"
+            SET "verificationStatus" = 'PENDING', "verificationNote" = NULL, "verifiedAt" = NULL,
+                "status" = CASE WHEN "status" = 'AVAILABLE' THEN 'OFFLINE'::driver_status ELSE "status" END,
+                "availableSince" = NULL
+          WHERE "id" = $1 AND "verificationStatus" = $2`,
+        [driverId, latest.decision],
+      );
+      await manager.getRepository(DriverReview).insert({
+        driverId,
+        reviewerUserId,
+        decision: 'WITHDRAWN',
+        note: null,
+        applicationSubmittedAt: latest.applicationSubmittedAt,
+        documentIds: latest.documentIds,
+      });
+      if (onUndone) await onUndone(manager, driver, latest.decision as 'VERIFIED' | 'REJECTED');
+      return 'undone';
     });
   }
 

@@ -25,6 +25,8 @@ Each notification stores a **message key and its parameters** next to the Englis
 | `driver.application_approved`, `driver.application_rejected` | `note` (the reviewer's words to the driver, when given) — #215 |
 | `restaurant.application_approved`, `restaurant.application_rejected` | `restaurantName`; `note` when given — #215 |
 | `driver.suspended`, `driver.reactivated` | none — #215 |
+| `driver.review_withdrawn` | none — #318 |
+| `restaurant.review_withdrawn` | `restaurantName` — #318 |
 | `restaurant.suspended`, `restaurant.reactivated` | `restaurantName` — #215 |
 | `account.reactivated` | none — #215 (a suspension has no notice: the person can't sign in, and is told when they try) |
 

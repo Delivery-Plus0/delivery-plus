@@ -9,8 +9,9 @@ const setup = () => {
   const drivers = { findById: jest.fn(), suspend: jest.fn(), reactivate: jest.fn() };
   const applications = { review: jest.fn() };
   const outbox = { kick: jest.fn() };
-  const service = new AdminDriverActionsService(dataSource as never, drivers as never, applications as never, outbox as never);
-  return { service, manager, drivers, applications, outbox };
+  const applicationRows = { undoDecision: jest.fn() };
+  const service = new AdminDriverActionsService(dataSource as never, drivers as never, applications as never, outbox as never, applicationRows as never);
+  return { service, manager, drivers, applications, outbox, applicationRows };
 };
 const staged = (manager: { query: jest.Mock }) =>
   manager.query.mock.calls.filter(([sql]) => String(sql).includes('outbox_events')).map(([, params]) => ({ topic: params[1], event: JSON.parse(params[2]) }));

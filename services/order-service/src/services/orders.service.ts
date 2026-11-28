@@ -28,7 +28,7 @@ import {
   RestaurantUnavailableError,
   haversineKm,
 } from '@food-delivery/shared';
-import { DeliveryAddress, OrdersRepository } from '../repositories/orders.repository';
+import { DeliveryAddress, HistoryActor, HistoryActorType, OrdersRepository } from '../repositories/orders.repository';
 import { OrderPaymentStatus, outcomeFor } from '../common/order-outcome';
 import { itemsSubtotal, priceOrder } from '../common/pricing';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
@@ -448,7 +448,9 @@ export class OrdersService implements OnModuleInit {
     // transaction as the change (transactional outbox, #98).
     // Who ended the order and why is written in the same compare-and-set as the status (#143).
     const outcome = outcomeFor(dto.status, requesterRole, dto.reason) ?? {};
-    const updated = await this.orders.updateStatus(id, order.status, dto.status, (changed) => orderEvent(changed, eventType), outcome);
+    // #217: who made the change, written in the same transaction as the compare-and-set.
+    const actor = historyActor(requesterRole, requesterId, dto.reason);
+    const updated = await this.orders.updateStatus(id, order.status, dto.status, (changed) => orderEvent(changed, eventType), outcome, actor);
     if (!updated) {
       const current = await this.findOrThrow(id);
       if (current.status === dto.status) {
@@ -490,4 +492,24 @@ export class OrdersService implements OnModuleInit {
     }
     return order;
   }
+}
+
+/**
+ * #217: the history's actor for a caller. Staff (ADMIN) are STAFF; a service (SYSTEM token, or an event
+ * consumed here) is SYSTEM with its principal (`system:payment-service`, or `system` for events).
+ */
+export function historyActor(role: UserRole, requesterId: string, reason?: string): HistoryActor {
+  const actorType: HistoryActorType =
+    role === UserRole.SYSTEM || requesterId === 'system' || requesterId.startsWith('system:')
+      ? 'SYSTEM'
+      : role === UserRole.CUSTOMER
+      ? 'CUSTOMER'
+      : role === UserRole.RESTAURANT_OWNER
+        ? 'RESTAURANT'
+        : role === UserRole.DRIVER
+          ? 'DRIVER'
+          : role === UserRole.ADMIN
+            ? 'STAFF'
+            : 'SYSTEM';
+  return { actorType, actorId: requesterId || null, reason: reason ?? null };
 }

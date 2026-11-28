@@ -1,5 +1,5 @@
 import { DEFAULT_PRICING } from '../common/pricing';
-import { OrdersService } from './orders.service';
+import { historyActor, OrdersService } from './orders.service';
 import { OrdersRepository } from '../repositories/orders.repository';
 import { CartServiceClient } from '../common/cart-service.client';
 import { RestaurantServiceClient } from '../common/restaurant-service.client';
@@ -548,7 +548,7 @@ describe('OrdersService', () => {
         cancelledBy: 'CUSTOMER',
         cancellationReason: 'You cancelled this order.',
         cancellationNote: null,
-      });
+      }, { actorType: 'CUSTOMER', actorId: 'customer-1', reason: null });
     });
 
     it("records the restaurant's reason when it cancels (#143)", async () => {
@@ -561,7 +561,7 @@ describe('OrdersService', () => {
         cancelledBy: 'RESTAURANT',
         cancellationReason: 'The restaurant cancelled this order: Kitchen closed early',
         cancellationNote: 'Kitchen closed early',
-      });
+      }, { actorType: 'RESTAURANT', actorId: 'owner-1', reason: 'Kitchen closed early' });
     });
 
     it('records no outcome for a status that does not end the order', async () => {
@@ -570,7 +570,7 @@ describe('OrdersService', () => {
 
       await service.updateStatus('order-1', 'owner-1', UserRole.RESTAURANT_OWNER, { status: OrderStatus.PREPARING });
 
-      expect(orders.updateStatus).toHaveBeenCalledWith('order-1', OrderStatus.CONFIRMED, OrderStatus.PREPARING, expect.any(Function), {});
+      expect(orders.updateStatus).toHaveBeenCalledWith('order-1', OrderStatus.CONFIRMED, OrderStatus.PREPARING, expect.any(Function), {}, { actorType: 'RESTAURANT', actorId: 'owner-1', reason: null });
     });
 
     it('rejects a customer cancelling someone else\'s order', async () => {
@@ -652,7 +652,7 @@ describe('OrdersService', () => {
         cancelledBy: 'PAYMENT',
         cancellationReason: 'Your payment was declined, so the order was not placed.',
         cancellationNote: null,
-      });
+      }, { actorType: 'SYSTEM', actorId: 'system', reason: null });
       expect(orders.recordPaymentStatus).toHaveBeenCalledWith('order-1', 'FAILED');
       expect((await staged())[0].eventType).toBe(OrderEventType.FAILED);
     });
@@ -674,7 +674,7 @@ describe('OrdersService', () => {
 
       await (await handlerFor(PaymentEventType.COMPLETED))({ payload: { orderId: 'order-1' } });
 
-      expect(orders.updateStatus).toHaveBeenCalledWith('order-1', OrderStatus.PAYMENT_PENDING, OrderStatus.CONFIRMED, expect.any(Function), {});
+      expect(orders.updateStatus).toHaveBeenCalledWith('order-1', OrderStatus.PAYMENT_PENDING, OrderStatus.CONFIRMED, expect.any(Function), {}, { actorType: 'SYSTEM', actorId: 'system', reason: null });
       expect((await staged())[0].eventType).toBe(OrderEventType.CONFIRMED);
     });
 
@@ -766,7 +766,7 @@ describe('OrdersService', () => {
       expect(orders.updateStatus).toHaveBeenCalledWith(
         'order-1',
         OrderStatus.READY_FOR_PICKUP,
-        OrderStatus.DRIVER_ASSIGNED, expect.any(Function), {});
+        OrderStatus.DRIVER_ASSIGNED, expect.any(Function), {}, { actorType: 'SYSTEM', actorId: 'system', reason: null });
     });
 
     it('delivery.completed after the HTTP sync already delivered the order is a no-op', async () => {
@@ -996,7 +996,7 @@ describe('OrdersService', () => {
         cancelledBy: 'SYSTEM',
         cancellationReason: 'Delivery Plus cancelled this order.',
         cancellationNote: null,
-      });
+      }, { actorType: 'SYSTEM', actorId: 'system:delivery-service', reason: null });
     });
 
     it('lets an admin cancel an order still in the kitchen', async () => {
@@ -1013,7 +1013,7 @@ describe('OrdersService', () => {
       orders.findById.mockResolvedValue({ ...baseOrder, status: OrderStatus.PICKED_UP } as any);
       orders.updateStatus.mockResolvedValue({ ...baseOrder, status: OrderStatus.CANCELLED } as any);
       await handler({ payload: { orderId: 'order-1' } });
-      expect(orders.updateStatus).toHaveBeenCalledWith('order-1', OrderStatus.PICKED_UP, OrderStatus.CANCELLED, expect.any(Function), expect.objectContaining({ cancelledBy: 'SYSTEM' }));
+      expect(orders.updateStatus).toHaveBeenCalledWith('order-1', OrderStatus.PICKED_UP, OrderStatus.CANCELLED, expect.any(Function), expect.objectContaining({ cancelledBy: 'SYSTEM' }), expect.objectContaining({ actorType: 'SYSTEM' }));
 
       orders.updateStatus.mockClear();
       orders.findById.mockResolvedValue({ ...baseOrder, status: OrderStatus.DELIVERED } as any);
@@ -1033,7 +1033,7 @@ describe('OrdersService', () => {
         cancelledBy: 'SYSTEM',
         cancellationReason: 'Delivery Plus cancelled this order: The driver had a breakdown',
         cancellationNote: 'The driver had a breakdown',
-      });
+      }, { actorType: 'SYSTEM', actorId: 'system', reason: 'The driver had a breakdown' });
     });
 
     it('records REFUNDED from payment.refunded (#56)', async () => {
@@ -1045,5 +1045,17 @@ describe('OrdersService', () => {
       expect(orders.recordPaymentStatus).toHaveBeenCalledWith('order-1', 'REFUNDED');
       expect(orders.updateStatus).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('historyActor (#217)', () => {
+  it('names each kind of caller, and treats service principals as SYSTEM whatever their token role', () => {
+    expect(historyActor(UserRole.CUSTOMER, 'customer-1')).toEqual({ actorType: 'CUSTOMER', actorId: 'customer-1', reason: null });
+    expect(historyActor(UserRole.RESTAURANT_OWNER, 'owner-1', 'Out of stock')).toEqual({ actorType: 'RESTAURANT', actorId: 'owner-1', reason: 'Out of stock' });
+    expect(historyActor(UserRole.DRIVER, 'driver-1').actorType).toBe('DRIVER');
+    expect(historyActor(UserRole.ADMIN, 'staff-1').actorType).toBe('STAFF');
+    expect(historyActor(UserRole.SYSTEM, 'system:payment-service')).toEqual({ actorType: 'SYSTEM', actorId: 'system:payment-service', reason: null });
+    expect(historyActor(UserRole.ADMIN, 'system:delivery-service').actorType).toBe('SYSTEM');
+    expect(historyActor(UserRole.SYSTEM, 'system').actorType).toBe('SYSTEM');
   });
 });

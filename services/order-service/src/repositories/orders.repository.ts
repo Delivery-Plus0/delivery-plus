@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, FindOptionsWhere } from 'typeorm';
+import { EntityManager, Repository, In, FindOptionsWhere } from 'typeorm';
 import { BaseEvent, OrderStatus, TOPICS, stageEvent } from '@food-delivery/shared';
 import { Order } from '../entities/order.entity';
 import { OrderItem } from '../entities/order-item.entity';
@@ -12,6 +12,25 @@ export interface DeliveryAddress {
   notes: string | null;
   latitude: number | null;
   longitude: number | null;
+}
+
+/** Who changed an order's status (#217): the kind of caller, its id, and the reason it gave. */
+export type HistoryActorType = 'CUSTOMER' | 'RESTAURANT' | 'DRIVER' | 'SYSTEM' | 'STAFF';
+export interface HistoryActor {
+  actorType: HistoryActorType;
+  actorId: string | null;
+  reason?: string | null;
+}
+
+/** One row of an order's status history (#217), oldest first. */
+export interface OrderStatusHistoryRow {
+  id: string;
+  fromStatus: OrderStatus | null;
+  toStatus: OrderStatus;
+  actorType: HistoryActorType;
+  actorId: string | null;
+  reason: string | null;
+  at: Date;
 }
 
 /** Builds the event describing the change from the order as written (staged in the same transaction). */
@@ -71,9 +90,10 @@ export class OrdersRepository {
           }) as OrderItem,
       ),
     });
-    // The order and its order.created event commit together (transactional outbox, #98).
+    // The order, its first history row (#217) and its order.created event commit together (transactional outbox, #98).
     return this.repo.manager.transaction(async (manager) => {
       const saved = await manager.getRepository(Order).save(order);
+      await recordHistory(manager, saved.id, null, OrderStatus.CREATED, { actorType: 'CUSTOMER', actorId: customerId });
       await stageEvent(manager, TOPICS.ORDER_EVENTS, event(saved));
       return saved;
     });
@@ -87,7 +107,8 @@ export class OrdersRepository {
 
   /**
    * Compare-and-set: moves the order from `from` to `to` only if it is still in `from`, and stages the
-   * event for the change in the same transaction (only the writer that wins stages it). Returns the
+   * event for the change and its history row (#217) in the same transaction (only the writer that wins
+   * writes either). Returns the
    * updated order, or null when another writer changed it first.
    */
   async updateStatus(
@@ -95,7 +116,8 @@ export class OrdersRepository {
     from: OrderStatus,
     to: OrderStatus,
     event: OrderEventBuilder,
-    outcome: Partial<Pick<Order, 'cancelledBy' | 'cancellationReason' | 'cancellationNote'>> = {},
+    outcome: Partial<Pick<Order, 'cancelledBy' | 'cancellationReason' | 'cancellationNote'>>,
+    actor: HistoryActor,
   ): Promise<Order | null> {
     return this.repo.manager.transaction(async (manager) => {
       const orders = manager.getRepository(Order);
@@ -103,9 +125,19 @@ export class OrdersRepository {
       if (!result.affected) return null;
       const updated = await orders.findOne({ where: { id } });
       if (!updated) return null;
+      await recordHistory(manager, id, from, to, actor);
       await stageEvent(manager, TOPICS.ORDER_EVENTS, event(updated));
       return updated;
     });
+  }
+
+  /** #217: the order's status history, oldest first. Empty for orders placed before it was recorded. */
+  async statusHistory(orderId: string): Promise<OrderStatusHistoryRow[]> {
+    return this.repo.query(
+      `SELECT "id", "fromStatus", "toStatus", "actorType", "actorId", "reason", "at"
+         FROM "order_status_history" WHERE "orderId" = $1 ORDER BY "at" ASC, "id" ASC`,
+      [orderId],
+    );
   }
 
   /**
@@ -235,3 +267,10 @@ export class OrdersRepository {
   }
 }
 
+/** One history row, inside the caller's transaction (#217). Reasons are capped at the column's 500 characters. */
+async function recordHistory(manager: EntityManager, orderId: string, from: OrderStatus | null, to: OrderStatus, actor: HistoryActor): Promise<void> {
+  await manager.query(
+    `INSERT INTO "order_status_history" ("orderId", "fromStatus", "toStatus", "actorType", "actorId", "reason") VALUES ($1, $2, $3, $4, $5, $6)`,
+    [orderId, from, to, actor.actorType, actor.actorId, actor.reason ? actor.reason.slice(0, 500) : null],
+  );
+}

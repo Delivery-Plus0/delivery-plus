@@ -176,19 +176,21 @@ _Snapshot of GitHub on 2026-10-22. Issue numbers without a prefix are in this re
 
 ### Production 3 · Admin console I: foundation & approvals
 
-0 of 9 closed.
+All 9 closed; milestone closed 2026-11-28.
 
 | Issue | Repo | Title | Depends on | State |
 | --- | --- | --- | --- | --- |
-| #212 | backend | feat: admin API conventions, permission guard and gateway routing | #202 | open |
-| #213 | backend | feat: audit-service with an append-only log of every staff action | #212 | open |
-| #214 | backend | feat: admin read APIs for users, drivers and restaurants | #212, #207, #208 | open |
-| #215 | backend | feat: admin actions for approvals, suspensions and session revocation | #212, #213, #206, #207, #208 | open |
-| #216 | backend | feat(auth): staff accounts, invitations and permission management | #202, #203, #212, #213 | open |
-| admin#1 | admin | chore: scaffold the admin app (Expo Router web, kit, i18n, Maestro, CI) | #212, #216 | open |
-| admin#2 | admin | feat: approval queues for drivers and restaurants | #214, #215, admin#1 | open |
-| admin#3 | admin | feat: people directory with suspend, reactivate and sign-out-everywhere | #214, #215, admin#1 | open |
-| admin#4 | admin | feat: staff management and the audit log viewer | #213, #216, admin#1 | open |
+| #212 | backend | feat: admin API conventions, permission guard and gateway routing | #202 | closed |
+| #213 | backend | feat: audit-service with an append-only log of every staff action | #212 | closed |
+| #214 | backend | feat: admin read APIs for users, drivers and restaurants | #212, #207, #208 | closed |
+| #215 | backend | feat: admin actions for approvals, suspensions and session revocation | #212, #213, #206, #207, #208 | closed |
+| #216 | backend | feat(auth): staff accounts, invitations and permission management | #202, #203, #212, #213 | closed |
+| admin#1 | admin | chore: scaffold the admin app (Expo Router web, kit, i18n, Maestro, CI) | #212, #216 | closed |
+| admin#2 | admin | feat: approval queues for drivers and restaurants | #214, #215, admin#1 | closed |
+| admin#3 | admin | feat: people directory with suspend, reactivate and sign-out-everywhere | #214, #215, admin#1 | closed |
+| admin#4 | admin | feat: staff management and the audit log viewer | #213, #216, admin#1 | closed |
+
+Found and closed on the way: #317 (masked personal data and audited reveals), #318 (Undo for review decisions), #321 (the admin app's own E2E origin, :8086), #323 and #327 (typed admin responses, checked against real ones in the E2E), #325 and #329 (two flaky tests), and customer-app#87 (the reactivation notice in Arabic).
 
 ### Production 4 · Admin console II: operations, support & finance views
 
